@@ -1,10 +1,10 @@
-CREATE TABLE IF NOT EXISTS user_profiles (
-    id SERIAL PRIMARY KEY,
-    email VARCHAR(255),
-    first_name VARCHAR(255),
-    last_name VARCHAR(255),
-    is_manager BOOLEAN,
-    crm_base_url TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS UserProfiles (
+    Id SERIAL PRIMARY KEY,
+    Email VARCHAR(255),
+    FirstName VARCHAR(255),
+    LastName VARCHAR(255),
+    IsManager BOOLEAN,
+    CrmBaseUrl TEXT,
+    CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

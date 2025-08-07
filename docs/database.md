@@ -371,11 +371,13 @@ sqlcmd -S localhost -U sa -P password -Q "RESTORE DATABASE badgermaps FROM DISK 
    - Verify database server is running
    - Check connection parameters
    - Ensure proper permissions
+   - Review error messages which include specific database type and connection details
 
 2. **Schema Errors**
    - Run `./badgersync utils create-tables`
    - Check SQL file syntax
    - Verify database type configuration
+   - Look for specific file paths in error messages to locate problematic SQL files
 
 3. **Performance Issues**
    - Check index creation
@@ -386,6 +388,33 @@ sqlcmd -S localhost -U sa -P password -Q "RESTORE DATABASE badgermaps FROM DISK 
    - Restore from backup
    - Check disk space
    - Verify file permissions
+
+5. **SQL File Errors**
+   - Check if SQL files exist in the correct directory (error messages will indicate the expected path)
+   - Verify file permissions
+   - Review SQL syntax for database-specific compatibility
+
+### Understanding Error Messages
+
+The database package provides detailed error messages to help diagnose issues:
+
+1. **Database Connection Errors**
+   ```
+   failed to open postgres database connection: [original error] (check connection parameters)
+   ```
+   This indicates a problem with your database connection settings.
+
+2. **SQL File Loading Errors**
+   ```
+   failed to read SQL file create_accounts_table.sql: [original error] (check if file exists and has correct permissions in database/postgres directory)
+   ```
+   This shows which SQL file is missing and where it should be located.
+
+3. **SQL Execution Errors**
+   ```
+   failed to execute SQL statement #2 in create_indexes.sql: [original error] (check SQL syntax and database permissions)
+   ```
+   This indicates which statement in which file has a syntax error.
 
 ### Debug Mode
 

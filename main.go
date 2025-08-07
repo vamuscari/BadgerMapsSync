@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"badgermaps-cli/api"
 	"badgermaps-cli/database"
@@ -223,6 +224,28 @@ func (c *Client) SyncAccounts() error {
 	return nil
 }
 
+// SyncProfile pulls user profile from API and stores it in the database using merge_user_profiles
+func (c *Client) SyncProfile() error {
+	log.Println("Syncing user profile from API using merge_user_profiles...")
+
+	// Get user profile from API
+	profile, err := c.api.GetUserProfile()
+	if err != nil {
+		return fmt.Errorf("failed to get user profile from API: %w", err)
+	}
+
+	log.Printf("Retrieved user profile for %s %s (ID: %d) from API",
+		profile.FirstName, profile.LastName, profile.ID)
+
+	// Store profile in database using merge_user_profiles
+	if err := c.db.StoreProfiles(profile); err != nil {
+		return fmt.Errorf("failed to store user profile in database: %w", err)
+	}
+
+	log.Printf("Successfully stored user profile in database using merge_user_profiles")
+	return nil
+}
+
 // InitializeSchema creates all necessary tables and indexes
 func (c *Client) InitializeSchema() error {
 	return c.db.InitializeSchema()
@@ -368,9 +391,11 @@ Examples:
 				// TODO: Implement checkins pulling
 				fmt.Printf("Checkins pulling not yet implemented\n")
 			case "profiles":
-				log.Printf("Pulling profiles...")
-				// TODO: Implement profiles pulling
-				fmt.Printf("Profiles pulling not yet implemented\n")
+				log.Printf("Pulling profile...")
+				if err := client.SyncProfile(); err != nil {
+					log.Fatal("Failed to pull profile:", err)
+				}
+				fmt.Printf("Successfully pulled profile\n")
 			}
 		}
 
@@ -641,10 +666,11 @@ func saveAPIResponses(command string, args []string, config *Config, client *Cli
 		return
 	}
 
-	// Save responses to file
-	filename := fmt.Sprintf("api_responses_%s_%s.json", command, strings.Join(args, "_"))
+	// Save responses to file with datetime
+	currentTime := time.Now().Format("2006-01-02_150405")
+	filename := fmt.Sprintf("api_responses_%s_%s_%s.json", command, strings.Join(args, "_"), currentTime)
 	if len(args) == 0 {
-		filename = fmt.Sprintf("api_responses_%s_all.json", command)
+		filename = fmt.Sprintf("api_responses_%s_all_%s.json", command, currentTime)
 	}
 
 	// Create responses directory if it doesn't exist

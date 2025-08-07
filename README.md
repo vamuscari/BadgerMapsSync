@@ -51,6 +51,7 @@ For detailed documentation, see the [docs/](docs/) folder:
 - **[Environment Configuration](docs/environment.md)** - Complete guide to configuring the CLI
 - **[API Documentation](docs/api.md)** - BadgerMaps API integration and endpoints
 - **[Database Documentation](docs/database.md)** - Database setup, schema, and operations
+- **[Database Error Handling](docs/database_errors.md)** - Detailed database error messages and troubleshooting
 - **[Contributing Guidelines](docs/contributing.md)** - How to contribute to the project
 - **[Troubleshooting Guide](docs/troubleshooting.md)** - Common issues and solutions
 

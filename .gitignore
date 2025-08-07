@@ -31,8 +31,10 @@ go.work.sum
 *.db
 
 
-badgersync 
-api_test_results/*
+badgersync
+badgersync.log
+test_responses/
+test_responses/*
 
 # Editor/IDE
 .idea/

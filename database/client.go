@@ -59,19 +59,19 @@ func (c *Client) connectDatabase() (*sql.DB, error) {
 		driverName = "sqlite3"
 		dsn = c.config.Database
 	default:
-		return nil, fmt.Errorf("unsupported database type: %s", c.config.DatabaseType)
+		return nil, fmt.Errorf("unsupported database type: %s (supported types: postgres, mssql, sqlite3)", c.config.DatabaseType)
 	}
 
 	log.Printf("Connecting to %s database...", c.config.DatabaseType)
 	db, err := sql.Open(driverName, dsn)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database connection: %w", err)
+		return nil, fmt.Errorf("failed to open %s database connection: %w (check connection parameters)", c.config.DatabaseType, err)
 	}
 
 	// Test the connection
 	if err := db.Ping(); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("failed to ping database: %w", err)
+		return nil, fmt.Errorf("failed to ping %s database: %w (check if database server is running and accessible)", c.config.DatabaseType, err)
 	}
 
 	log.Printf("Successfully connected to %s database", c.config.DatabaseType)
@@ -142,7 +142,7 @@ func (c *Client) InitializeSchema() error {
 	// Validate SQL files exist before proceeding
 	sqlLoader := NewSQLLoader(c.config.DatabaseType)
 	if err := sqlLoader.ValidateSQLFiles(); err != nil {
-		return fmt.Errorf("SQL validation failed: %w", err)
+		return fmt.Errorf("SQL validation failed: %w (check if all required SQL files exist in database/%s directory)", err, c.config.DatabaseType)
 	}
 
 	// Create tables
@@ -159,13 +159,13 @@ func (c *Client) InitializeSchema() error {
 
 	for _, tableName := range tables {
 		if err := c.createTableIfNotExists(tableName); err != nil {
-			return fmt.Errorf("failed to create table %s: %w", tableName, err)
+			return fmt.Errorf("failed to create table %s: %w (check SQL syntax in create_%s_table.sql)", tableName, err, tableName)
 		}
 	}
 
 	// Create indexes
 	if err := c.createIndexes(); err != nil {
-		return fmt.Errorf("failed to create indexes: %w", err)
+		return fmt.Errorf("failed to create indexes: %w (check SQL syntax in create_indexes.sql)", err)
 	}
 
 	log.Println("Database schema initialized successfully")
@@ -196,7 +196,7 @@ func (c *Client) tableExists(tableName string) (bool, error) {
 		var exists bool
 		err := c.db.QueryRow(query, tableName).Scan(&exists)
 		if err != nil {
-			return false, fmt.Errorf("failed to check table existence: %w", err)
+			return false, fmt.Errorf("failed to check if table '%s' exists in PostgreSQL: %w (check database connection and permissions)", tableName, err)
 		}
 		return exists, nil
 	case "mssql", "sqlserver":
@@ -204,7 +204,7 @@ func (c *Client) tableExists(tableName string) (bool, error) {
 		var exists bool
 		err := c.db.QueryRow(query, tableName).Scan(&exists)
 		if err != nil {
-			return false, fmt.Errorf("failed to check table existence: %w", err)
+			return false, fmt.Errorf("failed to check if table '%s' exists in MSSQL: %w (check database connection and permissions)", tableName, err)
 		}
 		return exists, nil
 	case "sqlite3", "sqlite":
@@ -215,11 +215,11 @@ func (c *Client) tableExists(tableName string) (bool, error) {
 			return false, nil
 		}
 		if err != nil {
-			return false, fmt.Errorf("failed to check table existence: %w", err)
+			return false, fmt.Errorf("failed to check if table '%s' exists in SQLite: %w (check database file permissions)", tableName, err)
 		}
 		return true, nil
 	default:
-		return false, fmt.Errorf("unsupported database type: %s", c.config.DatabaseType)
+		return false, fmt.Errorf("unsupported database type: %s (supported types: postgres, mssql, sqlite3)", c.config.DatabaseType)
 	}
 }
 
@@ -230,12 +230,14 @@ func (c *Client) createTable(tableName string) error {
 	sqlLoader := NewSQLLoader(c.config.DatabaseType)
 	sqlContent, err := sqlLoader.LoadCreateTableSQL(tableName)
 	if err != nil {
-		return fmt.Errorf("failed to load SQL for table %s: %w", tableName, err)
+		return fmt.Errorf("failed to load SQL for table %s: %w (check if create_%s_table.sql exists in database/%s directory)",
+			tableName, err, tableName, c.config.DatabaseType)
 	}
 
 	_, err = c.db.Exec(sqlContent)
 	if err != nil {
-		return fmt.Errorf("failed to execute SQL for table %s: %w", tableName, err)
+		return fmt.Errorf("failed to execute SQL for table %s: %w (check SQL syntax and database permissions)",
+			tableName, err)
 	}
 
 	log.Printf("Successfully created table: %s", tableName)
@@ -315,20 +317,21 @@ func (c *Client) StoreAccounts(accounts []api.Account) error {
 	sqlLoader := NewSQLLoader(c.config.DatabaseType)
 	sqlContent, err := sqlLoader.LoadMergeAccountsBasicSQL()
 	if err != nil {
-		return fmt.Errorf("failed to load merge_accounts_basic SQL: %w", err)
+		return fmt.Errorf("failed to load merge_accounts_basic SQL: %w (check if merge_accounts_basic.sql exists in database/%s directory)",
+			err, c.config.DatabaseType)
 	}
 
 	// Begin transaction
 	tx, err := c.db.Begin()
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
+		return fmt.Errorf("failed to begin transaction: %w (check database connection and transaction support)", err)
 	}
 	defer tx.Rollback()
 
 	// Prepare statement
 	stmt, err := tx.Prepare(sqlContent)
 	if err != nil {
-		return fmt.Errorf("failed to prepare merge_accounts_basic statement: %w", err)
+		return fmt.Errorf("failed to prepare merge_accounts_basic statement: %w (check SQL syntax in merge_accounts_basic.sql)", err)
 	}
 	defer stmt.Close()
 
@@ -341,13 +344,14 @@ func (c *Client) StoreAccounts(accounts []api.Account) error {
 
 		_, err := stmt.Exec(account.ID, firstName, account.LastName)
 		if err != nil {
-			return fmt.Errorf("failed to merge account %d: %w", account.ID, err)
+			return fmt.Errorf("failed to merge account ID %d: %w (check account data and table schema compatibility)",
+				account.ID, err)
 		}
 	}
 
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+		return fmt.Errorf("failed to commit transaction: %w (check database connection and transaction state)", err)
 	}
 
 	log.Printf("Successfully stored %d accounts using merge_accounts_basic", len(accounts))
@@ -380,4 +384,65 @@ func (c *Client) GetAccountIDs() ([]int, error) {
 
 	log.Printf("Retrieved %d account IDs from database", len(accountIDs))
 	return accountIDs, nil
+}
+
+// StoreProfiles stores user profiles in the database using merge_user_profiles
+func (c *Client) StoreProfiles(profile *api.UserProfile) error {
+	log.Printf("Storing user profile using merge_user_profiles")
+
+	sqlLoader := NewSQLLoader(c.config.DatabaseType)
+	sqlContent, err := sqlLoader.LoadMergeUserProfilesSQL()
+	if err != nil {
+		return fmt.Errorf("failed to load merge_user_profiles SQL: %w (check if merge_user_profiles.sql exists in database/%s directory)",
+			err, c.config.DatabaseType)
+	}
+
+	// Begin transaction
+	tx, err := c.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w (check database connection and transaction support)", err)
+	}
+	defer tx.Rollback()
+
+	// Prepare statement
+	stmt, err := tx.Prepare(sqlContent)
+	if err != nil {
+		return fmt.Errorf("failed to prepare merge_user_profiles statement: %w (check SQL syntax in merge_user_profiles.sql)", err)
+	}
+	defer stmt.Close()
+
+	// Handle nullable manager field
+	var manager string
+	if profile.Manager != nil {
+		manager = *profile.Manager
+	}
+
+	// Execute for the profile
+	_, err = stmt.Exec(
+		profile.ID,
+		profile.FirstName,
+		profile.LastName,
+		profile.Email,
+		profile.IsManager,
+		manager,
+		profile.Company.ID,
+		profile.Company.Name,
+		profile.Company.ShortName,
+		profile.Completed,
+		profile.TrialDaysLeft,
+		profile.HasData,
+		profile.DefaultApptLength,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to merge user profile ID %d: %w (check profile data and table schema compatibility)",
+			profile.ID, err)
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w (check database connection and transaction state)", err)
+	}
+
+	log.Printf("Successfully stored user profile using merge_user_profiles")
+	return nil
 }

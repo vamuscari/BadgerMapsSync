@@ -1,3 +1,3 @@
-INSERT OR REPLACE INTO accounts (
-    id, first_name, last_name, updated_at
-) VALUES (?, ?, ?, CURRENT_TIMESTAMP); 
+INSERT OR REPLACE INTO Accounts (
+    Id, FirstName, LastName, UpdatedAt
+) VALUES (?, ?, ?, CURRENT_TIMESTAMP);

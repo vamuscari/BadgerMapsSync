@@ -1,11 +1,11 @@
-CREATE TABLE IF NOT EXISTS routes (
-    id INTEGER PRIMARY KEY,
-    name TEXT,
-    route_date TEXT,
-    duration INTEGER,
-    start_address TEXT,
-    destination_address TEXT,
-    start_time TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-); 
+CREATE TABLE IF NOT EXISTS Routes (
+    Id INTEGER PRIMARY KEY,
+    Name TEXT,
+    RouteDate TEXT,
+    Duration INTEGER,
+    StartAddress TEXT,
+    DestinationAddress TEXT,
+    StartTime TEXT,
+    CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+);

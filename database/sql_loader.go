@@ -44,7 +44,9 @@ func (loader *SQLLoader) ValidateSQLFiles() error {
 	}
 
 	if len(missingFiles) > 0 {
-		return fmt.Errorf("missing required SQL files for %s database: %v", loader.databaseType, missingFiles)
+		dbDir := filepath.Join("database", loader.getDatabaseTypeForSQL())
+		return fmt.Errorf("missing required SQL files for %s database: %v (check if these files exist in the %s directory)",
+			loader.databaseType, missingFiles, dbDir)
 	}
 
 	return nil
@@ -74,7 +76,9 @@ func (loader *SQLLoader) LoadCreateTableSQL(tableName string) (string, error) {
 
 	content, err := ioutil.ReadFile(sqlPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to read SQL file %s: %w", sqlPath, err)
+		dbDir := filepath.Join("database", loader.getDatabaseTypeForSQL())
+		return "", fmt.Errorf("failed to read SQL file %s: %w (check if file exists and has correct permissions in %s directory)",
+			filename, err, dbDir)
 	}
 
 	return string(content), nil
@@ -82,11 +86,14 @@ func (loader *SQLLoader) LoadCreateTableSQL(tableName string) (string, error) {
 
 // LoadCreateIndexesSQL loads the SQL for creating indexes
 func (loader *SQLLoader) LoadCreateIndexesSQL() (string, error) {
-	sqlPath := loader.getSQLPath("create_indexes.sql")
+	filename := "create_indexes.sql"
+	sqlPath := loader.getSQLPath(filename)
 
 	content, err := ioutil.ReadFile(sqlPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to read SQL file %s: %w", sqlPath, err)
+		dbDir := filepath.Join("database", loader.getDatabaseTypeForSQL())
+		return "", fmt.Errorf("failed to read SQL file %s: %w (check if file exists and has correct permissions in %s directory)",
+			filename, err, dbDir)
 	}
 
 	return string(content), nil
@@ -94,11 +101,29 @@ func (loader *SQLLoader) LoadCreateIndexesSQL() (string, error) {
 
 // LoadMergeAccountsBasicSQL loads the SQL for merging accounts using merge_accounts_basic
 func (loader *SQLLoader) LoadMergeAccountsBasicSQL() (string, error) {
-	sqlPath := loader.getSQLPath("merge_accounts_basic.sql")
+	filename := "merge_accounts_basic.sql"
+	sqlPath := loader.getSQLPath(filename)
 
 	content, err := ioutil.ReadFile(sqlPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to read SQL file %s: %w", sqlPath, err)
+		dbDir := filepath.Join("database", loader.getDatabaseTypeForSQL())
+		return "", fmt.Errorf("failed to read SQL file %s: %w (check if file exists and has correct permissions in %s directory)",
+			filename, err, dbDir)
+	}
+
+	return string(content), nil
+}
+
+// LoadMergeUserProfilesSQL loads the SQL for merging user profiles using merge_user_profiles
+func (loader *SQLLoader) LoadMergeUserProfilesSQL() (string, error) {
+	filename := "merge_user_profiles.sql"
+	sqlPath := loader.getSQLPath(filename)
+
+	content, err := ioutil.ReadFile(sqlPath)
+	if err != nil {
+		dbDir := filepath.Join("database", loader.getDatabaseTypeForSQL())
+		return "", fmt.Errorf("failed to read SQL file %s: %w (check if file exists and has correct permissions in %s directory)",
+			filename, err, dbDir)
 	}
 
 	return string(content), nil
@@ -110,7 +135,9 @@ func (loader *SQLLoader) LoadAndExecuteSQL(filename string, db *sql.DB) error {
 
 	content, err := ioutil.ReadFile(sqlPath)
 	if err != nil {
-		return fmt.Errorf("failed to read SQL file %s: %w", sqlPath, err)
+		dbDir := filepath.Join("database", loader.getDatabaseTypeForSQL())
+		return fmt.Errorf("failed to read SQL file %s: %w (check if file exists and has correct permissions in %s directory)",
+			filename, err, dbDir)
 	}
 
 	sqlContent := string(content)
@@ -118,7 +145,7 @@ func (loader *SQLLoader) LoadAndExecuteSQL(filename string, db *sql.DB) error {
 	// Split by semicolons to handle multiple statements
 	statements := strings.Split(sqlContent, ";")
 
-	for _, statement := range statements {
+	for i, statement := range statements {
 		statement = strings.TrimSpace(statement)
 		if statement == "" {
 			continue
@@ -128,7 +155,9 @@ func (loader *SQLLoader) LoadAndExecuteSQL(filename string, db *sql.DB) error {
 
 		_, err := db.Exec(statement)
 		if err != nil {
-			return fmt.Errorf("failed to execute SQL statement: %w", err)
+			// Include statement number to help identify problematic statements
+			return fmt.Errorf("failed to execute SQL statement #%d in %s: %w (check SQL syntax and database permissions)",
+				i+1, filename, err)
 		}
 	}
 
@@ -171,7 +200,8 @@ func (loader *SQLLoader) CreateAllTables(db *sql.DB) error {
 	for _, table := range tables {
 		log.Printf("Creating table using: %s", table)
 		if err := loader.LoadAndExecuteSQL(table, db); err != nil {
-			return fmt.Errorf("failed to create table with %s: %w", table, err)
+			return fmt.Errorf("failed to create table with %s: %w (check SQL syntax and database permissions)",
+				table, err)
 		}
 	}
 
@@ -181,7 +211,12 @@ func (loader *SQLLoader) CreateAllTables(db *sql.DB) error {
 // CreateIndexes creates all necessary indexes
 func (loader *SQLLoader) CreateIndexes(db *sql.DB) error {
 	log.Println("Creating indexes...")
-	return loader.LoadAndExecuteSQL("create_indexes.sql", db)
+	indexFile := "create_indexes.sql"
+	if err := loader.LoadAndExecuteSQL(indexFile, db); err != nil {
+		return fmt.Errorf("failed to create indexes with %s: %w (check SQL syntax and database permissions)",
+			indexFile, err)
+	}
+	return nil
 }
 
 // Helper function for min

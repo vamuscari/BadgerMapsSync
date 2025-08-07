@@ -1,13 +1,13 @@
-CREATE TABLE IF NOT EXISTS accounts (
-    id INTEGER PRIMARY KEY,
-    first_name TEXT,
-    last_name TEXT,
-    phone_number TEXT,
-    email TEXT,
-    customer_id TEXT,
-    notes TEXT,
-    original_address TEXT,
-    crm_id TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-); 
+CREATE TABLE IF NOT EXISTS Accounts (
+    Id INTEGER PRIMARY KEY,
+    FirstName TEXT,
+    LastName TEXT,
+    PhoneNumber TEXT,
+    Email TEXT,
+    CustomerId TEXT,
+    Notes TEXT,
+    OriginalAddress TEXT,
+    CrmId TEXT,
+    CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+);

@@ -1,14 +1,14 @@
-CREATE TABLE IF NOT EXISTS account_locations (
-    id INTEGER PRIMARY KEY,
-    account_id INTEGER,
-    city TEXT,
-    name TEXT,
-    zipcode TEXT,
-    longitude REAL,
-    state TEXT,
-    latitude REAL,
-    address_line1 TEXT,
-    location TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-); 
+CREATE TABLE IF NOT EXISTS AccountLocations (
+    Id INTEGER PRIMARY KEY,
+    AccountId INTEGER,
+    City TEXT,
+    Name TEXT,
+    Zipcode TEXT,
+    Longitude REAL,
+    State TEXT,
+    Latitude REAL,
+    AddressLine1 TEXT,
+    Location TEXT,
+    CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+);

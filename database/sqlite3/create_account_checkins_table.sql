@@ -1,12 +1,12 @@
-CREATE TABLE IF NOT EXISTS account_checkins (
-    id INTEGER PRIMARY KEY,
-    crm_id TEXT,
-    customer INTEGER,
-    log_datetime TEXT,
-    type TEXT,
-    comments TEXT,
-    extra_fields TEXT,
-    created_by TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-); 
+CREATE TABLE IF NOT EXISTS AccountCheckins (
+    Id INTEGER PRIMARY KEY,
+    CrmId TEXT,
+    Customer INTEGER,
+    LogDatetime TEXT,
+    Type TEXT,
+    Comments TEXT,
+    ExtraFields TEXT,
+    CreatedBy TEXT,
+    CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+);
