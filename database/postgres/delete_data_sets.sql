@@ -1,0 +1,1 @@
+DELETE FROM DataSets WHERE ProfileId = ? 

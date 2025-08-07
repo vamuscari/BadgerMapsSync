@@ -1,0 +1,1512 @@
+FORMAT: 1A
+HOST: https://badgerapis.badgermapping.com/api/2
+
+# Badger Map API
+
+## Authorization
+Badger uses token-based authentication to authorize API requests. Each request to the API needs to have the “Authorization” header set to “Token yourAPIkey”. For example, if your API token is “abcdefg12345678”, then the Authorization header will be set to “Token abcdefg12345678” (without the surrounding quotes).
+
+In this documentation, “abcdefg12345678” will need to be replaced with your actual API key when making requests.
+
+To obtain your API key, see ["Authentication"](https://badgerupdatedapi.docs.apiary.io/#reference/users/authentication).
+
+## Versioning
+The current version of the API is v2. Other versions may be made available as backwards incompatible changes are introduced.
+
+## Webhooks
+Badger supports webhooks for the following events: Account Created, Account Updated, Check-in Created. [Contact](mailto:support@badgermapping.com) an Integration Specialist at Badger for more information and to subscribe to any webhooks.
+
+# Group Users
+
+## Authentication [/login/]
+Authenticate a user by POSTing with *username* and *password*. A *status* is returned, and if the *status* is **login_successful**, a *token* will be included. This *token* must be included for the **Authentication** of every subsequent API request (see ["Authorization"](https://badgerupdatedapi.docs.apiary.io/#introduction/authorization)). A *user_id* is also returned, which may need to be used in other API requests.
+
+Possible statuses:
+    
++   **login_successful** (with *token* and *user_id*)
++   **error_missing_key**
++   **error_account_disabled**
++   **error_account_does_not_exist** (for both missing accounts and bad password)
++   **error_non_post_request**
++   **error_trial_expired**
++   **error_account_delinquent**
+
+### Authenticate [POST]
+
++ Request (application/x-www-form-urlencoded)
+    
+    + Body
+
+            username=myUser&password=mySecurePassword
+    
++ Response 200 (application/json)
+
+        {
+            "token": "abcdefg12345678",
+            "status": "login_successful",
+            "user_id": 441
+        }
+
+## User Profile [/profiles/]
+Get profile for the currently logged-in user.
+
+The “datafields” property contains a list of fields the user has in Badger. The “label” property likely matches up to the name of the field in your system. The “name” property is how that field in mapped in Badger. You’ll need this to construct other API requests that interact with custom fields.
+
+### Retrieve User Profile [GET]
+
++ Request
+
+    + Headers
+
+            Authorization: "Token abcdefg12345678"
+
++ Response 200 (application/json)
+
+        {
+           "crm_creatable_fields_list":[],
+           "company":{
+              "id":15488,
+              "short_name":"badger mapping",
+              "name":"Badger Mapping"
+           },
+           "completed": false,
+           "trial_days_left": 4,
+           "apptlog_fields": [
+                {
+                    "name": "my_field",
+                    "label": "My Field",
+                    "type": "StringType",
+                    "options": null
+                },
+                {
+                    "name": "another_field",
+                    "label": "Another Field",
+                    "type": "PicklistType",
+                    "options": [
+                      {
+                        "value": 1,
+                        "label": "Option 1"
+                      },
+                      {
+                        "value": 2,
+                        "label": "Option 2"
+                      },
+                    ]
+                }
+            ],
+            "acctlog_fields": [
+                {
+                    "name": "my_field",
+                    "label": "My Field",
+                    "type": "StringType",
+                    "options": null
+                },
+                {
+                    "name": "another_field",
+                    "label": "Another Field",
+                    "type": "PicklistType",
+                    "options": [
+                      {
+                        "value": 1,
+                        "label": "Option 1"
+                      },
+                      {
+                        "value": 2,
+                        "label": "Option 2"
+                      },
+                    ]
+                }
+            ],
+           "datafields":[
+              {
+                 "name":"ct",
+                 "filterable":true,
+                 "label":"Flag",
+                 "values":[
+                    {
+                       "text":"Normal",
+                       "value":"Normal"
+                    },
+                    {
+                       "text":"Urgent",
+                       "value":"Urgent"
+                    }
+                 ],
+                 "position":1,
+                 "type":"text",
+                 "has_data":true,
+                 "is_user_can_add_new_text_values": true
+              },
+              {
+                 "rawmin":5.0,
+                 "name":"cn",
+                 "min":23.0,
+                 "filterable":true,
+                 "max":71.0,
+                 "rawmax":89.0,
+                 "label":"Days Since Last Visit",
+                 "position":0,
+                 "type":"numeric",
+                 "has_data":true,
+                 "is_user_can_add_new_text_values": false
+              },
+              {
+                 "name":"ct2",
+                 "filterable":true,
+                 "label":"Next Step",
+                 "values":[
+                    {
+                       "text":"drop by office",
+                       "value":"drop by office"
+                    },
+                    {
+                       "text":"drop off a sample",
+                       "value":"drop off a sample"
+                    },
+                    {
+                       "text":"phone call",
+                       "value":"phone call"
+                    },
+                    {
+                       "text":"send an email",
+                       "value":"send an email"
+                    },
+                    {
+                       "text":"set a meeting",
+                       "value":"set a meeting"
+                    }
+                 ],
+                 "position":3,
+                 "type":"text",
+                 "has_data":true,
+                 "is_user_can_add_new_text_values": true
+              },
+              {
+                 "rawmin":null,
+                 "name":"cn2",
+                 "min":null,
+                 "filterable":false,
+                 "max":null,
+                 "rawmax":null,
+                 "label":"Sales YTD",
+                 "position":2,
+                 "type":"numeric",
+                 "has_data":true,
+                 "is_user_can_add_new_text_values": false
+              },
+              {
+                 "name":"ct3",
+                 "filterable":true,
+                 "label":"Next Step Date",
+                 "values":[
+                    {
+                       "text":"10-Nov",
+                       "value":"10-Nov"
+                    },
+                    {
+                       "text":"15-Oct",
+                       "value":"15-Oct"
+                    },
+                    {
+                       "text":"19-Oct",
+                       "value":"19-Oct"
+                    },
+                    {
+                       "text":"23-Oct",
+                       "value":"23-Oct"
+                    },
+                    {
+                       "text":"31-Oct",
+                       "value":"31-Oct"
+                    },
+                    {
+                       "text":"5-Nov",
+                       "value":"5-Nov"
+                    }
+                 ],
+                 "position":4,
+                 "type":"text",
+                 "has_data":true,
+                 "is_user_can_add_new_text_values": false
+              },
+              {
+                 "rawmin":2.0,
+                 "name":"cn3",
+                 "min":2.0,
+                 "filterable":true,
+                 "max":5.0,
+                 "rawmax":25.0,
+                 "label":"Desired Delivery Frequency",
+                 "position":6,
+                 "type":"numeric",
+                 "has_data":true,
+                 "is_user_can_add_new_text_values": true
+              },
+              {
+                 "name":"ct4",
+                 "filterable":true,
+                 "label":"Priority",
+                 "values":[
+                    {
+                       "text":"High",
+                       "value":"High"
+                    },
+                    {
+                       "text":"Low",
+                       "value":"Low"
+                    },
+                    {
+                       "text":"Medium",
+                       "value":"Medium"
+                    }
+                 ],
+                 "position":5,
+                 "type":"text",
+                 "has_data":true,
+                 "is_user_can_add_new_text_values": true
+              },
+              {
+                 "rawmin":null,
+                 "name":"cn4",
+                 "min":null,
+                 "filterable":true,
+                 "max":null,
+                 "rawmax":null,
+                 "label":"test",
+                 "position":64,
+                 "type":"numeric",
+                 "has_data":false,
+                 "is_user_can_add_new_text_values": true
+              },
+              {
+                 "name":"ct5",
+                 "filterable":true,
+                 "label":"Prospect Qual",
+                 "values":[
+                    {
+                       "text":"A",
+                       "value":"A"
+                    },
+                    {
+                       "text":"B",
+                       "value":"B"
+                    },
+                    {
+                       "text":"C",
+                       "value":"C"
+                    },
+                    {
+                       "text":"Customer",
+                       "value":"Customer"
+                    }
+                 ],
+                 "position":7,
+                 "type":"text",
+                 "has_data":true,
+                 "is_user_can_add_new_text_values": true
+              },
+              {
+                 "rawmin":null,
+                 "name":"cn5",
+                 "min":null,
+                 "filterable":true,
+                 "max":null,
+                 "rawmax":null,
+                 "label":"testing",
+                 "position":65,
+                 "type":"numeric",
+                 "has_data":false,
+                 "is_user_can_add_new_text_values": true
+              },
+              {
+                 "name":"ct6",
+                 "filterable":true,
+                 "label":"Rep Names",
+                 "values":[
+                    {
+                       "text":"Dorothy",
+                       "value":"Dorothy"
+                    },
+                    {
+                       "text":"The Cowardly Lion",
+                       "value":"The Cowardly Lion"
+                    },
+                    {
+                       "text":"The Scarecrow",
+                       "value":"The Scarecrow"
+                    },
+                    {
+                       "text":"The Tin Man",
+                       "value":"The Tin Man"
+                    }
+                 ],
+                 "position":8,
+                 "type":"text",
+                 "has_data":true,
+                 "is_user_can_add_new_text_values": true
+              },
+              {
+                 "name":"ct7",
+                 "filterable":true,
+                 "label":"Sales Stage",
+                 "values":[
+                    {
+                       "text":"Customer",
+                       "value":"Customer"
+                    },
+                    {
+                       "text":"Lead",
+                       "value":"Lead"
+                    },
+                    {
+                       "text":"Opportunity",
+                       "value":"Opportunity"
+                    },
+                    {
+                       "text":"Qualified Lead",
+                       "value":"Qualified Lead"
+                    }
+                 ],
+                 "position":10,
+                 "type":"text",
+                 "has_data":true,
+                 "is_user_can_add_new_text_values": false
+              },
+              {
+                 "name":"ct8",
+                 "filterable":true,
+                 "label":"Specialty",
+                 "values":[
+                    {
+                       "text":"Cardiology",
+                       "value":"Cardiology"
+                    },
+                    {
+                       "text":"Pediatrician",
+                       "value":"Pediatrician"
+                    },
+                    {
+                       "text":"Podiatrist",
+                       "value":"Podiatrist"
+                    },
+                    {
+                       "text":"Primary Care",
+                       "value":"Primary Care"
+                    }
+                 ],
+                 "position":9,
+                 "type":"text",
+                 "has_data":true,
+                 "is_user_can_add_new_text_values": false
+              },
+              {
+                 "name":"ct9",
+                 "filterable":true,
+                 "label":"Type",
+                 "values":[
+                    {
+                       "text":"Clinic",
+                       "value":"Clinic"
+                    },
+                    {
+                       "text":"Hospital",
+                       "value":"Hospital"
+                    },
+                    {
+                       "text":"Specialist",
+                       "value":"Specialist"
+                    },
+                    {
+                       "text":"Wholesale",
+                       "value":"Wholesale"
+                    }
+                 ],
+                 "position":11,
+                 "type":"text",
+                 "has_data":true,
+                 "is_user_can_add_new_text_values": true
+              },
+              {
+                 "name":"ct11",
+                 "filterable":true,
+                 "label":"Delivery Type",
+                 "values":[
+                    {
+                       "text":"Electric Delivery",
+                       "value":"Electric Delivery"
+                    },
+                    {
+                       "text":"Fossil Generation",
+                       "value":"Fossil Generation"
+                    },
+                    {
+                       "text":"Gas Delivery",
+                       "value":"Gas Delivery"
+                    },
+                    {
+                       "text":"Transmission",
+                       "value":"Transmission"
+                    }
+                 ],
+                 "position":13,
+                 "type":"text",
+                 "has_data":true,
+                 "is_user_can_add_new_text_values": true
+              },
+              {
+                 "name":"ct12",
+                 "filterable":true,
+                 "label":"Route Name",
+                 "values":[
+                    {
+                       "text":"Week of Jan 13",
+                       "value":"Week of Jan 13"
+                    },
+                    {
+                       "text":"Week of Jan 20",
+                       "value":"Week of Jan 20"
+                    }
+                 ],
+                 "position":61,
+                 "type":"text",
+                 "has_data":true,
+                 "is_user_can_add_new_text_values": true
+              }
+            ],
+            "is_manager": false,
+            "is_hide_referral_ios_banner": false,
+            "marker_icon": "ic_default",
+            "manager": null,
+            "crm_editable_fields_list": [],
+            "crm_base_url": "https://ns9.salesforce.com",
+            "crm_type": "s",
+            "referral_url": "https://sidekick.badgermapping.com/r/abc123/",
+            "map_start_zoom": 5,
+            "map_start": "POINT (-96.6573846999999944 39.4662621000000016)",
+            "is_user_can_edit": false,
+            "is_user_can_delete_checkins": true,
+            "is_user_can_add_new_text_values": true,
+            "id": 439,
+            "has_data": true,
+            "default_appt_length": 30,
+            "first_name": "Stephen",
+            "last_name": "Malkmus",
+            "email": "steve@pavement.com"
+        }
+        
+## User Search [/search/users/?q={query}]
+Find an existing Badger User at your company by User's email address or internal ID.
+
+Returns email address, internal ID, internal username, and first name of user.
+
+Usage example: if you need the internal ID of the user to create accounts owned by the user, but only have the user's email address.
+
++ Parameters
+
+    + query (string, `stephenmalkmus@pavement.com`) ... Email Address or Badger User ID of user.
+
+### Search users [GET]
+
++ Request
+
+    + Headers
+
+            Authorization: "Token abcdefg12345678"
+
++ Response 200 (application/json)
+
+        {
+            "username": "smalkmus",
+            "first_name": "Stephen",
+            "id": 1234,
+            "email": "stephenmalkmus@pavement.com"
+        }
+
+# Group Accounts
+
+## Retrieve and update account details [/customers/{account_id}/]
+Retrieve and update account details
+
++ Parameters
+
+    + account_id (number, `1981937`) ... ID of account to retrieve or update.
+
+### Retrieve account details [GET]
+Returns single account object (with *account_id*).
+
+This will include the account details, with fields prefixed with “custom_text” or “custom_numeric” corresponding to the “name” property in the user profile field mappings (see ["User Profile"](https://badgerupdatedapi.docs.apiary.io/#reference/users/get-user-profile). For example, a datafield with name “ct2” in the user profile will correspond to the “custom_text2” property in the account object.
+
+
++ Request
+
+    + Headers
+
+            Authorization: "Token abcdefg12345678"
+
++ Response 200 (application/json)
+
+        {
+            "id": 1981937,
+            "first_name": null,
+            "last_name": "Allen Aleksey",
+            "full_name": "Allen Aleksey",
+            "phone_number": "312-755-0408",
+            "email": "allen@aleksey.com",
+            "custom_numeric": 45,
+            "custom_text": "Normal",
+            "custom_numeric2": 11291,
+            "custom_text2": "drop off a sample",
+            "custom_numeric3": null,
+            "custom_text3": "23-Oct",
+            "custom_numeric4": null,
+            "custom_text4": "High",
+            "custom_numeric5": null,
+            "custom_text5": "A",
+            "custom_numeric6": null,
+            "custom_text6": "The Tin Man",
+            "custom_numeric7": null,
+            "custom_text7": "Qualified Lead",
+            "custom_numeric8": null,
+            "custom_text8": "Podiatrist",
+            "custom_numeric9": null,
+            "custom_text9": "Specialist",
+            "custom_numeric10": null,
+            "custom_text10": "http://www.allenaleksey.com",
+            "custom_numeric11": null,
+            "custom_text11": null,
+            "custom_numeric12": null,
+            "custom_text12": null,
+            "custom_numeric13": null,
+            "custom_text13": null,
+            "custom_numeric14": null,
+            "custom_text14": null,
+            "custom_numeric15": null,
+            "custom_text15": null,
+            "custom_numeric16": null,
+            "custom_text16": null,
+            "custom_numeric17": null,
+            "custom_text17": null,
+            "custom_numeric18": null,
+            "custom_text18": null,
+            "custom_numeric19": null,
+            "custom_text19": null,
+            "custom_numeric20": null,
+            "custom_text20": null,
+            "custom_numeric21": null,
+            "custom_text21": null,
+            "custom_numeric22": null,
+            "custom_text22": null,
+            "custom_numeric23": null,
+            "custom_text23": null,
+            "custom_numeric24": null,
+            "custom_text24": null,
+            "custom_numeric25": null,
+            "custom_text25": null,
+            "custom_numeric26": null,
+            "custom_text26": null,
+            "custom_numeric27": null,
+            "custom_text27": null,
+            "custom_numeric28": null,
+            "custom_text28": null,
+            "custom_numeric29": null,
+            "custom_text29": null,
+            "custom_numeric30": null,
+            "custom_text30": null,
+            "customer_id": null,
+            "notes": null,
+            "original_address": "645 N Michigan Ave, Chicago, IL, 60611",
+            "crm_id": null,
+            "locations": [
+                {
+                    "id": 1611109,
+                    "city": "Chicago",
+                    "name": null,
+                    "zipcode": "60611",
+                    "long": -87.6238691,
+                    "state": "IL",
+                    "lat": 41.8938317,
+                    "address_line_1": "645 North Michigan Avenue",
+                    "location": "POINT (-87.6238690999999932 41.8938316999999998)"
+                }
+            ]
+        }
+
+### Update account [PATCH]
+Returns updated account containing an array of one or more locations for that customer (typically only one is used). If "account_owner" is included included in the request, the account will be reassigned to the user with the User ID specified (as long as the auth token belongs to the user's manager).
+ 
++ Request (application/x-www-form-urlencoded)
+
+    + Headers
+
+            Authorization: "Token abcdefg12345678"
+    
+    + Body
+
+            custom_text=Urgent
+        
++ Response 200 (application/json)
+    
+        {
+            "id": 1981937,
+            "first_name": null,
+            "last_name": "Allen Aleksey",
+            "full_name": "Allen Aleksey",
+            "phone_number": "312-755-0408",
+            "email": "allen@aleksey.com",
+            "custom_numeric": 45,
+            "custom_text": "Urgent",
+            "custom_numeric2": 11291,
+            "custom_text2": "drop off a sample",
+            "custom_numeric3": null,
+            "custom_text3": "23-Oct",
+            "custom_numeric4": null,
+            "custom_text4": "High",
+            "custom_numeric5": null,
+            "custom_text5": "A",
+            "custom_numeric6": null,
+            "custom_text6": "The Tin Man",
+            "custom_numeric7": null,
+            "custom_text7": "Qualified Lead",
+            "custom_numeric8": null,
+            "custom_text8": "Podiatrist",
+            "custom_numeric9": null,
+            "custom_text9": "Specialist",
+            "custom_numeric10": null,
+            "custom_text10": "http://www.allenaleksey.com",
+            "custom_numeric11": null,
+            "custom_text11": null,
+            "custom_numeric12": null,
+            "custom_text12": null,
+            "custom_numeric13": null,
+            "custom_text13": null,
+            "custom_numeric14": null,
+            "custom_text14": null,
+            "custom_numeric15": null,
+            "custom_text15": null,
+            "custom_numeric16": null,
+            "custom_text16": null,
+            "custom_numeric17": null,
+            "custom_text17": null,
+            "custom_numeric18": null,
+            "custom_text18": null,
+            "custom_numeric19": null,
+            "custom_text19": null,
+            "custom_numeric20": null,
+            "custom_text20": null,
+            "custom_numeric21": null,
+            "custom_text21": null,
+            "custom_numeric22": null,
+            "custom_text22": null,
+            "custom_numeric23": null,
+            "custom_text23": null,
+            "custom_numeric24": null,
+            "custom_text24": null,
+            "custom_numeric25": null,
+            "custom_text25": null,
+            "custom_numeric26": null,
+            "custom_text26": null,
+            "custom_numeric27": null,
+            "custom_text27": null,
+            "custom_numeric28": null,
+            "custom_text28": null,
+            "custom_numeric29": null,
+            "custom_text29": null,
+            "custom_numeric30": null,
+            "custom_text30": null,
+            "customer_id": null,
+            "notes": null,
+            "original_address": "645 N Michigan Ave, Chicago, IL, 60611",
+            "crm_id": null,
+            "locations": [
+                {
+                    "id": 1611109,
+                    "city": "Chicago",
+                    "name": null,
+                    "zipcode": "60611",
+                    "long": -87.6238691,
+                    "state": "IL",
+                    "lat": 41.8938317,
+                    "address_line_1": "645 North Michigan Avenue",
+                    "location": "POINT (-87.6238690999999932 41.8938316999999998)"
+                }
+            ]
+        }
+
+### Delete customer [DELETE]
+Returns nothing.
+
++ Request
+
+    + Headers
+
+            Authorization: "Token abcdefg12345678"
+
++ Response 204
+
+## List and create accounts [/customers/]
+Get all accounts or create a new account.
+
+### Get list of accounts [GET]
+Get list of all accounts, with name and ID included. Get list of accounts for another user that authenticated user manages by including optional *rn* parameter in query string with User ID of managed user.
+
++ Request
+
+    + Headers
+
+            Authorization: "Token abcdefg12345678"
+
++ Response 200 (application/json)
+
+        [
+            {
+                "first_name": null,
+                "last_name": "Aaron Kieke",
+                "id": 1981653
+            },
+            {
+                "first_name": null,
+                "last_name": "Abbie Brennecke",
+                "id": 1982399
+            },
+            {
+                "first_name": null,
+                "last_name": "Abbie Khosravi",
+                "id": 1981951
+            }
+        ]
+
+### Create new account [POST]
+Returns new account object, and updated profile.
+
+- Values should be URL encoded.
+- “last_name”, “address”, and “account_owner” are required.
+
+    - account_owner value is returned via [Authentication](https://badgerupdatedapi.docs.apiary.io/#reference/users/authentication).
+    - “phone_number” and “email” are required keys, but the values can be empty.
+    - Example: last_name=John Doe&address=1 Union St, San Francisco, CA&account_owner=441&email=&phone_number
+
+- Including a valid “lat” and “lng” will create the account using that and skip geocoding the address (although an address is still required).
+
+    - Example: last_name=John Doe&address=1 Union St, San Francisco, CA&lat=43.435175&lng=-83.9912469&email=&phone_number
+
+- Include any custom field key/value pairs, using the field mappings from the user profile “datafields” (see ["User Profile"](https://badgerupdatedapi.docs.apiary.io/#reference/users/get-user-profile)). Consider this example of user profile “datafields”:
+
+    {
+       "name":"ct",
+       "label":"Flag",
+       ...
+    },
+    {
+       "name":"ct2",
+       "label":"Next Step",
+       ...
+    },
+    {
+       "name":"cn3",
+       "label":"Sales YTD",
+       ...
+    },
+    …
+
+    - If you want to update the “Next Step” field in your CRM, then you would include the value for custom text field 2 (“name” ct2 in datafields), but the key is “custom_text2”. So our example would be extended like this:
+
+        - last_name=John Doe&address=1 Union St, San Francisco, CA&ct2=the next step&email=&phone_number
+
+    - If you have a custom numeric field you want to update, you would just use “custom_numeric3” if “cn3” is the name of the datafield, like this:
+
+        - last_name=John Doe&address=1 Union St, San Francisco, CA&ct2=the next step&cn3=43&email=&phone_number
+
+    - Also, names “ct” and “cn” correspond to keys “custom_text” and “custom_numeric” (no number at the end):
+    
+        - last_name=John Doe&address=1 Union St, San Francisco, CA&ct2=the next step&cn3=43&ct=somevalue&cn=10&email=&phone_number
+
++ Request (application/x-www-form-urlencoded)
+
+    + Headers
+
+            Authorization: "Token abcdefg12345678"
+    
+    + Body
+
+            last_name=Roger Smith&address=3458 Mackinaw Street, Saginaw, MI, United States&phone_number=444-444-4444&email=roger@smith.com&custom_numeric3=400&custom_numeric4=&custom_numeric5=&custom_text=Normal&custom_text3=&custom_text2=&custom_text5=&custom_text6=&custom_text8=&custom_text7=&custom_text9=&custom_text10=&custom_text11=&custom_text12=&custom_text14=&custom_text13=&custom_text15=&custom_text16=&origin=2&account_owner=441&lat=43.435175&lng=-83.99124699999999
+        
++ Response 201 (application/json)
+
+        {
+          "customer": {
+            "id": 2333125,
+            "first_name": null,
+            "last_name": "Roger Smith",
+            "full_name": "Roger Smith",
+            "phone_number": "444-444-4444",
+            "email": "roger@smith.com",
+            "custom_numeric": null,
+            "custom_text": "Normal",
+            "custom_numeric2": null,
+            "custom_text2": "",
+            "custom_numeric3": 400.0,
+            "custom_text3": "",
+            "custom_numeric4": null,
+            "custom_text4": null,
+            "custom_numeric5": null,
+            "custom_text5": "",
+            "custom_numeric6": null,
+            "custom_text6": "",
+            "custom_numeric7": null,
+            "custom_text7": "",
+            "custom_numeric8": null,
+            "custom_text8": "",
+            "custom_numeric9": null,
+            "custom_text9": "",
+            "custom_numeric10": null,
+            "custom_text10": "",
+            "custom_numeric11": null,
+            "custom_text11": "",
+            "custom_numeric12": null,
+            "custom_text12": "",
+            "custom_numeric13": null,
+            "custom_text13": "",
+            "custom_numeric14": null,
+            "custom_text14": "",
+            "custom_numeric15": null,
+            "custom_text15": "",
+            "custom_numeric16": null,
+            "custom_text16": "",
+            "custom_numeric17": null,
+            "custom_text17": null,
+            "custom_numeric18": null,
+            "custom_text18": null,
+            "custom_numeric19": null,
+            "custom_text19": null,
+            "custom_numeric20": null,
+            "custom_text20": null,
+            "custom_numeric21": null,
+            "custom_text21": null,
+            "custom_numeric22": null,
+            "custom_text22": null,
+            "custom_numeric23": null,
+            "custom_text23": null,
+            "custom_numeric24": null,
+            "custom_text24": null,
+            "custom_numeric25": null,
+            "custom_text25": null,
+            "custom_numeric26": null,
+            "custom_text26": null,
+            "custom_numeric27": null,
+            "custom_text27": null,
+            "custom_numeric28": null,
+            "custom_text28": null,
+            "custom_numeric29": null,
+            "custom_text29": null,
+            "custom_numeric30": null,
+            "custom_text30": null,
+            "territory": {
+              "name": "US"
+            },
+            "customer_id": null,
+            "notes": null,
+            "original_address": null,
+            "crm_id": null,
+            "locations": [
+              {
+                "id": 1870817,
+                "city": "",
+                "name": null,
+                "zipcode": "",
+                "long": -83.99124699999999,
+                "state": "",
+                "lat": 43.435175,
+                "address_line_1": "3458 MACKINAW STREET  SAGINAW  MI  UNITED STATES",
+                "location": "POINT (-83.9912469999999871 43.4351750000000010)"
+              }
+            ]
+          },
+          "profile": {
+            "crm_creatable_fields_list": [],
+            "company": {
+              "id": 15488,
+              "short_name": "badger mapping",
+              "name": "Badger Mapping"
+            },
+            "datafields": [
+              {
+                "name": "ct",
+                "filterable": false,
+                "label": "Flag",
+                "values": [
+                  {
+                    "text": "Normal",
+                    "value": "Normal"
+                  },
+                  {
+                    "text": "Urgent",
+                    "value": "Urgent"
+                  }
+                ],
+                "position": 0,
+                "type": "text",
+                "has_data": true
+              },
+              {
+                "name": "ct2",
+                "filterable": true,
+                "label": "Next Step",
+                "values": [
+                  {
+                    "text": "drop by office",
+                    "value": "drop by office"
+                  },
+                  {
+                    "text": "drop off a sample",
+                    "value": "drop off a sample"
+                  },
+                  {
+                    "text": "phone call",
+                    "value": "phone call"
+                  },
+                  {
+                    "text": "send an email",
+                    "value": "send an email"
+                  },
+                  {
+                    "text": "set a meeting",
+                    "value": "set a meeting"
+                  }
+                ],
+                "position": 4,
+                "type": "text",
+                "has_data": true
+              },
+              {
+                "name": "ct3",
+                "filterable": true,
+                "label": "Next Step Date",
+                "values": [
+                  {
+                    "text": "10-Nov",
+                    "value": "10-Nov"
+                  },
+                  {
+                    "text": "15-Oct",
+                    "value": "15-Oct"
+                  },
+                  {
+                    "text": "19-Oct",
+                    "value": "19-Oct"
+                  },
+                  {
+                    "text": "23-Oct",
+                    "value": "23-Oct"
+                  },
+                  {
+                    "text": "31-Oct",
+                    "value": "31-Oct"
+                  },
+                  {
+                    "text": "5-Nov",
+                    "value": "5-Nov"
+                  }
+                ],
+                "position": 3,
+                "type": "text",
+                "has_data": true
+              },
+              {
+                "rawmin": 2.0,
+                "name": "cn3",
+                "min": 2.0,
+                "filterable": true,
+                "max": 5.0,
+                "rawmax": 400.0,
+                "label": "Desired Delivery Frequency",
+                "position": 1,
+                "type": "numeric",
+                "has_data": true
+              },
+              {
+                "rawmin": null,
+                "name": "cn4",
+                "min": null,
+                "filterable": true,
+                "max": null,
+                "rawmax": null,
+                "label": "testing",
+                "position": 14,
+                "type": "numeric",
+                "has_data": false
+              },
+              {
+                "name": "ct5",
+                "filterable": true,
+                "label": "Prospect Qual",
+                "values": [
+                  {
+                    "text": "A",
+                    "value": "A"
+                  },
+                  {
+                    "text": "B",
+                    "value": "B"
+                  },
+                  {
+                    "text": "C",
+                    "value": "C"
+                  },
+                  {
+                    "text": "Customer",
+                    "value": "Customer"
+                  }
+                ],
+                "position": 5,
+                "type": "text",
+                "has_data": true
+              },
+              {
+                "rawmin": null,
+                "name": "cn5",
+                "min": null,
+                "filterable": true,
+                "max": null,
+                "rawmax": null,
+                "label": "testttt",
+                "position": 17,
+                "type": "numeric",
+                "has_data": false
+              },
+              {
+                "name": "ct6",
+                "filterable": true,
+                "label": "Rep Names",
+                "values": [
+                  {
+                    "text": "Dorothy",
+                    "value": "Dorothy"
+                  },
+                  {
+                    "text": "The Cowardly Lion",
+                    "value": "The Cowardly Lion"
+                  },
+                  {
+                    "text": "The Scarecrow",
+                    "value": "The Scarecrow"
+                  },
+                  {
+                    "text": "The Tin Man",
+                    "value": "The Tin Man"
+                  }
+                ],
+                "position": 6,
+                "type": "text",
+                "has_data": true
+              },
+              {
+                "name": "ct7",
+                "filterable": true,
+                "label": "Sales Stage",
+                "values": [
+                  {
+                    "text": "Customer",
+                    "value": "Customer"
+                  },
+                  {
+                    "text": "Lead",
+                    "value": "Lead"
+                  },
+                  {
+                    "text": "Opportunity",
+                    "value": "Opportunity"
+                  },
+                  {
+                    "text": "Qualified Lead",
+                    "value": "Qualified Lead"
+                  }
+                ],
+                "position": 8,
+                "type": "text",
+                "has_data": true
+              },
+              {
+                "name": "ct8",
+                "filterable": true,
+                "label": "Specialty",
+                "values": [
+                  {
+                    "text": "Cardiology",
+                    "value": "Cardiology"
+                  },
+                  {
+                    "text": "Pediatrician",
+                    "value": "Pediatrician"
+                  },
+                  {
+                    "text": "Podiatrist",
+                    "value": "Podiatrist"
+                  },
+                  {
+                    "text": "Primary Care",
+                    "value": "Primary Care"
+                  }
+                ],
+                "position": 7,
+                "type": "text",
+                "has_data": true
+              },
+              {
+                "name": "ct9",
+                "filterable": true,
+                "label": "Type",
+                "values": [
+                  {
+                    "text": "Clinic",
+                    "value": "Clinic"
+                  },
+                  {
+                    "text": "Hospital",
+                    "value": "Hospital"
+                  },
+                  {
+                    "text": "Specialist",
+                    "value": "Specialist"
+                  },
+                  {
+                    "text": "Wholesale",
+                    "value": "Wholesale"
+                  }
+                ],
+                "position": 9,
+                "type": "text",
+                "has_data": true
+              },
+              {
+                "name": "ct11",
+                "filterable": true,
+                "label": "Delivery Type",
+                "values": [
+                  {
+                    "text": "Electric Delivery",
+                    "value": "Electric Delivery"
+                  },
+                  {
+                    "text": "Fossil Generation",
+                    "value": "Fossil Generation"
+                  },
+                  {
+                    "text": "Gas Delivery",
+                    "value": "Gas Delivery"
+                  },
+                  {
+                    "text": "Transmission",
+                    "value": "Transmission"
+                  }
+                ],
+                "position": 11,
+                "type": "text",
+                "has_data": true
+              },
+              {
+                "name": "ct12",
+                "filterable": true,
+                "label": "Route Name",
+                "values": [
+                  {
+                    "text": "Week of Jan 13",
+                    "value": "Week of Jan 13"
+                  },
+                  {
+                    "text": "Week of Jan 20",
+                    "value": "Week of Jan 20"
+                  }
+                ],
+                "position": 12,
+                "type": "text",
+                "has_data": true
+              },
+              {
+                "name": "ct13",
+                "filterable": true,
+                "label": "test",
+                "values": [],
+                "position": 15,
+                "type": "text",
+                "has_data": false
+              },
+              {
+                "name": "ct14",
+                "filterable": true,
+                "label": "Route Name",
+                "values": [],
+                "position": 13,
+                "type": "text",
+                "has_data": false
+              },
+              {
+                "name": "ct15",
+                "filterable": true,
+                "label": "test",
+                "values": [],
+                "position": 16,
+                "type": "text",
+                "has_data": false
+              },
+              {
+                "name": "ct16",
+                "filterable": true,
+                "label": "teser",
+                "values": [],
+                "position": 18,
+                "type": "text",
+                "has_data": false
+              }
+            ],
+            "is_manager": false,
+            "map_start_zoom": 5,
+            "marker_icon": "ic_default",
+            "manager": null,
+            "crm_editable_fields_list": [],
+            "crm_base_url": "https://ns9.salesforce.com",
+            "crm_type": "s",
+            "is_user_can_edit": true,
+            "map_start": "POINT (-96.6573846999999660 39.4662621000000016)",
+            "id": 439,
+            "has_data": true
+          },
+          "location": {
+            "id": 1870817,
+            "city": "",
+            "name": null,
+            "zipcode": "",
+            "long": -83.99124699999999,
+            "state": "",
+            "lat": 43.435175,
+            "address_line_1": "3458 MACKINAW STREET  SAGINAW  MI  UNITED STATES",
+            "location": "POINT (-83.9912469999999871 43.4351750000000010)"
+          }
+        }
+
+# Group Locations
+An account's location (address, for example) is handled separately from the account details.
+
+## Update account's location [/locations/{location_id}/]
+Update the location of an account (address, for example).
+
+### Update location with new address [PATCH]
+Pass optional *lat* and *lng* (in addition to required *address*) if available to skip geocoding the address. Returns JSON object representing the updated Location.
+
++ Parameters
+
+    + location_id (number, `1611109`) ... ID of location to update.
+
++ Request (application/x-www-form-urlencoded)
+
+    + Headers
+
+            Authorization: "Token abcdefg12345678"
+    
+    + Body
+        
+            address=5731 Palmer Way, Carlsbad, CA&lat=33.13773&lng=-117.272667
+
++ Response 200 (application/json)
+
+        {
+          "id": 1611109,
+          "city": "Carlsbad",
+          "name": null,
+          "zipcode": "92010",
+          "long": -117.272667,
+          "state": "CA",
+          "lat": 33.13773,
+          "address_line_1": "5731 Palmer Way",
+          "location": "POINT (-117.272667 33.13773)"
+        }
+
+# Group Check-Ins
+
+## Get check-ins for account [/appointments/{?customer_id}]
+Retrieve user's check-ins for an account with *customer_id*.
+
+### Retrieve check-ins for an account [GET]
+Returns JSON array of check-in objects for an account.
+
++ Parameters
+
+    + customer_id (number, `1981937`) ... ID of account to get check-ins for.
+
++ Request
+
+    + Headers
+
+            Authorization: "Token abcdefg12345678"
+
++ Response 200 (application/json)
+
+        [
+            {
+                "id": 57250,
+                "crm_id": null,
+                "customer": 1981937,
+                "log_datetime": "2014-01-23T10:08:44.133",
+                "type": "Drop-in",
+                "comments": "Stopped by office, left business cards",
+                "extra_fields": null,
+                "created_by": "John Doe"
+            },
+            {
+                "id": 57249,
+                "crm_id": null,
+                "customer": 1981937,
+                "log_datetime": "2014-01-24T13:32:22.179",
+                "type": "Drop-in",
+                "comments": "Met with client, follow up next week",
+                "extra_fields": null,
+                "created_by": "John Doe"
+            }
+        ]
+
+## Create check-in for account [/appointments/]
+Create check-in for an account.
+
+### Save new check-in for an account [POST]
+Returns new check-in object.
+
++ Request (application/x-www-form-urlencoded)
+
+    + Headers
+
+            Authorization: "Token abcdefg12345678"
+            
+    + Body
+
+            customer=1981937&comments=Met with client, follow up next week&type=Drop-in
+
++ Response 201 (application/json)
+
+        {
+            "id": 57249,
+            "crm_id": null,
+            "customer": 1981937,
+            "log_datetime": "2014-01-24T13:32:22.179",
+            "type": "Drop-in",
+            "comments": "Met with client, follow up next week",
+            "extra_fields": null,
+            "created_by": "John Doe"
+        }
+
+# Group Routes
+
+## List routes [/routes/]
+Get all routes for authenticated user.
+
+### Get list of routes [GET]
+Returns JSON array of route objects, containing basic information of each.
+
++ Request
+
+    + Headers
+
+            Authorization: "Token abcdefg12345678"
+
++ Response 200 (application/json)
+
+        [
+            {
+                "id": 1235,
+                "name": "Day 3 of Trip",
+                "route_date": "2019-09-19"
+            },
+            {
+                "id": 1234,
+                "name": "Monday Route",
+                "route_date": "2019-09-12"
+            }
+        ]
+
+## Retrieve route details [/routes/{route_id}/]
+Retrieve details of an existing route with *route_id*.
+
+### Retrieve route details [GET]
+Returns single route object (with *route_id*), including an array of one or more waypoints for that route.
+
++ Parameters
+
+    + route_id (number, `1234`) ... ID of route to retreive.
+
++ Request (application/json)
+
+    + Headers
+
+            Authorization: "Token abcdefg12345678"
+
++ Response 200 (application/json)
+
+        {
+            "id": 1234,
+            "name": "Monday Route",
+            "duration": null,
+            "waypoints": [
+                {
+                    "id": 1111,
+                    "name": "Acme Doctors",
+                    "address": "1522 Saint Louis Ave, Kansas City, MO, 64101, ",
+                    "suite": null,
+                    "city": null,
+                    "state": null,
+                    "zipcode": null,
+                    "location": "POINT (-94.6034329999999954 39.1030840000000026)",
+                    "lat": 39.103084,
+                    "long": -94.603433,
+                    "layover_minutes": 60,
+                    "position": 0,
+                    "complete_address": null,
+                    "location_id": 2222,
+                    "customer_id": 3344,
+                    "appt_time": null,
+                    "type": 1,
+                    "place_id": null
+                },
+                {
+                    "id": 1112,
+                    "name": "Tyre Manufacturers",
+                    "address": "2015 Washington St, Kansas City, MO, 64108, ",
+                    "suite": null,
+                    "city": null,
+                    "state": null,
+                    "zipcode": null,
+                    "location": "POINT (-94.5897779999999955 39.0887960000000021)",
+                    "lat": 39.088796,
+                    "long": -94.589778,
+                    "layover_minutes": 60,
+                    "position": 1,
+                    "complete_address": null,
+                    "location_id": 2223,
+                    "customer_id": 4444,
+                    "appt_time": null,
+                    "type": 1,
+                    "place_id": null
+                },
+                {
+                    "id": 1113,
+                    "name": "Starbus Coffee",
+                    "address": "1015 E 8th St, Kansas City, MO, 64106, ",
+                    "suite": null,
+                    "city": null,
+                    "state": null,
+                    "zipcode": null,
+                    "location": "POINT (-94.5701590000000039 39.1037609999999987)",
+                    "lat": 39.103761,
+                    "long": -94.570159,
+                    "layover_minutes": 60,
+                    "position": 2,
+                    "complete_address": null,
+                    "location_id": 5555,
+                    "customer_id": 4445,
+                    "appt_time": null,
+                    "type": 1,
+                    "place_id": null
+                }
+            ],
+            "start_address": "",
+            "destination_address": "",
+            "start_time": "09:00:00",
+            "route_date": "2019-09-12"
+        }

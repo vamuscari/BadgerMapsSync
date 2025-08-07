@@ -1,0 +1,23 @@
+2025/08/05 23:09:52 Mock BadgerMaps API server starting on port 8080
+2025/08/05 23:09:52 Base URL: http://localhost:8080
+2025/08/05 23:09:52 Available endpoints:
+2025/08/05 23:09:52   GET  /api/2/profile/
+2025/08/05 23:09:52   GET  /api/2/customers/
+2025/08/05 23:09:52   GET  /api/2/customers/{id}/
+2025/08/05 23:09:52   PATCH /api/2/customers/{id}/
+2025/08/05 23:09:52   GET  /api/2/appointments/
+2025/08/05 23:09:52   POST /api/2/appointments/
+2025/08/05 23:09:52   GET  /api/2/routes/
+2025/08/05 23:09:52   GET  /api/2/routes/{id}/
+2025/08/05 23:09:52   GET  /api/2/search/users/
+2025/08/05 23:09:52   GET  /api/2/datafields/
+2025/08/05 23:09:54 PATCH /api/2/customers/135298959/
+2025/08/05 23:09:54 PATCH /api/2/customers/135299001/
+2025/08/05 23:09:54 PATCH /api/2/customers/135299181/
+2025/08/05 23:09:54 PATCH /api/2/customers/135299577/
+2025/08/05 23:09:54 PATCH /api/2/customers/135299919/
+2025/08/05 23:09:54 PATCH /api/2/customers/135300430/
+2025/08/05 23:09:54 PATCH /api/2/customers/135301416/
+2025/08/05 23:09:54 PATCH /api/2/customers/135302565/
+2025/08/05 23:09:54 PATCH /api/2/customers/135302580/
+2025/08/05 23:09:54 PATCH /api/2/customers/135304307/

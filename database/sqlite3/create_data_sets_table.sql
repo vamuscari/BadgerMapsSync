@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS data_sets (
+    id INTEGER PRIMARY KEY,
+    name TEXT,
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+); 

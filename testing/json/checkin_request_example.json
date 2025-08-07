@@ -1,0 +1,9 @@
+{
+    "customer": 135300110,
+    "log_datetime": "2025-08-05T10:30:00.000000",
+    "type": "Phone Call",
+    "comments": "Test check-in created via API. Discussed beverage delivery options with store manager.",
+    "extra_fields": null,
+    "created_by": "Test User",
+    "created_by_email": "test.user@example.com"
+} 

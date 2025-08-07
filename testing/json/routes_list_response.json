@@ -1,0 +1,52 @@
+[
+    {
+        "id": 3083663,
+        "name": "Beverage Delivery Route 1 - East Coast",
+        "duration": null
+    },
+    {
+        "id": 3083664,
+        "name": "Beverage Delivery Route 2 - West Coast",
+        "duration": null
+    },
+    {
+        "id": 3083665,
+        "name": "Beverage Delivery Route 3 - Central Region",
+        "duration": null
+    },
+    {
+        "id": 3083666,
+        "name": "Beverage Delivery Route 4 - North Region",
+        "duration": null
+    },
+    {
+        "id": 3083667,
+        "name": "Beverage Delivery Route 5 - South Region",
+        "duration": null
+    },
+    {
+        "id": 3083668,
+        "name": "Beverage Delivery Route 6 - Downtown",
+        "duration": null
+    },
+    {
+        "id": 3083669,
+        "name": "Beverage Delivery Route 7 - Suburban",
+        "duration": null
+    },
+    {
+        "id": 3083670,
+        "name": "Beverage Delivery Route 8 - Rural",
+        "duration": null
+    },
+    {
+        "id": 3083671,
+        "name": "Beverage Delivery Route 9 - Express",
+        "duration": null
+    },
+    {
+        "id": 3083672,
+        "name": "Beverage Delivery Route 10 - Standard",
+        "duration": null
+    }
+] 

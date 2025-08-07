@@ -1,0 +1,62 @@
+[
+    {
+        "id": 135299181,
+        "first_name": "",
+        "last_name": "Downtown Convenience Store",
+        "original_address": ""
+    },
+    {
+        "id": 135302580,
+        "first_name": null,
+        "last_name": "Gas Station & Market",
+        "original_address": ""
+    },
+    {
+        "id": 135299577,
+        "first_name": null,
+        "last_name": "Corner Grocery Store",
+        "original_address": "123 Main Street, Test City, FL, 12345"
+    },
+    {
+        "id": 135298959,
+        "first_name": "",
+        "last_name": "Supermarket Express",
+        "original_address": "456 Business Center Blvd Suite A, Test City, FL, 12346"
+    },
+    {
+        "id": 135300430,
+        "first_name": null,
+        "last_name": "Quick Stop Mart",
+        "original_address": "789 Perimeter Park Blvd d, Test City, FL, 12347"
+    },
+    {
+        "id": 135299001,
+        "first_name": "",
+        "last_name": "Neighborhood Market",
+        "original_address": "321 East State Road 123, Test City, Fl, 12348"
+    },
+    {
+        "id": 135302565,
+        "first_name": null,
+        "last_name": "Food & Beverage Store",
+        "original_address": "654 Test Street North, Test City, FL, 12349"
+    },
+    {
+        "id": 135301416,
+        "first_name": null,
+        "last_name": "Beverage Warehouse",
+        "original_address": "987 Test Blvd 103, Test City, FL, 12350"
+    },
+    {
+        "id": 135299919,
+        "first_name": null,
+        "last_name": "Drink Distribution Center",
+        "original_address": "147 Test Hwy #21, Test City, FL, 12351"
+    },
+    {
+        "id": 135304307,
+        "first_name": "",
+        "last_name": "Refreshment Station",
+        "original_address": "258 Test Highway STE 1, Test City, FL, 12352"
+    }
+] 

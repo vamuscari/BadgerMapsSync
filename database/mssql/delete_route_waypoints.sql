@@ -1,0 +1,1 @@
+DELETE FROM RouteWaypoints WHERE RouteId = ? 

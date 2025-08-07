@@ -1,0 +1,267 @@
+{
+    "is_user_can_add_new_text_values": true,
+    "is_user_can_delete_checkins": true,
+    "manager": null,
+    "marker_icon": "ic_default",
+    "id": 12345,
+    "company": {
+        "id": 67890,
+        "short_name": "beveragedist",
+        "name": "Beverage Distribution Co."
+    },
+    "map_start": "SRID=4326;POINT (-80.123456 25.123456)",
+    "map_start_zoom": 5,
+    "is_manager": true,
+    "crm_editable_fields_list": [],
+    "crm_creatable_fields_list": [],
+    "crm_base_url": null,
+    "crm_add_contact_url_template": null,
+    "crm_web_home_url": null,
+    "crm_type": null,
+    "is_user_can_edit": true,
+    "is_user_can_edit_account_name_only": false,
+    "is_hide_referral_ios_banner": false,
+    "referral_url": "https://sidekick.badgermapping.com/r/test123",
+    "apptlog_fields": null,
+    "acct_fields": null,
+    "default_appt_length": 5,
+    "active_colorize": null,
+    "completed": true,
+    "trial_days_left": -1,
+    "must_subscribe_ios": false,
+    "first_name": "Test",
+    "last_name": "User",
+    "email": "test.user@example.com",
+    "is_multiple_objects_user": false,
+    "has_account_owner_edit_permission": true,
+    "is_visibility_mode_user": false,
+    "TILE_SERVER_URL": "https://tiles.badgermapping.com",
+    "has_data": true,
+    "datafields": [
+        {
+            "name": "rn",
+            "type": "text",
+            "label": "Sales Representatives",
+            "filterable": true,
+            "position": 1,
+            "is_user_can_add_new_text_values": false,
+            "has_data": true,
+            "all_values": null,
+            "values": [
+                {
+                    "value": 1001,
+                    "text": "John Smith"
+                },
+                {
+                    "value": 1002,
+                    "text": "Jane Doe"
+                },
+                {
+                    "value": 1003,
+                    "text": "Mike Johnson"
+                },
+                {
+                    "value": 1004,
+                    "text": "Sarah Wilson"
+                },
+                {
+                    "value": 1005,
+                    "text": "David Brown"
+                },
+                {
+                    "value": 1006,
+                    "text": "Beverage Distribution Co."
+                }
+            ]
+        },
+        {
+            "name": "ct",
+            "type": "text",
+            "label": "Delivery Preferences",
+            "filterable": true,
+            "position": 3,
+            "is_user_can_add_new_text_values": true,
+            "has_data": true,
+            "all_values": [
+                {
+                    "value": "Complete",
+                    "text": "Complete"
+                },
+                {
+                    "value": "Waiting on Customer",
+                    "text": "Waiting on Customer"
+                }
+            ],
+            "values": [
+                {
+                    "value": "Complete",
+                    "text": "Complete"
+                },
+                {
+                    "value": "Waiting on Customer",
+                    "text": "Waiting on Customer"
+                }
+            ]
+        },
+        {
+            "name": "ct25",
+            "type": "text",
+            "label": "Onboarding - Billing Preferences",
+            "filterable": true,
+            "position": 4,
+            "is_user_can_add_new_text_values": true,
+            "has_data": true,
+            "all_values": [
+                {
+                    "value": "Net 30",
+                    "text": "Net 30"
+                },
+                {
+                    "value": "Net 60",
+                    "text": "Net 60"
+                },
+                {
+                    "value": "COD",
+                    "text": "Cash on Delivery"
+                },
+                {
+                    "value": "Prepaid",
+                    "text": "Prepaid"
+                }
+            ],
+            "values": [
+                {
+                    "value": "Net 30",
+                    "text": "Net 30"
+                },
+                {
+                    "value": "Net 60",
+                    "text": "Net 60"
+                },
+                {
+                    "value": "COD",
+                    "text": "Cash on Delivery"
+                }
+            ]
+        },
+        {
+            "name": "ct26",
+            "type": "text",
+            "label": "Delivery Schedule",
+            "filterable": true,
+            "position": 5,
+            "is_user_can_add_new_text_values": true,
+            "has_data": true,
+            "all_values": [
+                {
+                    "value": "Weekly",
+                    "text": "Weekly"
+                },
+                {
+                    "value": "Bi-Weekly",
+                    "text": "Bi-Weekly"
+                },
+                {
+                    "value": "Monthly",
+                    "text": "Monthly"
+                },
+                {
+                    "value": "On Demand",
+                    "text": "On Demand"
+                }
+            ],
+            "values": [
+                {
+                    "value": "Weekly",
+                    "text": "Weekly"
+                },
+                {
+                    "value": "Bi-Weekly",
+                    "text": "Bi-Weekly"
+                }
+            ]
+        },
+        {
+            "name": "ct27",
+            "type": "text",
+            "label": "Product Category",
+            "filterable": true,
+            "position": 6,
+            "is_user_can_add_new_text_values": true,
+            "has_data": true,
+            "all_values": [
+                {
+                    "value": "Soft Drinks",
+                    "text": "Soft Drinks"
+                },
+                {
+                    "value": "Energy Drinks",
+                    "text": "Energy Drinks"
+                },
+                {
+                    "value": "Water",
+                    "text": "Water"
+                },
+                {
+                    "value": "Juices",
+                    "text": "Juices"
+                },
+                {
+                    "value": "Sports Drinks",
+                    "text": "Sports Drinks"
+                }
+            ],
+            "values": [
+                {
+                    "value": "Soft Drinks",
+                    "text": "Soft Drinks"
+                },
+                {
+                    "value": "Energy Drinks",
+                    "text": "Energy Drinks"
+                },
+                {
+                    "value": "Water",
+                    "text": "Water"
+                }
+            ]
+        },
+        {
+            "name": "ct28",
+            "type": "text",
+            "label": "Account Status",
+            "filterable": true,
+            "position": 7,
+            "is_user_can_add_new_text_values": true,
+            "has_data": true,
+            "all_values": [
+                {
+                    "value": "Active",
+                    "text": "Active"
+                },
+                {
+                    "value": "Inactive",
+                    "text": "Inactive"
+                },
+                {
+                    "value": "Pending",
+                    "text": "Pending"
+                },
+                {
+                    "value": "Suspended",
+                    "text": "Suspended"
+                }
+            ],
+            "values": [
+                {
+                    "value": "Active",
+                    "text": "Active"
+                },
+                {
+                    "value": "Pending",
+                    "text": "Pending"
+                }
+            ]
+        }
+    ]
+} 

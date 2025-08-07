@@ -1,0 +1,23 @@
+{
+  "api_base_url": "http://localhost:8080",
+  "api_endpoints": {
+    "profile": "/api/2/profile/",
+    "customers": "/api/2/customers/",
+    "customer_detail": "/api/2/customers/%d/",
+    "checkins": "/api/2/appointments/",
+    "routes": "/api/2/routes/",
+    "route_detail": "/api/2/routes/%d/",
+    "search_users": "/api/2/search/users/",
+    "datafields": "/api/2/datafields/"
+  },
+  "mock_server": {
+    "enabled": true,
+    "port": 8080,
+    "host": "localhost"
+  },
+  "testing": {
+    "use_mock_data": true,
+    "log_requests": true,
+    "log_responses": true
+  }
+} 
