@@ -143,11 +143,13 @@ func pullAccountsCmd() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			// Get verbose flag
 			verbose, _ := cmd.Flags().GetBool("verbose")
+			// Get top flag
+			top, _ := cmd.Flags().GetInt("top")
 			if len(args) == 0 {
 				if verbose {
 					fmt.Println(color.CyanString("Pulling all accounts"))
 				}
-				pullAllAccounts(verbose)
+				pullAllAccounts(verbose, top)
 			} else {
 				if verbose {
 					fmt.Println(color.CyanString("Pulling accounts with IDs: %v", args))
@@ -268,11 +270,15 @@ func pullAccountsCmd() *cobra.Command {
 			}
 		},
 	}
+
+	// Add top flag
+	cmd.Flags().Int("top", 10, "Limit the number of accounts to retrieve (default 10)")
+
 	return cmd
 }
 
 // pullAllAccounts pulls all accounts from the API
-func pullAllAccounts(verbose bool) {
+func pullAllAccounts(verbose bool, top int) {
 	if verbose {
 		fmt.Println(color.CyanString("Retrieving all accounts from BadgerMaps API..."))
 	}
@@ -294,7 +300,13 @@ func pullAllAccounts(verbose bool) {
 		os.Exit(1)
 	}
 
-	if verbose {
+	// Limit the number of accounts if top is specified
+	if top > 0 && top < len(accountsList) {
+		if verbose {
+			fmt.Printf("Found %d accounts, limiting to top %d\n", len(accountsList), top)
+		}
+		accountsList = accountsList[:top]
+	} else if verbose {
 		fmt.Printf("Found %d accounts to pull\n", len(accountsList))
 	}
 

@@ -379,6 +379,84 @@ func (c *Client) dropTable(tableName string) error {
 	return nil
 }
 
+// StoreAccountLocations stores account locations in the database
+func (c *Client) StoreAccountLocations(accountID int, locations []api.Location) error {
+	if len(locations) == 0 {
+		return nil
+	}
+
+	c.logf("Storing %d locations for account %d", len(locations), accountID)
+
+	sqlLoader := NewSQLLoader(c.config.DatabaseType, c.verbose)
+
+	// First, delete existing locations for this account
+	deleteSQL, err := sqlLoader.LoadSQL("delete_account_locations.sql")
+	if err != nil {
+		return fmt.Errorf("failed to load delete_account_locations SQL: %w (check if delete_account_locations.sql exists in database/%s directory)",
+			err, c.config.DatabaseType)
+	}
+
+	// Begin transaction
+	tx, err := c.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w (check database connection and transaction support)", err)
+	}
+	defer tx.Rollback()
+
+	// Delete existing locations
+	_, err = tx.Exec(deleteSQL, accountID)
+	if err != nil {
+		return fmt.Errorf("failed to delete existing locations for account %d: %w", accountID, err)
+	}
+
+	// Load insert SQL
+	insertSQL, err := sqlLoader.LoadSQL("insert_account_locations.sql")
+	if err != nil {
+		return fmt.Errorf("failed to load insert_account_locations SQL: %w (check if insert_account_locations.sql exists in database/%s directory)",
+			err, c.config.DatabaseType)
+	}
+
+	// Prepare statement for inserts
+	stmt, err := tx.Prepare(insertSQL)
+	if err != nil {
+		return fmt.Errorf("failed to prepare insert_account_locations statement: %w (check SQL syntax in insert_account_locations.sql)", err)
+	}
+	defer stmt.Close()
+
+	// Execute for each location
+	for _, location := range locations {
+		// Handle nullable fields
+		name := ""
+		if location.Name != nil {
+			name = *location.Name
+		}
+
+		_, err := stmt.Exec(
+			location.ID,
+			accountID,
+			location.City,
+			name,
+			location.Zipcode,
+			location.Long, // Maps to Longitude column in database
+			location.State,
+			location.Lat, // Maps to Latitude column in database
+			location.AddressLine1,
+			location.Location,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert location ID %d for account %d: %w (check location data and table schema compatibility)",
+				location.ID, accountID, err)
+		}
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w (check database connection and transaction state)", err)
+	}
+
+	return nil
+}
+
 // StoreAccounts stores accounts in the database using merge_accounts_detailed
 func (c *Client) StoreAccounts(accounts []api.Account) error {
 	c.logf("Storing %d accounts using merge_accounts_detailed", len(accounts))
@@ -729,6 +807,16 @@ func (c *Client) StoreAccounts(accounts []api.Account) error {
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w (check database connection and transaction state)", err)
+	}
+
+	// Store account locations for each account
+	for _, account := range accounts {
+		if len(account.Locations) > 0 {
+			err := c.StoreAccountLocations(account.ID, account.Locations)
+			if err != nil {
+				return fmt.Errorf("failed to store locations for account %d: %w", account.ID, err)
+			}
+		}
 	}
 
 	// log.Printf("Successfully stored %d accounts using merge_accounts_detailed", len(accounts))

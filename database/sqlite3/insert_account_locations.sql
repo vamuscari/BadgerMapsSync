@@ -4,9 +4,9 @@ INSERT INTO AccountLocations (
 	City, 
 	Name, 
 	Zipcode, 
-	Long, 
+	Longitude, 
 	State, 
-	Lat, 
+	Latitude, 
 	AddressLine1, 
 	Location
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?); 
