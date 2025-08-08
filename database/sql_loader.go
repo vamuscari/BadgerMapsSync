@@ -35,6 +35,27 @@ func (loader *SQLLoader) ValidateSQLFiles() error {
 		"create_indexes.sql",
 	}
 
+	// If SQL files are embedded, validate using embedded files
+	if IsEmbedded() {
+		var missingFiles []string
+		dbType := loader.getDatabaseTypeForSQL()
+
+		for _, filename := range requiredFiles {
+			_, err := GetEmbeddedSQL(dbType, filename)
+			if err != nil {
+				missingFiles = append(missingFiles, filename)
+			}
+		}
+
+		if len(missingFiles) > 0 {
+			return fmt.Errorf("missing required embedded SQL files for %s database: %v",
+				loader.databaseType, missingFiles)
+		}
+
+		return nil
+	}
+
+	// Otherwise, validate using filesystem
 	var missingFiles []string
 	for _, filename := range requiredFiles {
 		sqlPath := loader.getSQLPath(filename)
@@ -172,6 +193,12 @@ func (loader *SQLLoader) getSQLPath(filename string) string {
 
 // LoadSQL loads a generic SQL file by name
 func (loader *SQLLoader) LoadSQL(filename string) (string, error) {
+	// If SQL files are embedded, use them
+	if IsEmbedded() {
+		return GetEmbeddedSQL(loader.getDatabaseTypeForSQL(), filename)
+	}
+
+	// Otherwise, load from filesystem
 	sqlPath := loader.getSQLPath(filename)
 	content, err := ioutil.ReadFile(sqlPath)
 	if err != nil {

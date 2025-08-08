@@ -16,9 +16,10 @@ const (
 
 // APIClient handles BadgerMaps API interactions
 type APIClient struct {
-	baseURL string
-	apiKey  string
-	client  *http.Client
+	baseURL   string
+	apiKey    string
+	client    *http.Client
+	endpoints *Endpoints
 }
 
 // NewAPIClient creates a new BadgerMaps API client
@@ -34,6 +35,7 @@ func NewAPIClientWithURL(apiKey, baseURL string) *APIClient {
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		endpoints: NewEndpoints(baseURL),
 	}
 }
 
@@ -231,7 +233,7 @@ type FieldValue struct {
 
 // GetAccounts retrieves all accounts from the BadgerMaps API
 func (api *APIClient) GetAccounts() ([]Account, error) {
-	url := fmt.Sprintf("%s/customers/", api.baseURL)
+	url := api.endpoints.Customers()
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -261,7 +263,7 @@ func (api *APIClient) GetAccounts() ([]Account, error) {
 
 // GetRoutes retrieves all routes from the BadgerMaps API
 func (api *APIClient) GetRoutes() ([]Route, error) {
-	url := fmt.Sprintf("%s/routes/", api.baseURL)
+	url := api.endpoints.Routes()
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -291,7 +293,7 @@ func (api *APIClient) GetRoutes() ([]Route, error) {
 
 // GetCheckins retrieves all checkins from the BadgerMaps API
 func (api *APIClient) GetCheckins() ([]Checkin, error) {
-	url := fmt.Sprintf("%s/appointments/", api.baseURL)
+	url := api.endpoints.Appointments()
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -321,7 +323,7 @@ func (api *APIClient) GetCheckins() ([]Checkin, error) {
 
 // GetUserProfile retrieves the current user's profile from the BadgerMaps API
 func (api *APIClient) GetUserProfile() (*UserProfile, error) {
-	url := fmt.Sprintf("%s/profiles/", api.baseURL)
+	url := api.endpoints.Profiles()
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -353,7 +355,7 @@ func (api *APIClient) GetUserProfile() (*UserProfile, error) {
 func (api *APIClient) TestAPIConnection() error {
 	// Skip health endpoint test since it doesn't exist
 	// Instead, test with a simple API call to verify connectivity
-	url := fmt.Sprintf("%s/profiles/", api.baseURL)
+	url := api.endpoints.Profiles()
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create API test request: %w", err)
@@ -379,6 +381,7 @@ func (api *APIClient) TestAPIConnection() error {
 
 // TestEndpoint tests a specific API endpoint
 func (api *APIClient) TestEndpoint(endpoint string) error {
+	// For custom endpoints that don't have a specific method in the Endpoints struct
 	url := fmt.Sprintf("%s/%s", api.baseURL, strings.TrimPrefix(endpoint, "/"))
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -416,7 +419,7 @@ func (api *APIClient) TestAllEndpoints() map[string]error {
 
 // GetAccount retrieves a specific account by ID
 func (api *APIClient) GetAccount(accountID int) (*Account, error) {
-	url := fmt.Sprintf("%s/customers/%d", api.baseURL, accountID)
+	url := api.endpoints.Customer(accountID)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -446,7 +449,7 @@ func (api *APIClient) GetAccount(accountID int) (*Account, error) {
 
 // UpdateAccount updates an account
 func (api *APIClient) UpdateAccount(accountID int, data map[string]string) (*Account, error) {
-	url := fmt.Sprintf("%s/customers/%d", api.baseURL, accountID)
+	url := api.endpoints.Customer(accountID)
 
 	// Convert data to form-encoded string
 	formData := make([]string, 0, len(data))
@@ -484,7 +487,7 @@ func (api *APIClient) UpdateAccount(accountID int, data map[string]string) (*Acc
 
 // DeleteAccount deletes an account
 func (api *APIClient) DeleteAccount(accountID int) error {
-	url := fmt.Sprintf("%s/customers/%d", api.baseURL, accountID)
+	url := api.endpoints.Customer(accountID)
 	req, err := http.NewRequest("DELETE", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -508,7 +511,7 @@ func (api *APIClient) DeleteAccount(accountID int) error {
 
 // CreateAccount creates a new account
 func (api *APIClient) CreateAccount(data map[string]string) (*Account, error) {
-	url := fmt.Sprintf("%s/customers", api.baseURL)
+	url := api.endpoints.Customers()
 
 	// Convert data to form-encoded string
 	formData := make([]string, 0, len(data))
@@ -546,7 +549,7 @@ func (api *APIClient) CreateAccount(data map[string]string) (*Account, error) {
 
 // GetRoute retrieves a specific route by ID
 func (api *APIClient) GetRoute(routeID int) (*Route, error) {
-	url := fmt.Sprintf("%s/routes/%d", api.baseURL, routeID)
+	url := api.endpoints.Route(routeID)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -576,7 +579,7 @@ func (api *APIClient) GetRoute(routeID int) (*Route, error) {
 
 // GetCheckinsForAccount retrieves checkins for a specific account
 func (api *APIClient) GetCheckinsForAccount(customerID int) ([]Checkin, error) {
-	url := fmt.Sprintf("%s/appointments?customer_id=%d", api.baseURL, customerID)
+	url := api.endpoints.AppointmentsForCustomer(customerID)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -606,7 +609,7 @@ func (api *APIClient) GetCheckinsForAccount(customerID int) ([]Checkin, error) {
 
 // CreateCheckin creates a new checkin for an account
 func (api *APIClient) CreateCheckin(data map[string]string) (*Checkin, error) {
-	url := fmt.Sprintf("%s/appointments", api.baseURL)
+	url := api.endpoints.Appointments()
 
 	// Convert data to form-encoded string
 	formData := make([]string, 0, len(data))
@@ -644,7 +647,7 @@ func (api *APIClient) CreateCheckin(data map[string]string) (*Checkin, error) {
 
 // UpdateLocation updates a location
 func (api *APIClient) UpdateLocation(locationID int, data map[string]string) (*Location, error) {
-	url := fmt.Sprintf("%s/locations/%d", api.baseURL, locationID)
+	url := api.endpoints.Location(locationID)
 
 	// Convert data to form-encoded string
 	formData := make([]string, 0, len(data))
@@ -682,7 +685,7 @@ func (api *APIClient) UpdateLocation(locationID int, data map[string]string) (*L
 
 // SearchUsers searches for users by email or ID
 func (api *APIClient) SearchUsers(query string) (*UserProfile, error) {
-	url := fmt.Sprintf("%s/search/users/?q=%s", api.baseURL, query)
+	url := api.endpoints.SearchUsers(query)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -708,4 +711,94 @@ func (api *APIClient) SearchUsers(query string) (*UserProfile, error) {
 	}
 
 	return &user, nil
+}
+
+// SearchAccounts searches for accounts by name or ID
+func (api *APIClient) SearchAccounts(query string) ([]Account, error) {
+	url := api.endpoints.SearchAccounts(query)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := api.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search accounts: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := ioutil.ReadAll(resp.Body)
+		return nil, fmt.Errorf("search accounts failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var accounts []Account
+	if err := json.NewDecoder(resp.Body).Decode(&accounts); err != nil {
+		return nil, fmt.Errorf("failed to decode accounts search response: %w", err)
+	}
+
+	return accounts, nil
+}
+
+// SearchLocations searches for locations by name or ID
+func (api *APIClient) SearchLocations(query string) ([]Location, error) {
+	url := api.endpoints.SearchLocations(query)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := api.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search locations: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := ioutil.ReadAll(resp.Body)
+		return nil, fmt.Errorf("search locations failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var locations []Location
+	if err := json.NewDecoder(resp.Body).Decode(&locations); err != nil {
+		return nil, fmt.Errorf("failed to decode locations search response: %w", err)
+	}
+
+	return locations, nil
+}
+
+// SearchProfiles searches for user profiles by name or ID
+func (api *APIClient) SearchProfiles(query string) ([]UserProfile, error) {
+	url := api.endpoints.SearchProfiles(query)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := api.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search profiles: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := ioutil.ReadAll(resp.Body)
+		return nil, fmt.Errorf("search profiles failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var profiles []UserProfile
+	if err := json.NewDecoder(resp.Body).Decode(&profiles); err != nil {
+		return nil, fmt.Errorf("failed to decode profiles search response: %w", err)
+	}
+
+	return profiles, nil
 }

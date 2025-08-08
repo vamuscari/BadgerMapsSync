@@ -1,4 +1,4 @@
-module badgermaps-cli
+module badgermapscli
 
 go 1.21
 

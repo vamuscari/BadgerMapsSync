@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"badgermaps-cli/api"
+	"badgermapscli/api"
 
 	_ "github.com/lib/pq"               // PostgreSQL driver
 	_ "github.com/mattn/go-sqlite3"     // SQLite driver
@@ -259,7 +259,7 @@ func (c *Client) ValidateDatabaseSchema() error {
 			return fmt.Errorf("error checking if table %s exists: %w", tableName, err)
 		}
 		if !exists {
-			return fmt.Errorf("required table %s does not exist. Run 'badgersync utils create-tables' to create the necessary tables", tableName)
+			return fmt.Errorf("required table %s does not exist. Run 'badgermaps utils create-tables' to create the necessary tables", tableName)
 		}
 
 		// Check if all required columns exist
@@ -269,7 +269,7 @@ func (c *Client) ValidateDatabaseSchema() error {
 				return fmt.Errorf("error checking if column %s exists in table %s: %w", column, tableName, err)
 			}
 			if !exists {
-				return fmt.Errorf("required column %s does not exist in table %s. Run 'badgersync utils create-tables' to recreate the tables with the correct schema", column, tableName)
+				return fmt.Errorf("required column %s does not exist in table %s. Run 'badgermaps utils create-tables' to recreate the tables with the correct schema", column, tableName)
 			}
 		}
 	}
@@ -298,14 +298,14 @@ func (c *Client) columnExists(tableName string, columnName string) (bool, error)
 // GetRequiredTables returns a map of required tables and their essential columns
 func (c *Client) GetRequiredTables() map[string][]string {
 	return map[string][]string{
-		"accounts":          {"Id", "FirstName", "LastName", "PhoneNumber", "Email"},
-		"routes":            {"Id", "Name", "Description"},
-		"checkins":          {"Id", "AccountId", "CheckinType", "Comments"},
-		"user_profiles":     {"Id", "Username", "Email"},
-		"account_locations": {"Id", "AccountId", "Latitude", "Longitude"},
-		"route_waypoints":   {"Id", "RouteId", "AccountId", "Sequence"},
-		"data_sets":         {"Id", "Name", "Description"},
-		"data_set_values":   {"Id", "DataSetId", "AccountId", "Value"},
+		"Accounts":         {"Id", "FirstName", "LastName"},
+		"Routes":           {"Id", "Name", "RouteDate"},
+		"AccountCheckins":  {"Id", "CrmId", "Customer", "Comments"},
+		"UserProfiles":     {"ProfileId", "Email", "FirstName", "LastName"},
+		"AccountLocations": {"Id", "AccountId", "Latitude", "Longitude"},
+		"RouteWaypoints":   {"Id", "RouteId"},
+		"DataSets":         {"Id", "Name"},
+		"DataSetValues":    {"Id", "DataSetId", "Value"},
 	}
 }
 
@@ -313,14 +313,9 @@ func (c *Client) GetRequiredTables() map[string][]string {
 func (c *Client) createIndexes() error {
 	log.Println("Creating database indexes...")
 
+	// Use the SQLLoader's CreateIndexes method which properly handles multiple statements
 	sqlLoader := NewSQLLoader(c.config.DatabaseType)
-	sqlContent, err := sqlLoader.LoadCreateIndexesSQL()
-	if err != nil {
-		return fmt.Errorf("failed to load index creation SQL: %w", err)
-	}
-
-	_, err = c.db.Exec(sqlContent)
-	if err != nil {
+	if err := sqlLoader.CreateIndexes(c.db); err != nil {
 		return fmt.Errorf("failed to create indexes: %w", err)
 	}
 

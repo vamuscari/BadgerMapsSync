@@ -341,10 +341,12 @@ flowchart LR
 - Use for debugging and verification purposes
 
 ### Database Testing
-- When testing, create a new SQLite database in the test/ folder
+- When testing, create a new SQLite database in the badgermaps__test/ folder
 - Use isolated test databases to prevent interference with production data
 
 ### Test Responses
-- When saving any responses from tests, save them in the test/ folder
+- When saving any responses from tests, save them in the badgermaps__test/ folder
 - Organize test responses by feature or endpoint for easier debugging
 - Include timestamp in filenames for tracking test execution history
+
+API URL = https://badgerapis.badgermapping.com/api/2
