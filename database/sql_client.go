@@ -244,6 +244,71 @@ func (c *Client) createTable(tableName string) error {
 	return nil
 }
 
+// ValidateDatabaseSchema checks if all required tables exist with the correct fields
+func (c *Client) ValidateDatabaseSchema() error {
+	log.Println("Validating database schema...")
+
+	// Get required tables and their essential columns
+	requiredTables := c.GetRequiredTables()
+
+	// Check each table and its columns
+	for tableName, columns := range requiredTables {
+		// Check if table exists
+		exists, err := c.tableExists(tableName)
+		if err != nil {
+			return fmt.Errorf("error checking if table %s exists: %w", tableName, err)
+		}
+		if !exists {
+			return fmt.Errorf("required table %s does not exist. Run 'badgersync utils create-tables' to create the necessary tables", tableName)
+		}
+
+		// Check if all required columns exist
+		for _, column := range columns {
+			exists, err := c.columnExists(tableName, column)
+			if err != nil {
+				return fmt.Errorf("error checking if column %s exists in table %s: %w", column, tableName, err)
+			}
+			if !exists {
+				return fmt.Errorf("required column %s does not exist in table %s. Run 'badgersync utils create-tables' to recreate the tables with the correct schema", column, tableName)
+			}
+		}
+	}
+
+	log.Println("Database schema validation successful")
+	return nil
+}
+
+// columnExists checks if a column exists in a table
+func (c *Client) columnExists(tableName string, columnName string) (bool, error) {
+	sqlLoader := NewSQLLoader(c.config.DatabaseType)
+	sqlContent, err := sqlLoader.LoadSQL("check_column_exists.sql")
+	if err != nil {
+		return false, fmt.Errorf("failed to load check_column_exists.sql: %w", err)
+	}
+
+	var count int
+	err = c.db.QueryRow(sqlContent, tableName, columnName).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("failed to check if column %s exists in table %s: %w", columnName, tableName, err)
+	}
+
+	return count > 0, nil
+}
+
+// GetRequiredTables returns a map of required tables and their essential columns
+func (c *Client) GetRequiredTables() map[string][]string {
+	return map[string][]string{
+		"accounts":          {"Id", "FirstName", "LastName", "PhoneNumber", "Email"},
+		"routes":            {"Id", "Name", "Description"},
+		"checkins":          {"Id", "AccountId", "CheckinType", "Comments"},
+		"user_profiles":     {"Id", "Username", "Email"},
+		"account_locations": {"Id", "AccountId", "Latitude", "Longitude"},
+		"route_waypoints":   {"Id", "RouteId", "AccountId", "Sequence"},
+		"data_sets":         {"Id", "Name", "Description"},
+		"data_set_values":   {"Id", "DataSetId", "AccountId", "Value"},
+	}
+}
+
 // createIndexes creates indexes for better performance
 func (c *Client) createIndexes() error {
 	log.Println("Creating database indexes...")

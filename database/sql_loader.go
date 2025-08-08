@@ -170,6 +170,16 @@ func (loader *SQLLoader) getSQLPath(filename string) string {
 	return filepath.Join("database", dbType, filename)
 }
 
+// LoadSQL loads a generic SQL file by name
+func (loader *SQLLoader) LoadSQL(filename string) (string, error) {
+	sqlPath := loader.getSQLPath(filename)
+	content, err := ioutil.ReadFile(sqlPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read SQL file %s: %w", sqlPath, err)
+	}
+	return string(content), nil
+}
+
 // getDatabaseTypeForSQL returns the database type directory name
 func (loader *SQLLoader) getDatabaseTypeForSQL() string {
 	switch loader.databaseType {

@@ -29,12 +29,7 @@ go.work.sum
 
 # Any sqlite dbs
 *.db
-
-
-badgersync
-badgersync.log
-test_responses/
-test_responses/*
+test/
 
 # Editor/IDE
 .idea/
