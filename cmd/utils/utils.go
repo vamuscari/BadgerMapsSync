@@ -107,7 +107,7 @@ func createTables() {
 	dbConfig := getDatabaseConfig()
 
 	// Create database client
-	client, err := database.NewClient(dbConfig)
+	client, err := database.NewClient(dbConfig, false)
 	if err != nil {
 		fmt.Println(color.RedString("Error creating database client: %v", err))
 		os.Exit(1)
@@ -132,7 +132,7 @@ func validateSchema() {
 	dbConfig := getDatabaseConfig()
 
 	// Create database client
-	client, err := database.NewClient(dbConfig)
+	client, err := database.NewClient(dbConfig, false)
 	if err != nil {
 		fmt.Println(color.RedString("Error creating database client: %v", err))
 		os.Exit(1)
@@ -157,7 +157,7 @@ func dropTables() {
 	dbConfig := getDatabaseConfig()
 
 	// Create database client
-	client, err := database.NewClient(dbConfig)
+	client, err := database.NewClient(dbConfig, false)
 	if err != nil {
 		fmt.Println(color.RedString("Error creating database client: %v", err))
 		os.Exit(1)
@@ -182,7 +182,7 @@ func initDatabase() {
 	dbConfig := getDatabaseConfig()
 
 	// Create database client
-	client, err := database.NewClient(dbConfig)
+	client, err := database.NewClient(dbConfig, false)
 	if err != nil {
 		fmt.Println(color.RedString("Error creating database client: %v", err))
 		os.Exit(1)

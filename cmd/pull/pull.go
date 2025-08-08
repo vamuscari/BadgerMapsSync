@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/fatih/color"
+	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -24,6 +25,9 @@ func PullCmd() *cobra.Command {
 			os.Exit(1)
 		},
 	}
+
+	// Add global flags
+	pullCmd.PersistentFlags().Bool("verbose", false, "Enable verbose output")
 
 	// Add subcommands
 	pullCmd.AddCommand(pullAccountCmd())
@@ -45,7 +49,12 @@ func pullAccountCmd() *cobra.Command {
 		Long:  `Pull a single account from the BadgerMaps API to your local database.`,
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(color.CyanString("Pulling account with ID: %s", args[0]))
+			// Get verbose flag
+			verbose, _ := cmd.Flags().GetBool("verbose")
+
+			if verbose {
+				fmt.Println(color.CyanString("Pulling account with ID: %s", args[0]))
+			}
 
 			// Get API key from viper
 			apiKey := viper.GetString("API_KEY")
@@ -90,7 +99,7 @@ func pullAccountCmd() *cobra.Command {
 			}
 
 			// Create database client
-			dbClient, err := database.NewClient(dbConfig)
+			dbClient, err := database.NewClient(dbConfig, false)
 			if err != nil {
 				fmt.Println(color.RedString("Error creating database client: %v", err))
 				os.Exit(1)
@@ -113,11 +122,13 @@ func pullAccountCmd() *cobra.Command {
 				os.Exit(1)
 			}
 
-			fmt.Println(color.GreenString("Successfully pulled and stored account"))
-			fmt.Printf("Account ID: %d\n", account.ID)
-			fmt.Printf("Name: %s\n", account.FullName)
-			fmt.Printf("Email: %s\n", account.Email)
-			fmt.Printf("Locations: %d\n", len(account.Locations))
+			if verbose {
+				fmt.Println(color.GreenString("Successfully pulled and stored account"))
+				fmt.Printf("Account ID: %d\n", account.ID)
+				fmt.Printf("Name: %s\n", account.FullName)
+				fmt.Printf("Email: %s\n", account.Email)
+				fmt.Printf("Locations: %d\n", len(account.Locations))
+			}
 		},
 	}
 	return cmd
@@ -130,11 +141,17 @@ func pullAccountsCmd() *cobra.Command {
 		Short: "Pull multiple accounts from BadgerMaps",
 		Long:  `Pull multiple accounts from the BadgerMaps API to your local database.`,
 		Run: func(cmd *cobra.Command, args []string) {
+			// Get verbose flag
+			verbose, _ := cmd.Flags().GetBool("verbose")
 			if len(args) == 0 {
-				fmt.Println(color.CyanString("Pulling all accounts"))
-				pullAllAccounts()
+				if verbose {
+					fmt.Println(color.CyanString("Pulling all accounts"))
+				}
+				pullAllAccounts(verbose)
 			} else {
-				fmt.Println(color.CyanString("Pulling accounts with IDs: %v", args))
+				if verbose {
+					fmt.Println(color.CyanString("Pulling accounts with IDs: %v", args))
+				}
 
 				// Get API key from viper
 				apiKey := viper.GetString("API_KEY")
@@ -165,7 +182,7 @@ func pullAccountsCmd() *cobra.Command {
 				}
 
 				// Create database client
-				dbClient, err := database.NewClient(dbConfig)
+				dbClient, err := database.NewClient(dbConfig, verbose)
 				if err != nil {
 					fmt.Println(color.RedString("Error creating database client: %v", err))
 					os.Exit(1)
@@ -245,7 +262,9 @@ func pullAccountsCmd() *cobra.Command {
 					os.Exit(1)
 				}
 
-				fmt.Println(color.GreenString("Successfully pulled and stored %d accounts", len(accounts)))
+				if verbose {
+					fmt.Println(color.GreenString("Successfully pulled and stored %d accounts", len(accounts)))
+				}
 			}
 		},
 	}
@@ -253,8 +272,10 @@ func pullAccountsCmd() *cobra.Command {
 }
 
 // pullAllAccounts pulls all accounts from the API
-func pullAllAccounts() {
-	fmt.Println(color.CyanString("Retrieving all accounts from BadgerMaps API..."))
+func pullAllAccounts(verbose bool) {
+	if verbose {
+		fmt.Println(color.CyanString("Retrieving all accounts from BadgerMaps API..."))
+	}
 
 	// Get API key from viper
 	apiKey := viper.GetString("API_KEY")
@@ -273,7 +294,9 @@ func pullAllAccounts() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Found %d accounts to pull\n", len(accountsList))
+	if verbose {
+		fmt.Printf("Found %d accounts to pull\n", len(accountsList))
+	}
 
 	// Get database configuration
 	dbConfig := &database.Config{
@@ -294,7 +317,7 @@ func pullAllAccounts() {
 	}
 
 	// Create database client
-	dbClient, err := database.NewClient(dbConfig)
+	dbClient, err := database.NewClient(dbConfig, verbose)
 	if err != nil {
 		fmt.Println(color.RedString("Error creating database client: %v", err))
 		os.Exit(1)
@@ -314,17 +337,38 @@ func pullAllAccounts() {
 	if maxParallel <= 0 {
 		maxParallel = 5 // Default value
 	}
-	fmt.Printf("Using maximum of %d concurrent operations\n", maxParallel)
+
+	if verbose {
+		fmt.Printf("Using maximum of %d concurrent operations\n", maxParallel)
+	}
 
 	// Create a semaphore to limit concurrent operations
 	sem := make(chan bool, maxParallel)
 	var wg sync.WaitGroup
 
 	// Process accounts in parallel
-	detailedAccounts := make([]api.Account, 0, len(accountsList))
+	var successCount int32
 	var accountsMutex sync.Mutex
 
-	fmt.Println(color.CyanString("Retrieving detailed account information..."))
+	if verbose {
+		fmt.Println(color.CyanString("Retrieving and storing detailed account information..."))
+	}
+
+	// Create progress bar if not in verbose mode
+	var bar *progressbar.ProgressBar
+	if !verbose {
+		bar = progressbar.NewOptions(len(accountsList),
+			progressbar.OptionEnableColorCodes(true),
+			progressbar.OptionShowCount(),
+			progressbar.OptionSetDescription("[cyan]Retrieving and storing accounts...[reset]"),
+			progressbar.OptionSetTheme(progressbar.Theme{
+				Saucer:        "[green]=[reset]",
+				SaucerHead:    "[green]>[reset]",
+				SaucerPadding: " ",
+				BarStart:      "[",
+				BarEnd:        "]",
+			}))
+	}
 
 	for _, basicAccount := range accountsList {
 		wg.Add(1)
@@ -342,33 +386,43 @@ func pullAllAccounts() {
 				return
 			}
 
-			// Add account to the list
-			accountsMutex.Lock()
-			detailedAccounts = append(detailedAccounts, *detailedAccount)
-			accountsMutex.Unlock()
+			// Store account directly in the database
+			accounts := []api.Account{*detailedAccount}
+			err = dbClient.StoreAccounts(accounts)
+			if err != nil {
+				fmt.Println(color.RedString("Error storing account %d: %v", accountID, err))
+				return
+			}
 
-			fmt.Printf("Retrieved account %d: %s\n", accountID, detailedAccount.FullName)
+			// Increment success counter
+			accountsMutex.Lock()
+			successCount++
+			if verbose {
+				fmt.Printf("Retrieved and stored account %d: %s\n", accountID, detailedAccount.FullName)
+			} else if bar != nil {
+				bar.Add(1)
+			}
+			accountsMutex.Unlock()
 		}(basicAccount.ID)
 	}
 
 	// Wait for all goroutines to finish
 	wg.Wait()
 
-	if len(detailedAccounts) == 0 {
-		fmt.Println(color.YellowString("No accounts were retrieved successfully"))
+	// Add a newline after the progress bar
+	if !verbose && bar != nil {
+		fmt.Println()
+	}
+
+	if successCount == 0 {
+		fmt.Println(color.YellowString("No accounts were retrieved and stored successfully"))
 		os.Exit(1)
 	}
 
-	fmt.Printf("Successfully retrieved %d/%d accounts\n", len(detailedAccounts), len(accountsList))
-
-	// Store accounts in database
-	err = dbClient.StoreAccounts(detailedAccounts)
-	if err != nil {
-		fmt.Println(color.RedString("Error storing accounts: %v", err))
-		os.Exit(1)
+	if verbose {
+		fmt.Printf("Successfully retrieved and stored %d/%d accounts\n", successCount, len(accountsList))
+		fmt.Println(color.GreenString("Successfully pulled and stored all accounts from BadgerMaps"))
 	}
-
-	fmt.Println(color.GreenString("Successfully pulled and stored all accounts from BadgerMaps"))
 }
 
 // pullCheckinCmd creates a command to pull a single checkin
@@ -379,7 +433,12 @@ func pullCheckinCmd() *cobra.Command {
 		Long:  `Pull a single checkin from the BadgerMaps API to your local database.`,
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(color.CyanString("Pulling checkin with ID: %s", args[0]))
+			// Get verbose flag
+			verbose, _ := cmd.Flags().GetBool("verbose")
+
+			if verbose {
+				fmt.Println(color.CyanString("Pulling checkin with ID: %s", args[0]))
+			}
 
 			// Get API key from viper
 			apiKey := viper.GetString("API_KEY")
@@ -424,7 +483,7 @@ func pullCheckinCmd() *cobra.Command {
 			}
 
 			// Create database client
-			dbClient, err := database.NewClient(dbConfig)
+			dbClient, err := database.NewClient(dbConfig, false)
 			if err != nil {
 				fmt.Println(color.RedString("Error creating database client: %v", err))
 				os.Exit(1)
@@ -447,11 +506,13 @@ func pullCheckinCmd() *cobra.Command {
 				os.Exit(1)
 			}
 
-			fmt.Println(color.GreenString("Successfully pulled and stored checkin"))
-			fmt.Printf("Checkin ID: %d\n", checkin.ID)
-			fmt.Printf("Customer: %d\n", checkin.Customer)
-			fmt.Printf("Type: %s\n", checkin.Type)
-			fmt.Printf("Date: %s\n", checkin.LogDatetime)
+			if verbose {
+				fmt.Println(color.GreenString("Successfully pulled and stored checkin"))
+				fmt.Printf("Checkin ID: %d\n", checkin.ID)
+				fmt.Printf("Customer: %d\n", checkin.Customer)
+				fmt.Printf("Type: %s\n", checkin.Type)
+				fmt.Printf("Date: %s\n", checkin.LogDatetime)
+			}
 		},
 	}
 	return cmd
@@ -464,11 +525,17 @@ func pullCheckinsCmd() *cobra.Command {
 		Short: "Pull multiple checkins from BadgerMaps",
 		Long:  `Pull multiple checkins from the BadgerMaps API to your local database.`,
 		Run: func(cmd *cobra.Command, args []string) {
+			// Get verbose flag
+			verbose, _ := cmd.Flags().GetBool("verbose")
 			if len(args) == 0 {
-				fmt.Println(color.CyanString("Pulling all checkins"))
-				pullAllCheckins()
+				if verbose {
+					fmt.Println(color.CyanString("Pulling all checkins"))
+				}
+				pullAllCheckins(verbose)
 			} else {
-				fmt.Println(color.CyanString("Pulling checkins with IDs: %v", args))
+				if verbose {
+					fmt.Println(color.CyanString("Pulling checkins with IDs: %v", args))
+				}
 
 				// Get API key from viper
 				apiKey := viper.GetString("API_KEY")
@@ -499,7 +566,7 @@ func pullCheckinsCmd() *cobra.Command {
 				}
 
 				// Create database client
-				dbClient, err := database.NewClient(dbConfig)
+				dbClient, err := database.NewClient(dbConfig, verbose)
 				if err != nil {
 					fmt.Println(color.RedString("Error creating database client: %v", err))
 					os.Exit(1)
@@ -548,7 +615,9 @@ func pullCheckinsCmd() *cobra.Command {
 						sem <- true
 						defer func() { <-sem }()
 
-						fmt.Printf("Pulling checkin %d from API...\n", checkinID)
+						if verbose {
+							fmt.Printf("Pulling checkin %d from API...\n", checkinID)
+						}
 
 						// Get checkin from API
 						checkin, err := apiClient.GetCheckin(checkinID)
@@ -579,7 +648,9 @@ func pullCheckinsCmd() *cobra.Command {
 					os.Exit(1)
 				}
 
-				fmt.Println(color.GreenString("Successfully pulled and stored %d checkins", len(checkins)))
+				if verbose {
+					fmt.Println(color.GreenString("Successfully pulled and stored %d checkins", len(checkins)))
+				}
 			}
 		},
 	}
@@ -587,8 +658,10 @@ func pullCheckinsCmd() *cobra.Command {
 }
 
 // pullAllCheckins pulls all checkins from the API
-func pullAllCheckins() {
-	fmt.Println(color.CyanString("Retrieving all checkins from BadgerMaps API..."))
+func pullAllCheckins(verbose bool) {
+	if verbose {
+		fmt.Println(color.CyanString("Retrieving all checkins from BadgerMaps API..."))
+	}
 
 	// Get API key from viper
 	apiKey := viper.GetString("API_KEY")
@@ -607,7 +680,25 @@ func pullAllCheckins() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Found %d checkins to pull\n", len(checkins))
+	if verbose {
+		fmt.Printf("Found %d checkins to pull\n", len(checkins))
+	}
+
+	// Create progress bar if not in verbose mode
+	var bar *progressbar.ProgressBar
+	if !verbose {
+		bar = progressbar.NewOptions(len(checkins),
+			progressbar.OptionEnableColorCodes(true),
+			progressbar.OptionShowCount(),
+			progressbar.OptionSetDescription("[cyan]Storing checkins...[reset]"),
+			progressbar.OptionSetTheme(progressbar.Theme{
+				Saucer:        "[green]=[reset]",
+				SaucerHead:    "[green]>[reset]",
+				SaucerPadding: " ",
+				BarStart:      "[",
+				BarEnd:        "]",
+			}))
+	}
 
 	// Get database configuration
 	dbConfig := &database.Config{
@@ -628,7 +719,7 @@ func pullAllCheckins() {
 	}
 
 	// Create database client
-	dbClient, err := database.NewClient(dbConfig)
+	dbClient, err := database.NewClient(dbConfig, verbose)
 	if err != nil {
 		fmt.Println(color.RedString("Error creating database client: %v", err))
 		os.Exit(1)
@@ -644,13 +735,25 @@ func pullAllCheckins() {
 	}
 
 	// Store checkins in database
+	if verbose {
+		fmt.Println("Storing checkins in database...")
+	}
+
 	err = dbClient.StoreCheckins(checkins)
 	if err != nil {
 		fmt.Println(color.RedString("Error storing checkins: %v", err))
 		os.Exit(1)
 	}
 
-	fmt.Println(color.GreenString("Successfully pulled and stored all checkins from BadgerMaps"))
+	// Update progress bar if not in verbose mode
+	if !verbose && bar != nil {
+		bar.Finish()
+		fmt.Println()
+	}
+
+	if verbose {
+		fmt.Println(color.GreenString("Successfully pulled and stored all checkins from BadgerMaps"))
+	}
 }
 
 // pullRouteCmd creates a command to pull a single route
@@ -661,7 +764,12 @@ func pullRouteCmd() *cobra.Command {
 		Long:  `Pull a single route from the BadgerMaps API to your local database.`,
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(color.CyanString("Pulling route with ID: %s", args[0]))
+			// Get verbose flag
+			verbose, _ := cmd.Flags().GetBool("verbose")
+
+			if verbose {
+				fmt.Println(color.CyanString("Pulling route with ID: %s", args[0]))
+			}
 
 			// Get API key from viper
 			apiKey := viper.GetString("API_KEY")
@@ -706,7 +814,7 @@ func pullRouteCmd() *cobra.Command {
 			}
 
 			// Create database client
-			dbClient, err := database.NewClient(dbConfig)
+			dbClient, err := database.NewClient(dbConfig, false)
 			if err != nil {
 				fmt.Println(color.RedString("Error creating database client: %v", err))
 				os.Exit(1)
@@ -729,11 +837,13 @@ func pullRouteCmd() *cobra.Command {
 				os.Exit(1)
 			}
 
-			fmt.Println(color.GreenString("Successfully pulled and stored route"))
-			fmt.Printf("Route ID: %d\n", route.ID)
-			fmt.Printf("Name: %s\n", route.Name)
-			fmt.Printf("Date: %s\n", route.RouteDate)
-			fmt.Printf("Waypoints: %d\n", len(route.Waypoints))
+			if verbose {
+				fmt.Println(color.GreenString("Successfully pulled and stored route"))
+				fmt.Printf("Route ID: %d\n", route.ID)
+				fmt.Printf("Name: %s\n", route.Name)
+				fmt.Printf("Date: %s\n", route.RouteDate)
+				fmt.Printf("Waypoints: %d\n", len(route.Waypoints))
+			}
 		},
 	}
 	return cmd
@@ -746,11 +856,17 @@ func pullRoutesCmd() *cobra.Command {
 		Short: "Pull multiple routes from BadgerMaps",
 		Long:  `Pull multiple routes from the BadgerMaps API to your local database.`,
 		Run: func(cmd *cobra.Command, args []string) {
+			// Get verbose flag
+			verbose, _ := cmd.Flags().GetBool("verbose")
 			if len(args) == 0 {
-				fmt.Println(color.CyanString("Pulling all routes"))
-				pullAllRoutes()
+				if verbose {
+					fmt.Println(color.CyanString("Pulling all routes"))
+				}
+				pullAllRoutes(verbose)
 			} else {
-				fmt.Println(color.CyanString("Pulling routes with IDs: %v", args))
+				if verbose {
+					fmt.Println(color.CyanString("Pulling routes with IDs: %v", args))
+				}
 
 				// Get API key from viper
 				apiKey := viper.GetString("API_KEY")
@@ -781,7 +897,7 @@ func pullRoutesCmd() *cobra.Command {
 				}
 
 				// Create database client
-				dbClient, err := database.NewClient(dbConfig)
+				dbClient, err := database.NewClient(dbConfig, verbose)
 				if err != nil {
 					fmt.Println(color.RedString("Error creating database client: %v", err))
 					os.Exit(1)
@@ -830,7 +946,9 @@ func pullRoutesCmd() *cobra.Command {
 						sem <- true
 						defer func() { <-sem }()
 
-						fmt.Printf("Pulling route %d from API...\n", routeID)
+						if verbose {
+							fmt.Printf("Pulling route %d from API...\n", routeID)
+						}
 
 						// Get route from API
 						route, err := apiClient.GetRoute(routeID)
@@ -861,7 +979,9 @@ func pullRoutesCmd() *cobra.Command {
 					os.Exit(1)
 				}
 
-				fmt.Println(color.GreenString("Successfully pulled and stored %d routes", len(routes)))
+				if verbose {
+					fmt.Println(color.GreenString("Successfully pulled and stored %d routes", len(routes)))
+				}
 			}
 		},
 	}
@@ -869,8 +989,10 @@ func pullRoutesCmd() *cobra.Command {
 }
 
 // pullAllRoutes pulls all routes from the API
-func pullAllRoutes() {
-	fmt.Println(color.CyanString("Retrieving all routes from BadgerMaps API..."))
+func pullAllRoutes(verbose bool) {
+	if verbose {
+		fmt.Println(color.CyanString("Retrieving all routes from BadgerMaps API..."))
+	}
 
 	// Get API key from viper
 	apiKey := viper.GetString("API_KEY")
@@ -889,7 +1011,25 @@ func pullAllRoutes() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Found %d routes to pull\n", len(routes))
+	if verbose {
+		fmt.Printf("Found %d routes to pull\n", len(routes))
+	}
+
+	// Create progress bar if not in verbose mode
+	var bar *progressbar.ProgressBar
+	if !verbose {
+		bar = progressbar.NewOptions(len(routes),
+			progressbar.OptionEnableColorCodes(true),
+			progressbar.OptionShowCount(),
+			progressbar.OptionSetDescription("[cyan]Storing routes...[reset]"),
+			progressbar.OptionSetTheme(progressbar.Theme{
+				Saucer:        "[green]=[reset]",
+				SaucerHead:    "[green]>[reset]",
+				SaucerPadding: " ",
+				BarStart:      "[",
+				BarEnd:        "]",
+			}))
+	}
 
 	// Get database configuration
 	dbConfig := &database.Config{
@@ -910,7 +1050,7 @@ func pullAllRoutes() {
 	}
 
 	// Create database client
-	dbClient, err := database.NewClient(dbConfig)
+	dbClient, err := database.NewClient(dbConfig, verbose)
 	if err != nil {
 		fmt.Println(color.RedString("Error creating database client: %v", err))
 		os.Exit(1)
@@ -926,13 +1066,25 @@ func pullAllRoutes() {
 	}
 
 	// Store routes in database
+	if verbose {
+		fmt.Println("Storing routes in database...")
+	}
+
 	err = dbClient.StoreRoutes(routes)
 	if err != nil {
 		fmt.Println(color.RedString("Error storing routes: %v", err))
 		os.Exit(1)
 	}
 
-	fmt.Println(color.GreenString("Successfully pulled and stored all routes from BadgerMaps"))
+	// Update progress bar if not in verbose mode
+	if !verbose && bar != nil {
+		bar.Finish()
+		fmt.Println()
+	}
+
+	if verbose {
+		fmt.Println(color.GreenString("Successfully pulled and stored all routes from BadgerMaps"))
+	}
 }
 
 // pullProfileCmd creates a command to pull the user profile
@@ -942,7 +1094,12 @@ func pullProfileCmd() *cobra.Command {
 		Short: "Pull user profile from BadgerMaps",
 		Long:  `Pull your user profile from the BadgerMaps API to your local database.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(color.CyanString("Pulling user profile..."))
+			// Get verbose flag
+			verbose, _ := cmd.Flags().GetBool("verbose")
+
+			if verbose {
+				fmt.Println(color.CyanString("Pulling user profile..."))
+			}
 
 			// Get API key from viper
 			apiKey := viper.GetString("API_KEY")
@@ -980,7 +1137,7 @@ func pullProfileCmd() *cobra.Command {
 			}
 
 			// Create database client
-			dbClient, err := database.NewClient(dbConfig)
+			dbClient, err := database.NewClient(dbConfig, false)
 			if err != nil {
 				fmt.Println(color.RedString("Error creating database client: %v", err))
 				os.Exit(1)
@@ -1002,11 +1159,13 @@ func pullProfileCmd() *cobra.Command {
 				os.Exit(1)
 			}
 
-			fmt.Println(color.GreenString("Successfully pulled and stored user profile"))
-			fmt.Printf("Profile ID: %d\n", profile.ID)
-			fmt.Printf("Name: %s %s\n", profile.FirstName, profile.LastName)
-			fmt.Printf("Email: %s\n", profile.Email)
-			fmt.Printf("Company: %s\n", profile.Company.Name)
+			if verbose {
+				fmt.Println(color.GreenString("Successfully pulled and stored user profile"))
+				fmt.Printf("Profile ID: %d\n", profile.ID)
+				fmt.Printf("Name: %s %s\n", profile.FirstName, profile.LastName)
+				fmt.Printf("Email: %s\n", profile.Email)
+				fmt.Printf("Company: %s\n", profile.Company.Name)
+			}
 		},
 	}
 	return cmd

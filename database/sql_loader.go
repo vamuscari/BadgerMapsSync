@@ -12,12 +12,26 @@ import (
 // SQLLoader handles loading and executing SQL files
 type SQLLoader struct {
 	databaseType string
+	verbose      bool
 }
 
 // NewSQLLoader creates a new SQL loader
-func NewSQLLoader(databaseType string) *SQLLoader {
+// If verbose is not provided, it defaults to false
+func NewSQLLoader(databaseType string, verbose ...bool) *SQLLoader {
+	isVerbose := false
+	if len(verbose) > 0 {
+		isVerbose = verbose[0]
+	}
 	return &SQLLoader{
 		databaseType: databaseType,
+		verbose:      isVerbose,
+	}
+}
+
+// logf logs a message if verbose mode is enabled
+func (loader *SQLLoader) logf(format string, args ...interface{}) {
+	if loader.verbose {
+		log.Printf(format, args...)
 	}
 }
 
@@ -180,6 +194,21 @@ func (loader *SQLLoader) LoadMergeRoutesSQL() (string, error) {
 	return string(content), nil
 }
 
+// LoadMergeAccountsDetailedSQL loads the SQL for merging accounts using merge_accounts_detailed
+func (loader *SQLLoader) LoadMergeAccountsDetailedSQL() (string, error) {
+	filename := "merge_accounts_detailed.sql"
+	sqlPath := loader.getSQLPath(filename)
+
+	content, err := ioutil.ReadFile(sqlPath)
+	if err != nil {
+		dbDir := filepath.Join("database", loader.getDatabaseTypeForSQL())
+		return "", fmt.Errorf("failed to read SQL file %s: %w (check if file exists and has correct permissions in %s directory)",
+			filename, err, dbDir)
+	}
+
+	return string(content), nil
+}
+
 // LoadAndExecuteSQL loads and executes a SQL file
 func (loader *SQLLoader) LoadAndExecuteSQL(filename string, db *sql.DB) error {
 	sqlPath := loader.getSQLPath(filename)
@@ -202,7 +231,7 @@ func (loader *SQLLoader) LoadAndExecuteSQL(filename string, db *sql.DB) error {
 			continue
 		}
 
-		log.Printf("Executing SQL: %s", statement[:min(100, len(statement))]+"...")
+		loader.logf("Executing SQL: %s", statement[:min(100, len(statement))]+"...")
 
 		_, err := db.Exec(statement)
 		if err != nil {
@@ -265,7 +294,7 @@ func (loader *SQLLoader) CreateAllTables(db *sql.DB) error {
 	}
 
 	for _, table := range tables {
-		log.Printf("Creating table using: %s", table)
+		loader.logf("Creating table using: %s", table)
 		if err := loader.LoadAndExecuteSQL(table, db); err != nil {
 			return fmt.Errorf("failed to create table with %s: %w (check SQL syntax and database permissions)",
 				table, err)
@@ -277,7 +306,7 @@ func (loader *SQLLoader) CreateAllTables(db *sql.DB) error {
 
 // CreateIndexes creates all necessary indexes
 func (loader *SQLLoader) CreateIndexes(db *sql.DB) error {
-	log.Println("Creating indexes...")
+	loader.logf("Creating indexes...")
 	indexFile := "create_indexes.sql"
 	if err := loader.LoadAndExecuteSQL(indexFile, db); err != nil {
 		return fmt.Errorf("failed to create indexes with %s: %w (check SQL syntax and database permissions)",
