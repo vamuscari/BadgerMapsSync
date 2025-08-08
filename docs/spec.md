@@ -19,6 +19,7 @@
 - Single item operations: `pull account 208965000`
 - Multiple item operations: `pull accounts 208965000 208965001`
 - Bulk operations: `pull accounts` or `pull account all` (retrieves all accounts)
+- All data types: `pull all` (retrieves all data types in the order: profile, accounts, checkins, routes)
 
 ### Singular vs Plural Data Types
 - Singular form (e.g., `account`): Operate on a specific item by ID
@@ -62,6 +63,11 @@
 - If you need to add a new endpoint, add it to the api_endpoints.go file
 - Centralize all API URL construction in one place for easier maintenance
 - Follow RESTful API design principles for endpoint naming
+
+### Dataset and Dataset Values Management
+- When updating a profile, delete all existing datasets and dataset values associated with the profileID being updated before adding new ones
+- This ensures that outdated or removed datasets are properly cleaned up during profile updates
+- Use the existing delete_data_sets.sql and delete_data_set_values.sql files to perform these deletions
 
 ### JSON to Database Conversion
 - JSON responses from the API are converted to database tables using a structured approach
@@ -209,6 +215,11 @@ badgermaps config set API_TOKEN your_new_token
   - `DB_NAME`: Database name for PostgreSQL or MSSQL
   - `DB_USER`: Database user for PostgreSQL or MSSQL
   - `DB_PASSWORD`: Database password for PostgreSQL or MSSQL
+- SQLite database creation:
+  - When the database does not exist and the driver is SQLite, the user is prompted if they want to create a new database
+  - If the user chooses yes, the database is created according to the configuration and the script continues
+  - If the user chooses no, the script exits
+  - This ensures a better user experience by providing clear feedback and options when the database file is missing
 
 ### Directory Structure
 - The BadgerMaps CLI uses the following directory structure:

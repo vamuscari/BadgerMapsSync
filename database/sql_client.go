@@ -1,9 +1,13 @@
 package database
 
 import (
+	"bufio"
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"badgermapscli/api"
 
@@ -31,9 +35,10 @@ type Config struct {
 
 // Client represents the database client
 type Client struct {
-	config  *Config
-	db      *sql.DB
-	verbose bool
+	config          *Config
+	db              *sql.DB
+	verbose         bool
+	needsSchemaInit bool
 }
 
 // NewClient creates a new database client
@@ -67,6 +72,33 @@ func (c *Client) connectDatabase() (*sql.DB, error) {
 	case "sqlite3", "sqlite":
 		driverName = "sqlite3"
 		dsn = c.config.Database
+
+		// Check if SQLite database file exists
+		_, err := os.Stat(dsn)
+		if os.IsNotExist(err) {
+			fmt.Printf("SQLite database file '%s' does not exist. Would you like to create it? (y/n): ", dsn)
+			reader := bufio.NewReader(os.Stdin)
+			response, err := reader.ReadString('\n')
+			if err != nil {
+				return nil, fmt.Errorf("error reading input: %w", err)
+			}
+
+			response = strings.TrimSpace(strings.ToLower(response))
+			if response != "y" && response != "yes" {
+				return nil, fmt.Errorf("database creation cancelled by user")
+			}
+
+			// Create the database directory if it doesn't exist
+			dbDir := filepath.Dir(dsn)
+			if dbDir != "." {
+				if err := os.MkdirAll(dbDir, 0755); err != nil {
+					return nil, fmt.Errorf("failed to create database directory: %w", err)
+				}
+			}
+
+			fmt.Printf("Creating new SQLite database at '%s'...\n", dsn)
+			c.needsSchemaInit = true
+		}
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s (supported types: postgres, mssql, sqlite3)", c.config.DatabaseType)
 	}
@@ -84,6 +116,18 @@ func (c *Client) connectDatabase() (*sql.DB, error) {
 	}
 
 	c.logf("Successfully connected to %s database", c.config.DatabaseType)
+
+	// Initialize schema if needed (for new SQLite databases)
+	if c.needsSchemaInit {
+		c.db = db // Temporarily set db to initialize schema
+		if err := c.InitializeSchema(); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to initialize database schema: %w", err)
+		}
+		c.db = nil // Reset it as it will be set by the caller
+		fmt.Println("Database schema initialized successfully")
+	}
+
 	return db, nil
 }
 
@@ -313,8 +357,8 @@ func (c *Client) GetRequiredTables() map[string][]string {
 		"UserProfiles":     {"ProfileId", "Email", "FirstName", "LastName"},
 		"AccountLocations": {"Id", "AccountId", "Latitude", "Longitude"},
 		"RouteWaypoints":   {"Id", "RouteId"},
-		"DataSets":         {"Id", "Name"},
-		"DataSetValues":    {"Id", "DataSetId", "Value"},
+		"DataSets":         {"Name", "ProfileId"},
+		"DataSetValues":    {"DataSetName", "Value"},
 	}
 }
 

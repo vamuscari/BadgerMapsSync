@@ -25,6 +25,8 @@ The CLI looks for configuration in the following locations (in order of preferen
 
 When you run the `setup` command, you'll be prompted for your API URL, API key, database type, and database-specific configurations. By default, your configuration is saved to `~/.config/badgermaps/config.yaml`. If the directory doesn't exist, it will be created automatically. You can also optionally save to the `.env` file by using the `--env` flag, but you must first create the `.env` file using the `badgermaps utils create-env` command.
 
+If a configuration already exists when running the `setup` command, it will display the current configuration values with sensitive information (like API keys and passwords) masked for security. The existing values will be used as defaults, allowing you to keep them by simply pressing Enter or update them by entering new values.
+
 Example `.env` file:
 
 ```

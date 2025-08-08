@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
-	"badgermapscli/cmd/autocomplete"
 	"badgermapscli/cmd/help"
 	"badgermapscli/cmd/pull"
 	"badgermapscli/cmd/push"
@@ -67,17 +67,35 @@ func init() {
 	viper.BindPFlag("debug", rootCmd.PersistentFlags().Lookup("debug"))
 	viper.BindPFlag("no-color", rootCmd.PersistentFlags().Lookup("no-color"))
 
-	// Add commands
-	rootCmd.AddCommand(version.NewVersionCmd())
-	rootCmd.AddCommand(push.NewPushCmd())
-	rootCmd.AddCommand(pull.PullCmd())
-	rootCmd.AddCommand(server.NewServerCmd())
-	rootCmd.AddCommand(test.TestCmd())
-	rootCmd.AddCommand(utils.NewUtilsCmd())
-	rootCmd.AddCommand(setup.NewSetupCmd())
-	rootCmd.AddCommand(search.NewSearchCmd())
-	rootCmd.AddCommand(autocomplete.NewAutocompleteCmd(rootCmd))
-	rootCmd.AddCommand(help.NewHelpCmd(rootCmd))
+	// Create commands
+	versionCmd := version.NewVersionCmd()
+	pushCmd := push.NewPushCmd()
+	pullCmd := pull.PullCmd()
+	serverCmd := server.NewServerCmd()
+	testCmd := test.TestCmd()
+	utilsCmd := utils.NewUtilsCmd()
+	setupCmd := setup.NewSetupCmd()
+	searchCmd := search.NewSearchCmd()
+	helpCmd := help.NewHelpCmd(rootCmd)
+
+	// Apply setup verification to commands that need it
+	wrapCommandWithSetupCheck(pushCmd)
+	wrapCommandWithSetupCheck(pullCmd)
+	wrapCommandWithSetupCheck(serverCmd)
+	wrapCommandWithSetupCheck(testCmd)
+	wrapCommandWithSetupCheck(searchCmd)
+	wrapCommandWithSetupCheck(helpCmd)
+
+	// Add commands to root
+	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(pushCmd)
+	rootCmd.AddCommand(pullCmd)
+	rootCmd.AddCommand(serverCmd)
+	rootCmd.AddCommand(testCmd)
+	rootCmd.AddCommand(utilsCmd)
+	rootCmd.AddCommand(setupCmd)
+	rootCmd.AddCommand(searchCmd)
+	rootCmd.AddCommand(helpCmd)
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -131,6 +149,45 @@ func initConfig() {
 	// Initialize colors and error utilities after viper is configured
 	common.InitColors()
 	common.InitErrorUtil()
+}
+
+// wrapCommandWithSetupCheck adds setup verification to a command and all its subcommands
+// It checks if the command is one that requires setup (not setup, version, or utils)
+// If setup is required but not completed, it prompts the user to run setup
+func wrapCommandWithSetupCheck(cmd *cobra.Command) {
+	// First wrap the command itself
+	wrapSingleCommandWithSetupCheck(cmd)
+
+	// Then recursively wrap all subcommands
+	for _, subCmd := range cmd.Commands() {
+		wrapCommandWithSetupCheck(subCmd)
+	}
+}
+
+// wrapSingleCommandWithSetupCheck adds setup verification to a single command
+func wrapSingleCommandWithSetupCheck(cmd *cobra.Command) {
+	originalRun := cmd.Run
+	originalRunE := cmd.RunE
+
+	cmdName := cmd.Name()
+	// Skip setup verification for these commands
+	if cmdName == "setup" || cmdName == "version" || strings.HasPrefix(cmdName, "utils") {
+		return
+	}
+
+	if originalRun != nil {
+		cmd.Run = func(cmd *cobra.Command, args []string) {
+			common.VerifySetupOrExit()
+			originalRun(cmd, args)
+		}
+	}
+
+	if originalRunE != nil {
+		cmd.RunE = func(cmd *cobra.Command, args []string) error {
+			common.VerifySetupOrExit()
+			return originalRunE(cmd, args)
+		}
+	}
 }
 
 func main() {

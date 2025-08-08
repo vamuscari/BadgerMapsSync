@@ -1,7 +1,16 @@
 CREATE TABLE IF NOT EXISTS DataSets (
-    Id SERIAL PRIMARY KEY,
-    Name VARCHAR(255),
-    Description TEXT,
+    Name VARCHAR(255) PRIMARY KEY,
+    ProfileId INTEGER,
+    Filterable BOOLEAN,
+    Label TEXT,
+    Position INTEGER,
+    Type TEXT,
+    HasData BOOLEAN,
+    IsUserCanAddNewTextValues BOOLEAN,
+    RawMin REAL,
+    Min REAL,
+    Max REAL,
+    RawMax REAL,
     CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

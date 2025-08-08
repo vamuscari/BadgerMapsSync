@@ -21,7 +21,7 @@ func PullCmd() *cobra.Command {
 		Short: "Retrieve data from BadgerMaps API",
 		Long:  `Pull data from the BadgerMaps API to your local database.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("Please specify a data type to pull (account, checkin, route, profile)")
+			fmt.Println("Please specify a data type to pull (account, checkin, route, profile, all)")
 			os.Exit(1)
 		},
 	}
@@ -37,6 +37,7 @@ func PullCmd() *cobra.Command {
 	pullCmd.AddCommand(pullRouteCmd())
 	pullCmd.AddCommand(pullRoutesCmd())
 	pullCmd.AddCommand(pullProfileCmd())
+	pullCmd.AddCommand(pullAllCmd())
 
 	return pullCmd
 }
@@ -1178,6 +1179,318 @@ func pullProfileCmd() *cobra.Command {
 				fmt.Printf("Email: %s\n", profile.Email)
 				fmt.Printf("Company: %s\n", profile.Company.Name)
 			}
+		},
+	}
+	return cmd
+}
+
+// pullAllCmd creates a command to pull all data types in order
+func pullAllCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "all",
+		Short: "Pull all data types from BadgerMaps",
+		Long:  `Pull all data types from the BadgerMaps API to your local database in the order: profile, accounts, checkins, routes.`,
+		Run: func(cmd *cobra.Command, args []string) {
+			// Get verbose flag
+			verbose, _ := cmd.Flags().GetBool("verbose")
+
+			if verbose {
+				fmt.Println(color.CyanString("Pulling all data types in order: profile, accounts, checkins, routes"))
+			}
+
+			// Step 1: Pull profile
+			if verbose {
+				fmt.Println(color.CyanString("\n=== Pulling user profile ==="))
+			} else {
+				fmt.Println("Pulling user profile...")
+			}
+
+			// Get API key from viper
+			apiKey := viper.GetString("API_KEY")
+			if apiKey == "" {
+				fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
+				os.Exit(1)
+			}
+
+			// Create API client
+			apiClient := api.NewAPIClient(apiKey)
+
+			// Get database configuration
+			dbConfig := &database.Config{
+				DatabaseType: viper.GetString("DATABASE_TYPE"),
+				Host:         viper.GetString("DATABASE_HOST"),
+				Port:         viper.GetString("DATABASE_PORT"),
+				Database:     viper.GetString("DATABASE_NAME"),
+				Username:     viper.GetString("DATABASE_USERNAME"),
+				Password:     viper.GetString("DATABASE_PASSWORD"),
+			}
+
+			// Set default database type and name if not provided
+			if dbConfig.DatabaseType == "" {
+				dbConfig.DatabaseType = "sqlite3" // Default to SQLite
+			}
+			if dbConfig.DatabaseType == "sqlite3" && dbConfig.Database == "" {
+				dbConfig.Database = "badgermaps.db"
+			}
+
+			// Create database client
+			dbClient, err := database.NewClient(dbConfig, verbose)
+			if err != nil {
+				fmt.Println(color.RedString("Error creating database client: %v", err))
+				os.Exit(1)
+			}
+			defer dbClient.Close()
+
+			// Validate database schema
+			err = dbClient.ValidateDatabaseSchema()
+			if err != nil {
+				fmt.Println(color.RedString("Database schema validation failed: %v", err))
+				fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
+				os.Exit(1)
+			}
+
+			// Get user profile from API
+			profile, err := apiClient.GetUserProfile()
+			if err != nil {
+				fmt.Println(color.RedString("Error retrieving user profile: %v", err))
+				fmt.Println(color.YellowString("Continuing with other data types..."))
+			} else {
+				// Store profile in database
+				err = dbClient.StoreProfiles(profile)
+				if err != nil {
+					fmt.Println(color.RedString("Error storing user profile: %v", err))
+					fmt.Println(color.YellowString("Continuing with other data types..."))
+				} else if verbose {
+					fmt.Println(color.GreenString("Successfully pulled and stored user profile"))
+				}
+			}
+
+			// Step 2: Pull accounts
+			if verbose {
+				fmt.Println(color.CyanString("\n=== Pulling accounts ==="))
+			} else {
+				fmt.Println("Pulling accounts...")
+			}
+
+			// Get top value for accounts (default to 0 which means all)
+			top := 0
+
+			// Get all accounts from API (basic list)
+			accountsList, err := apiClient.GetAccounts()
+			if err != nil {
+				fmt.Println(color.RedString("Error retrieving accounts list: %v", err))
+				fmt.Println(color.YellowString("Continuing with other data types..."))
+			} else {
+				// Limit the number of accounts if top is specified
+				if top > 0 && top < len(accountsList) {
+					if verbose {
+						fmt.Printf("Found %d accounts, limiting to top %d\n", len(accountsList), top)
+					}
+					accountsList = accountsList[:top]
+				} else if verbose {
+					fmt.Printf("Found %d accounts to pull\n", len(accountsList))
+				}
+
+				// Get max parallel processes from config
+				maxParallel := viper.GetInt("MAX_PARALLEL_PROCESSES")
+				if maxParallel <= 0 {
+					maxParallel = 5 // Default value
+				}
+
+				if verbose {
+					fmt.Printf("Using maximum of %d concurrent operations\n", maxParallel)
+				}
+
+				// Create a semaphore to limit concurrent operations
+				sem := make(chan bool, maxParallel)
+				var wg sync.WaitGroup
+
+				// Process accounts in parallel
+				var successCount int32
+				var accountsMutex sync.Mutex
+
+				if verbose {
+					fmt.Println(color.CyanString("Retrieving and storing detailed account information..."))
+				}
+
+				// Create progress bar if not in verbose mode
+				var bar *progressbar.ProgressBar
+				if !verbose {
+					bar = progressbar.NewOptions(len(accountsList),
+						progressbar.OptionEnableColorCodes(true),
+						progressbar.OptionShowCount(),
+						progressbar.OptionSetDescription("[cyan]Retrieving and storing accounts...[reset]"),
+						progressbar.OptionSetTheme(progressbar.Theme{
+							Saucer:        "[green]=[reset]",
+							SaucerHead:    "[green]>[reset]",
+							SaucerPadding: " ",
+							BarStart:      "[",
+							BarEnd:        "]",
+						}))
+				}
+
+				for _, basicAccount := range accountsList {
+					wg.Add(1)
+					go func(accountID int) {
+						defer wg.Done()
+
+						// Acquire semaphore
+						sem <- true
+						defer func() { <-sem }()
+
+						// Get detailed account from API
+						detailedAccount, err := apiClient.GetAccount(accountID)
+						if err != nil {
+							fmt.Println(color.RedString("Error retrieving account %d: %v", accountID, err))
+							return
+						}
+
+						// Store account directly in the database
+						accounts := []api.Account{*detailedAccount}
+						err = dbClient.StoreAccounts(accounts)
+						if err != nil {
+							fmt.Println(color.RedString("Error storing account %d: %v", accountID, err))
+							return
+						}
+
+						// Increment success counter
+						accountsMutex.Lock()
+						successCount++
+						if verbose {
+							fmt.Printf("Retrieved and stored account %d: %s\n", accountID, detailedAccount.FullName)
+						} else if bar != nil {
+							bar.Add(1)
+						}
+						accountsMutex.Unlock()
+					}(basicAccount.ID)
+				}
+
+				// Wait for all goroutines to finish
+				wg.Wait()
+
+				// Add a newline after the progress bar
+				if !verbose && bar != nil {
+					fmt.Println()
+				}
+
+				if successCount == 0 && len(accountsList) > 0 {
+					fmt.Println(color.YellowString("No accounts were retrieved and stored successfully"))
+				} else if verbose {
+					fmt.Printf("Successfully retrieved and stored %d/%d accounts\n", successCount, len(accountsList))
+					fmt.Println(color.GreenString("Successfully pulled and stored accounts from BadgerMaps"))
+				}
+			}
+
+			// Step 3: Pull checkins
+			if verbose {
+				fmt.Println(color.CyanString("\n=== Pulling checkins ==="))
+			} else {
+				fmt.Println("Pulling checkins...")
+			}
+
+			// Get all checkins from API
+			checkins, err := apiClient.GetCheckins()
+			if err != nil {
+				fmt.Println(color.RedString("Error retrieving checkins: %v", err))
+				fmt.Println(color.YellowString("Continuing with other data types..."))
+			} else {
+				if verbose {
+					fmt.Printf("Found %d checkins to pull\n", len(checkins))
+				}
+
+				// Create progress bar if not in verbose mode
+				var bar *progressbar.ProgressBar
+				if !verbose {
+					bar = progressbar.NewOptions(len(checkins),
+						progressbar.OptionEnableColorCodes(true),
+						progressbar.OptionShowCount(),
+						progressbar.OptionSetDescription("[cyan]Storing checkins...[reset]"),
+						progressbar.OptionSetTheme(progressbar.Theme{
+							Saucer:        "[green]=[reset]",
+							SaucerHead:    "[green]>[reset]",
+							SaucerPadding: " ",
+							BarStart:      "[",
+							BarEnd:        "]",
+						}))
+				}
+
+				// Store checkins in database
+				if verbose {
+					fmt.Println("Storing checkins in database...")
+				}
+
+				err = dbClient.StoreCheckins(checkins)
+				if err != nil {
+					fmt.Println(color.RedString("Error storing checkins: %v", err))
+					fmt.Println(color.YellowString("Continuing with other data types..."))
+				} else {
+					// Update progress bar if not in verbose mode
+					if !verbose && bar != nil {
+						bar.Finish()
+						fmt.Println()
+					}
+
+					if verbose {
+						fmt.Println(color.GreenString("Successfully pulled and stored all checkins from BadgerMaps"))
+					}
+				}
+			}
+
+			// Step 4: Pull routes
+			if verbose {
+				fmt.Println(color.CyanString("\n=== Pulling routes ==="))
+			} else {
+				fmt.Println("Pulling routes...")
+			}
+
+			// Get all routes from API
+			routes, err := apiClient.GetRoutes()
+			if err != nil {
+				fmt.Println(color.RedString("Error retrieving routes: %v", err))
+				fmt.Println(color.YellowString("Finished pulling all available data types"))
+			} else {
+				if verbose {
+					fmt.Printf("Found %d routes to pull\n", len(routes))
+				}
+
+				// Create progress bar if not in verbose mode
+				var bar *progressbar.ProgressBar
+				if !verbose {
+					bar = progressbar.NewOptions(len(routes),
+						progressbar.OptionEnableColorCodes(true),
+						progressbar.OptionShowCount(),
+						progressbar.OptionSetDescription("[cyan]Storing routes...[reset]"),
+						progressbar.OptionSetTheme(progressbar.Theme{
+							Saucer:        "[green]=[reset]",
+							SaucerHead:    "[green]>[reset]",
+							SaucerPadding: " ",
+							BarStart:      "[",
+							BarEnd:        "]",
+						}))
+				}
+
+				// Store routes in database
+				if verbose {
+					fmt.Println("Storing routes in database...")
+				}
+
+				err = dbClient.StoreRoutes(routes)
+				if err != nil {
+					fmt.Println(color.RedString("Error storing routes: %v", err))
+				} else {
+					// Update progress bar if not in verbose mode
+					if !verbose && bar != nil {
+						bar.Finish()
+						fmt.Println()
+					}
+
+					if verbose {
+						fmt.Println(color.GreenString("Successfully pulled and stored all routes from BadgerMaps"))
+					}
+				}
+			}
+
+			fmt.Println(color.GreenString("\nFinished pulling all data types"))
 		},
 	}
 	return cmd
