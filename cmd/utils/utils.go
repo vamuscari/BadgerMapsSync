@@ -249,7 +249,15 @@ func getDatabaseConfig() *database.Config {
 
 	// Set default database name for SQLite if not provided
 	if dbType == "sqlite3" && dbConfig.Database == "" {
-		dbConfig.Database = "badgermaps.db"
+		// Create default directory if it doesn't exist
+		defaultDir := "./config/badgermaps"
+		if err := os.MkdirAll(defaultDir, 0755); err != nil {
+			fmt.Println(color.YellowString("Warning: Could not create default SQLite directory: %v", err))
+			// Fall back to current directory if we can't create the default
+			dbConfig.Database = "badgermaps.db"
+		} else {
+			dbConfig.Database = defaultDir + "/badgermaps.db"
+		}
 	}
 
 	return dbConfig

@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS DataSets (
     Id INTEGER PRIMARY KEY,
+    ProfileId INTEGER,
     Name TEXT,
     Filterable BOOLEAN,
     Label TEXT,

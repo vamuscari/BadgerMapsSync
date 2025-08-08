@@ -6,6 +6,8 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/fatih/color"
@@ -25,14 +27,8 @@ func NewAuthCmd() *cobra.Command {
 		Short: "Authenticate with the API",
 		Long:  `Authenticate with the BadgerMaps API and store your credentials securely.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			// Check if .env file exists, create one if it doesn't
-			if !common.CheckEnvFileExists() {
-				fmt.Println(color.YellowString("No .env file found. Creating one with default values..."))
-				if err := common.CreateEnvFile(false); err != nil {
-					fmt.Println(color.RedString("Failed to create .env file: %v", err))
-					// Continue anyway, as we can still authenticate
-				}
-			}
+			// We no longer automatically create an .env file during authentication
+			// Users should use 'badgermaps utils create-env' to create one if needed
 
 			// If no API key is provided, prompt for it
 			if apiKey == "" {
@@ -172,15 +168,21 @@ func validateAPIKey(apiKey string) error {
 
 // storeAPIKey stores the API key securely
 func storeAPIKey(apiKey string, storeInEnv bool) error {
-	if storeInEnv {
-		// Store in .env file
-		return storeAPIKeyInEnv(apiKey)
+	// Always store in config.yaml file
+	err := storeAPIKeyInConfig(apiKey)
+	if err != nil {
+		return err
 	}
 
-	// Store in system keychain (not implemented in this version)
-	// In a real implementation, we would use the system keychain
-	// For now, just store in .env file
-	return storeAPIKeyInEnv(apiKey)
+	// If storeInEnv is true, also store in .env file
+	if storeInEnv {
+		if err := storeAPIKeyInEnv(apiKey); err != nil {
+			fmt.Println(color.YellowString("Warning: Failed to store API key in .env file: %v", err))
+			// Continue anyway as we've already stored in config.yaml
+		}
+	}
+
+	return nil
 }
 
 // storeAPIKeyInEnv stores the API key in the .env file
@@ -190,10 +192,7 @@ func storeAPIKeyInEnv(apiKey string) error {
 
 	// Check if .env file exists
 	if !common.CheckEnvFileExists() {
-		// Create .env file if it doesn't exist
-		if err := common.CreateEnvFile(false); err != nil {
-			return fmt.Errorf("failed to create .env file: %w", err)
-		}
+		return fmt.Errorf("no .env file found. Use 'badgermaps utils create-env' to create one")
 	}
 
 	// Read the current .env file
@@ -236,8 +235,105 @@ func getStoredAPIKey() (string, error) {
 		return apiKey, nil
 	}
 
+	// Try to get from config file
+	configFile := common.GetConfigFilePath()
+	if _, err := os.Stat(configFile); err == nil {
+		content, err := os.ReadFile(configFile)
+		if err == nil {
+			lines := strings.Split(string(content), "\n")
+			for _, line := range lines {
+				if strings.HasPrefix(line, "API_KEY:") {
+					parts := strings.SplitN(line, ":", 2)
+					if len(parts) == 2 {
+						apiKey = strings.TrimSpace(parts[1])
+						if apiKey != "" {
+							return apiKey, nil
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Check ~/.badgermaps/config.yaml for backward compatibility
+	if runtime.GOOS != "windows" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			configFile = filepath.Join(home, ".badgermaps", "config.yaml")
+			if _, err := os.Stat(configFile); err == nil {
+				content, err := os.ReadFile(configFile)
+				if err == nil {
+					lines := strings.Split(string(content), "\n")
+					for _, line := range lines {
+						if strings.HasPrefix(line, "API_KEY:") {
+							parts := strings.SplitN(line, ":", 2)
+							if len(parts) == 2 {
+								apiKey = strings.TrimSpace(parts[1])
+								if apiKey != "" {
+									return apiKey, nil
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Try to get from .env file
+	if common.CheckEnvFileExists() {
+		content, err := os.ReadFile(".env")
+		if err == nil {
+			lines := strings.Split(string(content), "\n")
+			for _, line := range lines {
+				if strings.HasPrefix(line, "API_KEY=") {
+					parts := strings.SplitN(line, "=", 2)
+					if len(parts) == 2 {
+						apiKey = strings.TrimSpace(parts[1])
+						if apiKey != "" {
+							return apiKey, nil
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Not found
 	return "", fmt.Errorf("no API key found")
+}
+
+// storeAPIKeyInConfig stores the API key in the config.yaml file
+func storeAPIKeyInConfig(apiKey string) error {
+	// Set in viper
+	viper.Set("API_KEY", apiKey)
+
+	// Ensure config directory exists
+	if err := common.EnsureConfigDir(); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	// Get config file path
+	configFile := common.GetConfigFilePath()
+
+	// Create a map for the config
+	config := map[string]string{
+		"API_KEY": apiKey,
+	}
+
+	// Convert to YAML format
+	yamlData := "# BadgerMaps CLI Configuration\n"
+	for key, value := range config {
+		yamlData += fmt.Sprintf("%s: %s\n", key, value)
+	}
+
+	// Write to file
+	if err := os.WriteFile(configFile, []byte(yamlData), 0644); err != nil {
+		return fmt.Errorf("failed to write to config file: %w", err)
+	}
+
+	fmt.Println("API key stored in config file:", configFile)
+	return nil
 }
 
 // clearAPIKey clears the stored API key
@@ -245,10 +341,36 @@ func clearAPIKey() error {
 	// Clear from viper
 	viper.Set("API_KEY", "")
 
-	// Clear from .env file
-	// In a real implementation, we would update the .env file
-	// For now, just clear from viper
-	fmt.Println("API key cleared from environment")
+	// Try to clear from config file
+	configFile := common.GetConfigFilePath()
+	if _, err := os.Stat(configFile); err == nil {
+		// Config file exists, update it
+		yamlData := "# BadgerMaps CLI Configuration\n"
+		yamlData += "API_KEY: \n"
+		os.WriteFile(configFile, []byte(yamlData), 0644)
+		fmt.Println("API key cleared from config file")
+	}
+
+	// Also try to clear from .env file
+	if common.CheckEnvFileExists() {
+		// Read the current .env file
+		envContent, err := os.ReadFile(".env")
+		if err == nil {
+			// Replace the API_KEY line
+			lines := strings.Split(string(envContent), "\n")
+			for i, line := range lines {
+				if strings.HasPrefix(line, "API_KEY=") {
+					lines[i] = "API_KEY="
+					break
+				}
+			}
+			// Write the updated content back to the .env file
+			updatedContent := strings.Join(lines, "\n")
+			os.WriteFile(".env", []byte(updatedContent), 0644)
+			fmt.Println("API key cleared from environment file")
+		}
+	}
+
 	return nil
 }
 

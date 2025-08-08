@@ -1,6 +1,9 @@
 CREATE TABLE IF NOT EXISTS DataSetValues (
     Id INTEGER PRIMARY KEY,
+    ProfileId INTEGER,
     DataSetId INTEGER,
+    DataSetName TEXT,
+    DataSetPosition INTEGER,
     Text TEXT,
     Value TEXT,
     CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,

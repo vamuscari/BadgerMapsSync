@@ -3,8 +3,6 @@ package search
 import (
 	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -283,8 +281,10 @@ func updateSearchCache(apiKey string) {
 	apiClient := api.NewAPIClient(apiKey)
 
 	// Create cache directory if it doesn't exist
-	cacheDir := filepath.Join(os.Getenv("HOME"), ".badgermaps", "cache")
-	os.MkdirAll(cacheDir, 0755)
+	if err := common.EnsureCacheDir(); err != nil {
+		fmt.Printf("Failed to create cache directory: %v\n", err)
+		return
+	}
 
 	// Open SQLite database
 	dbPath := getCachePath()
@@ -371,8 +371,7 @@ func updateSearchCache(apiKey string) {
 
 // getCachePath returns the path to the SQLite cache database
 func getCachePath() string {
-	cacheDir := filepath.Join(os.Getenv("HOME"), ".badgermaps", "cache")
-	return filepath.Join(cacheDir, "search_cache.db")
+	return common.GetCacheFilePath("search_cache.db")
 }
 
 // contains checks if a string is in a slice

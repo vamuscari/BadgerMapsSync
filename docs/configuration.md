@@ -8,17 +8,22 @@ The BadgerMaps CLI supports multiple configuration sources with the following pr
 
 1. Command-line flags
 2. Environment variables
-3. Configuration file (.env)
+3. Configuration files (config.yaml or .env)
 4. Default values
 
 When a configuration value is set in multiple places, the highest priority source is used.
 
-## Configuration File
+## Configuration Files
 
-The CLI looks for configuration in the following locations:
+The CLI looks for configuration in the following locations (in order of preference):
 
-- `.env` file in the current directory
-- `.badgermaps` file in the user's home directory
+1. `.env` file in the current directory
+2. OS-specific configuration directory:
+   - Linux/macOS: `~/.config/badgermaps/config.yaml` (default)
+   - Windows: `%LocalAppData%\badgermaps\config.yaml`
+3. `~/.badgermaps/config.yaml` (for backward compatibility on Linux/macOS)
+
+When you run the `setup` command, you'll be prompted for your API URL, API key, database type, and database-specific configurations. By default, your configuration is saved to `~/.config/badgermaps/config.yaml`. If the directory doesn't exist, it will be created automatically. You can also optionally save to the `.env` file by using the `--env` flag, but you must first create the `.env` file using the `badgermaps utils create-env` command.
 
 Example `.env` file:
 
@@ -31,6 +36,20 @@ BADGERMAPS_MAX_PARALLEL_PROCESSES=5
 BADGERMAPS_SERVER_HOST=localhost
 BADGERMAPS_SERVER_PORT=8080
 BADGERMAPS_SERVER_TLS_ENABLED=false
+```
+
+Example `config.yaml` file:
+
+```yaml
+# BadgerMaps CLI Configuration
+API_KEY: your_api_key
+API_URL: https://badgerapis.badgermapping.com/api/2
+RATE_LIMIT_REQUESTS: 100
+RATE_LIMIT_PERIOD: 60
+MAX_PARALLEL_PROCESSES: 5
+SERVER_HOST: localhost
+SERVER_PORT: 8080
+SERVER_TLS_ENABLED: false
 ```
 
 ## Environment Variables
@@ -51,6 +70,18 @@ Global flags that apply to all commands:
 - `--debug`: Enable debug mode with maximum verbosity
 - `--no-color`: Disable colored output
 - `--config`: Specify a config file (default is $HOME/.badgermaps.yaml)
+
+## Directory Structure
+
+The BadgerMaps CLI uses the following directory structure:
+
+### Configuration Directories
+- Linux/macOS: `~/.config/badgermaps/`
+- Windows: `%LocalAppData%\badgermaps\`
+
+### Cache Directories
+- Linux/macOS: `~/.cache/badgermaps/`
+- Windows: `%TEMP%\badgermaps\`
 
 ## Configuration Options
 
@@ -79,7 +110,7 @@ Global flags that apply to all commands:
 ### Database Configuration
 
 - `DB_TYPE`: Database type (sqlite3, postgres, mssql) (default: sqlite3)
-- `DB_PATH`: Path to SQLite database file (default: badgermaps.db)
+- `DB_PATH`: Path to SQLite database file (default: ./config/badgermaps/badgermaps.db)
 - `DB_HOST`: Database host for PostgreSQL or MSSQL
 - `DB_PORT`: Database port for PostgreSQL or MSSQL
 - `DB_NAME`: Database name for PostgreSQL or MSSQL

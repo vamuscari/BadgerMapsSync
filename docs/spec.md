@@ -3,12 +3,12 @@
 ## 1. Command Structure
 
 ### Main Commands
+- `setup`: Setup BadgerMaps CLI configuration
 - `push`: Send data to BadgerMaps API
 - `pull`: Retrieve data from BadgerMaps API
 - `server`: Run in server mode
 - `test`: Run tests and diagnostics
 - `utils`: Utility commands for maintenance
-- `auth`: Authenticate with the API
 - `search`: Find items by name
 - `autocomplete`: Generate shell autocompletion scripts
 - `config`: Configure the application
@@ -16,8 +16,8 @@
 - `version`: Display version information
 
 ### Command Syntax
-- Single item operations: `pull account 208965638`
-- Multiple item operations: `pull accounts 208965638 208965639`
+- Single item operations: `pull account 208965000`
+- Multiple item operations: `pull accounts 208965000 208965001`
 - Bulk operations: `pull accounts` or `pull account all` (retrieves all accounts)
 
 ### Singular vs Plural Data Types
@@ -125,27 +125,99 @@ flowchart LR
 ### Configuration
 - Implement `config` command to configure the application
 - Use `viper` package to manage configuration
-- .env should be the preferred method for storing configurations
-- If no .env file exists, create one
-- Allow for rate limiting, parallel processing limits, and server configurations to be defined in the env file with defaults:
-  - `RATE_LIMIT_REQUESTS`: Maximum number of API requests per time period
-  - `RATE_LIMIT_PERIOD`: Time period for rate limiting in seconds
-  - `MAX_PARALLEL_PROCESSES`: Maximum number of concurrent operations
-  - `SERVER_HOST`: Host address for server mode
-  - `SERVER_PORT`: Port number for server mode
-  - `SERVER_TLS_ENABLED`: Enable/disable TLS for server
+- Configuration files (config.yaml or .env) are used for storing configurations
+- The CLI looks for configuration in the following locations (in order of preference):
+  1. `.env` file in the current directory
+  2. OS-specific configuration directory:
+     - Linux/macOS: `~/.config/badgermaps/config.yaml` (default)
+     - Windows: `%LocalAppData%\badgermaps\config.yaml`
+  3. `~/.badgermaps/config.yaml` (for backward compatibility on Linux/macOS)
+- When you run the `setup` command, you'll be prompted for your API URL, API key, database type, and database-specific configurations
+- By default, your configuration is saved to the OS-specific configuration directory
+- You can optionally save to the `.env` file by using the `--env` flag with the setup command
+- Allow for rate limiting, parallel processing limits, and server configurations to be defined with defaults:
+  - `RATE_LIMIT_REQUESTS`: Maximum number of API requests per time period (default: 100)
+  - `RATE_LIMIT_PERIOD`: Time period for rate limiting in seconds (default: 60)
+  - `MAX_PARALLEL_PROCESSES`: Maximum number of concurrent operations (default: 5)
+  - `SERVER_HOST`: Host address for server mode (default: localhost)
+  - `SERVER_PORT`: Port number for server mode (default: 8080)
+  - `SERVER_TLS_ENABLED`: Enable/disable TLS for server (default: false)
+  - `SERVER_TLS_CERT`: Path to TLS certificate file
+  - `SERVER_TLS_KEY`: Path to TLS key file
+
+### Configuration Files
+- Example `.env` file:
+```
+BADGERMAPS_API_URL=https://badgerapis.badgermapping.com/api/2
+BADGERMAPS_API_TOKEN=your_api_token
+BADGERMAPS_RATE_LIMIT_REQUESTS=100
+BADGERMAPS_RATE_LIMIT_PERIOD=60
+BADGERMAPS_MAX_PARALLEL_PROCESSES=5
+BADGERMAPS_SERVER_HOST=localhost
+BADGERMAPS_SERVER_PORT=8080
+BADGERMAPS_SERVER_TLS_ENABLED=false
+```
+
+- Example `config.yaml` file:
+```yaml
+# BadgerMaps CLI Configuration
+API_KEY: your_api_key
+API_URL: https://badgerapis.badgermapping.com/api/2
+RATE_LIMIT_REQUESTS: 100
+RATE_LIMIT_PERIOD: 60
+MAX_PARALLEL_PROCESSES: 5
+SERVER_HOST: localhost
+SERVER_PORT: 8080
+SERVER_TLS_ENABLED: false
+```
 
 ### Configuration Precedence
 - Implement a clear precedence order for configuration sources:
   1. Command-line flags (highest priority)
   2. Environment variables
-  3. Configuration file (.env)
+  3. Configuration files (config.yaml or .env)
   4. Default values (lowest priority)
 - Document this precedence in help text and documentation
 - When a configuration value is set in multiple places, use the highest priority source
 - Provide a way to view the effective configuration with source information
 - Allow overriding specific configuration values with flags while keeping others from config file
-- Support namespaced environment variables (e.g., `BADGERMAPS_API_URL`)
+- Support namespaced environment variables with the `BADGERMAPS_` prefix (e.g., `BADGERMAPS_API_URL`)
+
+### Viewing and Updating Configuration
+- To view the current effective configuration:
+```bash
+badgermaps config show
+```
+- To update a configuration value:
+```bash
+badgermaps config set API_TOKEN your_new_token
+```
+
+### Configuration Validation
+- The CLI validates configuration values when starting up and provides clear error messages for invalid configurations, such as:
+  - Invalid API URL format
+  - Missing required configuration
+  - Invalid port number
+  - Incompatible settings
+
+### Database Configuration
+- Support for multiple database types:
+  - `DB_TYPE`: Database type (sqlite3, postgres, mssql) (default: sqlite3)
+  - `DB_PATH`: Path to SQLite database file (default: ./config/badgermaps/badgermaps.db)
+  - `DB_HOST`: Database host for PostgreSQL or MSSQL
+  - `DB_PORT`: Database port for PostgreSQL or MSSQL
+  - `DB_NAME`: Database name for PostgreSQL or MSSQL
+  - `DB_USER`: Database user for PostgreSQL or MSSQL
+  - `DB_PASSWORD`: Database password for PostgreSQL or MSSQL
+
+### Directory Structure
+- The BadgerMaps CLI uses the following directory structure:
+  - Configuration Directories:
+    - Linux/macOS: `~/.config/badgermaps/`
+    - Windows: `%LocalAppData%\badgermaps\`
+  - Cache Directories:
+    - Linux/macOS: `~/.cache/badgermaps/`
+    - Windows: `%TEMP%\badgermaps\`
 
 ### Secrets Management
 - Store sensitive information like API tokens securely
@@ -153,15 +225,14 @@ flowchart LR
   1. Environment variables (recommended for CI/CD environments)
   2. OS keychain/credential store (recommended for desktop use)
   3. Configuration file with restricted permissions (fallback)
-- Implement automatic redaction of secrets in logs and error messages
-- Replace sensitive values with `[REDACTED]` in all output
+- The CLI automatically redacts secrets in logs and error messages, replacing them with `[REDACTED]`
 - Provide a `--no-redact` flag for debugging purposes (with appropriate warnings)
 - Implement secure input for secrets when configuring via interactive prompt
 - Support rotation of API tokens with minimal downtime
 - Validate secrets before storing them
 
 ### Authentication
-- Use `auth` command to validate and store the API token
+- Use `setup` command to configure API URL, API key, and database settings
 - Authentication is required before executing API operations
 - Support multiple authentication methods (token, OAuth)
 - Implement token refresh mechanism for OAuth authentication

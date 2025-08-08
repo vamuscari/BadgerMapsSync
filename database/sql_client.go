@@ -309,7 +309,7 @@ func (c *Client) GetRequiredTables() map[string][]string {
 	return map[string][]string{
 		"Accounts":         {"Id", "FirstName", "LastName"},
 		"Routes":           {"Id", "Name", "RouteDate"},
-		"AccountCheckins":  {"Id", "CrmId", "Customer", "Comments"},
+		"AccountCheckins":  {"Id", "CrmId", "AccountId", "Comments"},
 		"UserProfiles":     {"ProfileId", "Email", "FirstName", "LastName"},
 		"AccountLocations": {"Id", "AccountId", "Latitude", "Longitude"},
 		"RouteWaypoints":   {"Id", "RouteId"},
@@ -903,12 +903,113 @@ func (c *Client) StoreProfiles(profile *api.UserProfile) error {
 			profile.ID, err)
 	}
 
+	// Store datasets and dataset values
+	if len(profile.Datafields) > 0 {
+		c.logf("Storing %d datasets for profile ID %d", len(profile.Datafields), profile.ID)
+		err = c.storeDataSets(tx, profile.ID, profile.Datafields)
+		if err != nil {
+			return fmt.Errorf("failed to store datasets: %w", err)
+		}
+	}
+
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w (check database connection and transaction state)", err)
 	}
 
 	log.Printf("Successfully stored user profile using merge_user_profiles")
+	return nil
+}
+
+// storeDataSets stores datasets and their values in the database
+func (c *Client) storeDataSets(tx *sql.Tx, profileID int, datafields []api.DataField) error {
+	// Load SQL for inserting datasets
+	sqlLoader := NewSQLLoader(c.config.DatabaseType, c.verbose)
+
+	// First, delete existing datasets and values for this profile
+	deleteDataSetsSQL, err := sqlLoader.LoadDeleteDataSetsSQL()
+	if err != nil {
+		return fmt.Errorf("failed to load delete_data_sets SQL: %w", err)
+	}
+
+	deleteDataSetValuesSQL, err := sqlLoader.LoadDeleteDataSetValuesSQL()
+	if err != nil {
+		return fmt.Errorf("failed to load delete_data_set_values SQL: %w", err)
+	}
+
+	// Delete existing dataset values
+	_, err = tx.Exec(deleteDataSetValuesSQL, profileID)
+	if err != nil {
+		return fmt.Errorf("failed to delete existing dataset values: %w", err)
+	}
+
+	// Delete existing datasets
+	_, err = tx.Exec(deleteDataSetsSQL, profileID)
+	if err != nil {
+		return fmt.Errorf("failed to delete existing datasets: %w", err)
+	}
+
+	// Load SQL for inserting datasets and values
+	insertDataSetsSQL, err := sqlLoader.LoadInsertDataSetsSQL()
+	if err != nil {
+		return fmt.Errorf("failed to load insert_data_sets SQL: %w", err)
+	}
+
+	insertDataSetValuesSQL, err := sqlLoader.LoadInsertDataSetValuesSQL()
+	if err != nil {
+		return fmt.Errorf("failed to load insert_data_set_values SQL: %w", err)
+	}
+
+	// Prepare statements
+	insertDataSetsStmt, err := tx.Prepare(insertDataSetsSQL)
+	if err != nil {
+		return fmt.Errorf("failed to prepare insert_data_sets statement: %w", err)
+	}
+	defer insertDataSetsStmt.Close()
+
+	insertDataSetValuesStmt, err := tx.Prepare(insertDataSetValuesSQL)
+	if err != nil {
+		return fmt.Errorf("failed to prepare insert_data_set_values statement: %w", err)
+	}
+	defer insertDataSetValuesStmt.Close()
+
+	// Insert datasets and their values
+	for _, datafield := range datafields {
+		// Insert dataset
+		_, err = insertDataSetsStmt.Exec(
+			profileID,
+			datafield.Name,
+			datafield.Label,
+			datafield.Type,
+			datafield.Filterable,
+			datafield.Position,
+			datafield.HasData,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert dataset %s: %w", datafield.Name, err)
+		}
+
+		// Insert dataset values
+		for _, value := range datafield.Values {
+			// Convert value to string
+			var valueStr string
+			if value.Value != nil {
+				valueStr = fmt.Sprintf("%v", value.Value)
+			}
+
+			_, err = insertDataSetValuesStmt.Exec(
+				profileID,
+				datafield.Name,
+				datafield.Position,
+				valueStr,
+				value.Text,
+			)
+			if err != nil {
+				return fmt.Errorf("failed to insert dataset value for %s: %w", datafield.Name, err)
+			}
+		}
+	}
+
 	return nil
 }
 

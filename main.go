@@ -3,14 +3,16 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 
-	"badgermapscli/cmd/auth"
 	"badgermapscli/cmd/autocomplete"
 	"badgermapscli/cmd/help"
 	"badgermapscli/cmd/pull"
 	"badgermapscli/cmd/push"
 	"badgermapscli/cmd/search"
 	"badgermapscli/cmd/server"
+	"badgermapscli/cmd/setup"
 	"badgermapscli/cmd/test"
 	"badgermapscli/cmd/utils"
 	"badgermapscli/cmd/version"
@@ -72,7 +74,7 @@ func init() {
 	rootCmd.AddCommand(server.NewServerCmd())
 	rootCmd.AddCommand(test.TestCmd())
 	rootCmd.AddCommand(utils.NewUtilsCmd())
-	rootCmd.AddCommand(auth.NewAuthCmd())
+	rootCmd.AddCommand(setup.NewSetupCmd())
 	rootCmd.AddCommand(search.NewSearchCmd())
 	rootCmd.AddCommand(autocomplete.NewAutocompleteCmd(rootCmd))
 	rootCmd.AddCommand(help.NewHelpCmd(rootCmd))
@@ -84,16 +86,19 @@ func initConfig() {
 		// Use config file from the flag.
 		viper.SetConfigFile(cfgFile)
 	} else {
-		// Find home directory.
-		home, err := os.UserHomeDir()
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
+		// Use OS-specific config directory
+		configDir := common.GetConfigDir()
+		viper.AddConfigPath(configDir)
+		viper.SetConfigName("config")
+		viper.SetConfigType("yaml")
 
-		// Search config in home directory with name ".badgermaps" (without extension).
-		viper.AddConfigPath(home)
-		viper.SetConfigName(".badgermaps")
+		// Also search in ~/.badgermaps/ for backward compatibility (Unix systems)
+		if runtime.GOOS != "windows" {
+			home, err := os.UserHomeDir()
+			if err == nil {
+				viper.AddConfigPath(filepath.Join(home, ".badgermaps"))
+			}
+		}
 
 		// Also look for .env file in current directory
 		viper.AddConfigPath(".")
@@ -112,10 +117,14 @@ func initConfig() {
 				fmt.Println("Using config file:", viper.ConfigFileUsed())
 			}
 		}
-	} else if err := viper.ReadInConfig(); err == nil {
-		// If .env not found, try the default config file
-		if verbose {
-			fmt.Println("Using config file:", viper.ConfigFileUsed())
+	} else {
+		// If .env not found, try the default config files
+		if err := viper.ReadInConfig(); err == nil {
+			if verbose {
+				fmt.Println("Using config file:", viper.ConfigFileUsed())
+			}
+		} else if verbose {
+			fmt.Println("No config file found, using defaults and environment variables")
 		}
 	}
 

@@ -315,6 +315,26 @@ func (loader *SQLLoader) CreateIndexes(db *sql.DB) error {
 	return nil
 }
 
+// LoadDeleteDataSetsSQL loads the SQL for deleting datasets
+func (loader *SQLLoader) LoadDeleteDataSetsSQL() (string, error) {
+	return loader.LoadSQL("delete_data_sets.sql")
+}
+
+// LoadDeleteDataSetValuesSQL loads the SQL for deleting dataset values
+func (loader *SQLLoader) LoadDeleteDataSetValuesSQL() (string, error) {
+	return loader.LoadSQL("delete_data_set_values.sql")
+}
+
+// LoadInsertDataSetsSQL loads the SQL for inserting datasets
+func (loader *SQLLoader) LoadInsertDataSetsSQL() (string, error) {
+	return loader.LoadSQL("insert_data_sets.sql")
+}
+
+// LoadInsertDataSetValuesSQL loads the SQL for inserting dataset values
+func (loader *SQLLoader) LoadInsertDataSetValuesSQL() (string, error) {
+	return loader.LoadSQL("insert_data_set_values.sql")
+}
+
 // Helper function for min
 func min(a, b int) int {
 	if a < b {
