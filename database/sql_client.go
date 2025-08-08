@@ -731,7 +731,7 @@ func (c *Client) StoreAccounts(accounts []api.Account) error {
 		return fmt.Errorf("failed to commit transaction: %w (check database connection and transaction state)", err)
 	}
 
-	log.Printf("Successfully stored %d accounts using merge_accounts_detailed", len(accounts))
+	// log.Printf("Successfully stored %d accounts using merge_accounts_detailed", len(accounts))
 	return nil
 }
 
