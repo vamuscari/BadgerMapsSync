@@ -68,9 +68,9 @@ func init() {
 	// Add commands
 	rootCmd.AddCommand(version.NewVersionCmd())
 	rootCmd.AddCommand(push.NewPushCmd())
-	rootCmd.AddCommand(pull.NewPullCmd())
+	rootCmd.AddCommand(pull.PullCmd())
 	rootCmd.AddCommand(server.NewServerCmd())
-	rootCmd.AddCommand(test.NewTestCmd())
+	rootCmd.AddCommand(test.TestCmd())
 	rootCmd.AddCommand(utils.NewUtilsCmd())
 	rootCmd.AddCommand(auth.NewAuthCmd())
 	rootCmd.AddCommand(search.NewSearchCmd())

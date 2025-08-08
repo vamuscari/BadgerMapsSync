@@ -150,6 +150,36 @@ func (loader *SQLLoader) LoadMergeUserProfilesSQL() (string, error) {
 	return string(content), nil
 }
 
+// LoadMergeAccountCheckinsSQL loads the SQL for merging account checkins using merge_account_checkins
+func (loader *SQLLoader) LoadMergeAccountCheckinsSQL() (string, error) {
+	filename := "merge_account_checkins.sql"
+	sqlPath := loader.getSQLPath(filename)
+
+	content, err := ioutil.ReadFile(sqlPath)
+	if err != nil {
+		dbDir := filepath.Join("database", loader.getDatabaseTypeForSQL())
+		return "", fmt.Errorf("failed to read SQL file %s: %w (check if file exists and has correct permissions in %s directory)",
+			filename, err, dbDir)
+	}
+
+	return string(content), nil
+}
+
+// LoadMergeRoutesSQL loads the SQL for merging routes using merge_routes
+func (loader *SQLLoader) LoadMergeRoutesSQL() (string, error) {
+	filename := "merge_routes.sql"
+	sqlPath := loader.getSQLPath(filename)
+
+	content, err := ioutil.ReadFile(sqlPath)
+	if err != nil {
+		dbDir := filepath.Join("database", loader.getDatabaseTypeForSQL())
+		return "", fmt.Errorf("failed to read SQL file %s: %w (check if file exists and has correct permissions in %s directory)",
+			filename, err, dbDir)
+	}
+
+	return string(content), nil
+}
+
 // LoadAndExecuteSQL loads and executes a SQL file
 func (loader *SQLLoader) LoadAndExecuteSQL(filename string, db *sql.DB) error {
 	sqlPath := loader.getSQLPath(filename)

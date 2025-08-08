@@ -506,3 +506,210 @@ func (c *Client) StoreProfiles(profile *api.UserProfile) error {
 	log.Printf("Successfully stored user profile using merge_user_profiles")
 	return nil
 }
+
+// StoreCheckins stores checkins in the database using merge_account_checkins
+func (c *Client) StoreCheckins(checkins []api.Checkin) error {
+	log.Printf("Storing %d checkins using merge_account_checkins", len(checkins))
+
+	sqlLoader := NewSQLLoader(c.config.DatabaseType)
+	sqlContent, err := sqlLoader.LoadMergeAccountCheckinsSQL()
+	if err != nil {
+		return fmt.Errorf("failed to load merge_account_checkins SQL: %w (check if merge_account_checkins.sql exists in database/%s directory)",
+			err, c.config.DatabaseType)
+	}
+
+	// Begin transaction
+	tx, err := c.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w (check database connection and transaction support)", err)
+	}
+	defer tx.Rollback()
+
+	// Prepare statement
+	stmt, err := tx.Prepare(sqlContent)
+	if err != nil {
+		return fmt.Errorf("failed to prepare merge_account_checkins statement: %w (check SQL syntax in merge_account_checkins.sql)", err)
+	}
+	defer stmt.Close()
+
+	// Execute for each checkin
+	for _, checkin := range checkins {
+		// Handle nullable CRMID field
+		var crmID string
+		if checkin.CRMID != nil {
+			crmID = *checkin.CRMID
+		}
+
+		// Handle nullable ExtraFields field
+		var extraFields string
+		if checkin.ExtraFields != nil {
+			extraFields = *checkin.ExtraFields
+		}
+
+		_, err := stmt.Exec(
+			checkin.ID,
+			crmID,
+			checkin.Customer,
+			checkin.LogDatetime,
+			checkin.Type,
+			checkin.Comments,
+			extraFields,
+			checkin.CreatedBy,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to merge checkin ID %d: %w (check checkin data and table schema compatibility)",
+				checkin.ID, err)
+		}
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w (check database connection and transaction state)", err)
+	}
+
+	log.Printf("Successfully stored %d checkins using merge_account_checkins", len(checkins))
+	return nil
+}
+
+// StoreRoutes stores routes in the database using merge_routes
+func (c *Client) StoreRoutes(routes []api.Route) error {
+	log.Printf("Storing %d routes using merge_routes", len(routes))
+
+	sqlLoader := NewSQLLoader(c.config.DatabaseType)
+	sqlContent, err := sqlLoader.LoadMergeRoutesSQL()
+	if err != nil {
+		return fmt.Errorf("failed to load merge_routes SQL: %w (check if merge_routes.sql exists in database/%s directory)",
+			err, c.config.DatabaseType)
+	}
+
+	// Begin transaction
+	tx, err := c.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w (check database connection and transaction support)", err)
+	}
+	defer tx.Rollback()
+
+	// Prepare statement
+	stmt, err := tx.Prepare(sqlContent)
+	if err != nil {
+		return fmt.Errorf("failed to prepare merge_routes statement: %w (check SQL syntax in merge_routes.sql)", err)
+	}
+	defer stmt.Close()
+
+	// Execute for each route
+	for _, route := range routes {
+		// Handle nullable Duration field
+		var duration int
+		if route.Duration != nil {
+			duration = *route.Duration
+		}
+
+		_, err := stmt.Exec(
+			route.ID,
+			route.Name,
+			route.RouteDate,
+			duration,
+			route.StartAddress,
+			route.DestinationAddress,
+			route.StartTime,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to merge route ID %d: %w (check route data and table schema compatibility)",
+				route.ID, err)
+		}
+
+		// Store waypoints if any
+		if len(route.Waypoints) > 0 {
+			if err := c.storeWaypoints(tx, route.ID, route.Waypoints); err != nil {
+				return fmt.Errorf("failed to store waypoints for route ID %d: %w", route.ID, err)
+			}
+		}
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w (check database connection and transaction state)", err)
+	}
+
+	log.Printf("Successfully stored %d routes using merge_routes", len(routes))
+	return nil
+}
+
+// storeWaypoints stores waypoints for a route
+func (c *Client) storeWaypoints(tx *sql.Tx, routeID int, waypoints []api.Waypoint) error {
+	// First, delete existing waypoints for this route
+	deleteSQL := fmt.Sprintf("DELETE FROM route_waypoints WHERE route_id = %d", routeID)
+	_, err := tx.Exec(deleteSQL)
+	if err != nil {
+		return fmt.Errorf("failed to delete existing waypoints for route ID %d: %w", routeID, err)
+	}
+
+	// Prepare insert statement
+	insertSQL := `
+		INSERT INTO route_waypoints (
+			id, route_id, name, address, suite, city, state, zipcode, 
+			location, latitude, longitude, layover_minutes, position, 
+			complete_address, location_id, customer_id, appt_time, type, place_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+	stmt, err := tx.Prepare(insertSQL)
+	if err != nil {
+		return fmt.Errorf("failed to prepare waypoint insert statement: %w", err)
+	}
+	defer stmt.Close()
+
+	// Insert each waypoint
+	for _, waypoint := range waypoints {
+		// Handle nullable fields
+		var suite, city, state, zipcode, completeAddress, apptTime, placeID string
+
+		if waypoint.Suite != nil {
+			suite = *waypoint.Suite
+		}
+		if waypoint.City != nil {
+			city = *waypoint.City
+		}
+		if waypoint.State != nil {
+			state = *waypoint.State
+		}
+		if waypoint.Zipcode != nil {
+			zipcode = *waypoint.Zipcode
+		}
+		if waypoint.CompleteAddress != nil {
+			completeAddress = *waypoint.CompleteAddress
+		}
+		if waypoint.ApptTime != nil {
+			apptTime = *waypoint.ApptTime
+		}
+		if waypoint.PlaceID != nil {
+			placeID = *waypoint.PlaceID
+		}
+
+		_, err := stmt.Exec(
+			waypoint.ID,
+			routeID,
+			waypoint.Name,
+			waypoint.Address,
+			suite,
+			city,
+			state,
+			zipcode,
+			waypoint.Location,
+			waypoint.Lat,
+			waypoint.Long,
+			waypoint.LayoverMinutes,
+			waypoint.Position,
+			completeAddress,
+			waypoint.LocationID,
+			waypoint.CustomerID,
+			apptTime,
+			waypoint.Type,
+			placeID,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert waypoint ID %d: %w", waypoint.ID, err)
+		}
+	}
+
+	return nil
+}

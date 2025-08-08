@@ -1,20 +1,20 @@
 package pull
 
 import (
-	"fmt"
-	"os"
-	"sync"
-
 	"badgermapscli/api"
 	"badgermapscli/database"
+	"fmt"
+	"os"
+	"strconv"
+	"sync"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-// NewPullCmd creates a new pull command
-func NewPullCmd() *cobra.Command {
+// PullCmd creates a new pull command
+func PullCmd() *cobra.Command {
 	pullCmd := &cobra.Command{
 		Use:   "pull",
 		Short: "Retrieve data from BadgerMaps API",
@@ -26,45 +26,226 @@ func NewPullCmd() *cobra.Command {
 	}
 
 	// Add subcommands
-	pullCmd.AddCommand(newPullAccountCmd())
-	pullCmd.AddCommand(newPullAccountsCmd())
-	pullCmd.AddCommand(newPullCheckinCmd())
-	pullCmd.AddCommand(newPullCheckinsCmd())
-	pullCmd.AddCommand(newPullRouteCmd())
-	pullCmd.AddCommand(newPullRoutesCmd())
-	pullCmd.AddCommand(newPullProfileCmd())
+	pullCmd.AddCommand(pullAccountCmd())
+	pullCmd.AddCommand(pullAccountsCmd())
+	pullCmd.AddCommand(pullCheckinCmd())
+	pullCmd.AddCommand(pullCheckinsCmd())
+	pullCmd.AddCommand(pullRouteCmd())
+	pullCmd.AddCommand(pullRoutesCmd())
+	pullCmd.AddCommand(pullProfileCmd())
 
 	return pullCmd
 }
 
-// newPullAccountCmd creates a command to pull a single account
-func newPullAccountCmd() *cobra.Command {
+// pullAccountCmd creates a command to pull a single account
+func pullAccountCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "account [id]",
 		Short: "Pull a single account from BadgerMaps",
 		Long:  `Pull a single account from the BadgerMaps API to your local database.`,
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			// Implementation will go here
-			fmt.Printf("Pulling account with ID: %s\n", args[0])
+			fmt.Println(color.CyanString("Pulling account with ID: %s", args[0]))
+
+			// Get API key from viper
+			apiKey := viper.GetString("API_KEY")
+			if apiKey == "" {
+				fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
+				os.Exit(1)
+			}
+
+			// Parse account ID
+			accountID, err := strconv.Atoi(args[0])
+			if err != nil {
+				fmt.Println(color.RedString("Invalid account ID: %s", args[0]))
+				os.Exit(1)
+			}
+
+			// Create API client
+			apiClient := api.NewAPIClient(apiKey)
+
+			// Get account from API
+			account, err := apiClient.GetAccount(accountID)
+			if err != nil {
+				fmt.Println(color.RedString("Error retrieving account: %v", err))
+				os.Exit(1)
+			}
+
+			// Get database configuration
+			dbConfig := &database.Config{
+				DatabaseType: viper.GetString("DATABASE_TYPE"),
+				Host:         viper.GetString("DATABASE_HOST"),
+				Port:         viper.GetString("DATABASE_PORT"),
+				Database:     viper.GetString("DATABASE_NAME"),
+				Username:     viper.GetString("DATABASE_USERNAME"),
+				Password:     viper.GetString("DATABASE_PASSWORD"),
+			}
+
+			// Set default database type and name if not provided
+			if dbConfig.DatabaseType == "" {
+				dbConfig.DatabaseType = "sqlite3" // Default to SQLite
+			}
+			if dbConfig.DatabaseType == "sqlite3" && dbConfig.Database == "" {
+				dbConfig.Database = "badgermaps.db"
+			}
+
+			// Create database client
+			dbClient, err := database.NewClient(dbConfig)
+			if err != nil {
+				fmt.Println(color.RedString("Error creating database client: %v", err))
+				os.Exit(1)
+			}
+			defer dbClient.Close()
+
+			// Validate database schema
+			err = dbClient.ValidateDatabaseSchema()
+			if err != nil {
+				fmt.Println(color.RedString("Database schema validation failed: %v", err))
+				fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
+				os.Exit(1)
+			}
+
+			// Store account in database
+			accounts := []api.Account{*account}
+			err = dbClient.StoreAccounts(accounts)
+			if err != nil {
+				fmt.Println(color.RedString("Error storing account: %v", err))
+				os.Exit(1)
+			}
+
+			fmt.Println(color.GreenString("Successfully pulled and stored account"))
+			fmt.Printf("Account ID: %d\n", account.ID)
+			fmt.Printf("Name: %s\n", account.FullName)
+			fmt.Printf("Email: %s\n", account.Email)
+			fmt.Printf("Locations: %d\n", len(account.Locations))
 		},
 	}
 	return cmd
 }
 
-// newPullAccountsCmd creates a command to pull multiple accounts
-func newPullAccountsCmd() *cobra.Command {
+// pullAccountsCmd creates a command to pull multiple accounts
+func pullAccountsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "accounts [id...]",
 		Short: "Pull multiple accounts from BadgerMaps",
 		Long:  `Pull multiple accounts from the BadgerMaps API to your local database.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) == 0 {
-				fmt.Println("Pulling all accounts")
+				fmt.Println(color.CyanString("Pulling all accounts"))
 				pullAllAccounts()
 			} else {
-				fmt.Printf("Pulling accounts with IDs: %v\n", args)
-				// Implementation for specific accounts will go here
+				fmt.Println(color.CyanString("Pulling accounts with IDs: %v", args))
+
+				// Get API key from viper
+				apiKey := viper.GetString("API_KEY")
+				if apiKey == "" {
+					fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
+					os.Exit(1)
+				}
+
+				// Create API client
+				apiClient := api.NewAPIClient(apiKey)
+
+				// Get database configuration
+				dbConfig := &database.Config{
+					DatabaseType: viper.GetString("DATABASE_TYPE"),
+					Host:         viper.GetString("DATABASE_HOST"),
+					Port:         viper.GetString("DATABASE_PORT"),
+					Database:     viper.GetString("DATABASE_NAME"),
+					Username:     viper.GetString("DATABASE_USERNAME"),
+					Password:     viper.GetString("DATABASE_PASSWORD"),
+				}
+
+				// Set default database type and name if not provided
+				if dbConfig.DatabaseType == "" {
+					dbConfig.DatabaseType = "sqlite3" // Default to SQLite
+				}
+				if dbConfig.DatabaseType == "sqlite3" && dbConfig.Database == "" {
+					dbConfig.Database = "badgermaps.db"
+				}
+
+				// Create database client
+				dbClient, err := database.NewClient(dbConfig)
+				if err != nil {
+					fmt.Println(color.RedString("Error creating database client: %v", err))
+					os.Exit(1)
+				}
+				defer dbClient.Close()
+
+				// Validate database schema
+				err = dbClient.ValidateDatabaseSchema()
+				if err != nil {
+					fmt.Println(color.RedString("Database schema validation failed: %v", err))
+					fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
+					os.Exit(1)
+				}
+
+				// Parse account IDs
+				accountIDs := make([]int, 0, len(args))
+				for _, arg := range args {
+					id, err := strconv.Atoi(arg)
+					if err != nil {
+						fmt.Println(color.RedString("Invalid account ID: %s", arg))
+						os.Exit(1)
+					}
+					accountIDs = append(accountIDs, id)
+				}
+
+				// Get max parallel processes from config
+				maxParallel := viper.GetInt("MAX_PARALLEL_PROCESSES")
+				if maxParallel <= 0 {
+					maxParallel = 5 // Default value
+				}
+
+				// Create a semaphore to limit concurrent operations
+				sem := make(chan bool, maxParallel)
+				var wg sync.WaitGroup
+
+				// Process accounts in parallel
+				accounts := make([]api.Account, 0, len(accountIDs))
+				var accountsMutex sync.Mutex
+
+				for _, id := range accountIDs {
+					wg.Add(1)
+					go func(accountID int) {
+						defer wg.Done()
+
+						// Acquire semaphore
+						sem <- true
+						defer func() { <-sem }()
+
+						fmt.Printf("Pulling account %d from API...\n", accountID)
+
+						// Get account from API
+						account, err := apiClient.GetAccount(accountID)
+						if err != nil {
+							fmt.Println(color.RedString("Error retrieving account %d: %v", accountID, err))
+							return
+						}
+
+						// Add account to the list
+						accountsMutex.Lock()
+						accounts = append(accounts, *account)
+						accountsMutex.Unlock()
+					}(id)
+				}
+
+				// Wait for all goroutines to finish
+				wg.Wait()
+
+				if len(accounts) == 0 {
+					fmt.Println(color.YellowString("No accounts were retrieved successfully"))
+					os.Exit(1)
+				}
+
+				// Store accounts in database
+				err = dbClient.StoreAccounts(accounts)
+				if err != nil {
+					fmt.Println(color.RedString("Error storing accounts: %v", err))
+					os.Exit(1)
+				}
+
+				fmt.Println(color.GreenString("Successfully pulled and stored %d accounts", len(accounts)))
 			}
 		},
 	}
@@ -73,32 +254,79 @@ func newPullAccountsCmd() *cobra.Command {
 
 // pullAllAccounts pulls all accounts from the API
 func pullAllAccounts() {
-	// This is a placeholder for the actual implementation
-	// In a real implementation, we would:
-	// 1. Call the API to get all accounts
-	// 2. Store them in the database
-	// 3. Handle rate limiting and errors
+	fmt.Println(color.CyanString("Retrieving all accounts from BadgerMaps API..."))
 
-	// Example of how this might look:
-	fmt.Println("Retrieving all accounts from BadgerMaps API...")
+	// Get API key from viper
+	apiKey := viper.GetString("API_KEY")
+	if apiKey == "" {
+		fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
+		os.Exit(1)
+	}
 
-	// Simulate getting accounts from API
-	accountIDs := []int{1, 2, 3, 4, 5}
+	// Create API client
+	apiClient := api.NewAPIClient(apiKey)
 
-	fmt.Printf("Found %d accounts to pull\n", len(accountIDs))
+	// Get all accounts from API (basic list)
+	accountsList, err := apiClient.GetAccounts()
+	if err != nil {
+		fmt.Println(color.RedString("Error retrieving accounts list: %v", err))
+		os.Exit(1)
+	}
+
+	fmt.Printf("Found %d accounts to pull\n", len(accountsList))
+
+	// Get database configuration
+	dbConfig := &database.Config{
+		DatabaseType: viper.GetString("DATABASE_TYPE"),
+		Host:         viper.GetString("DATABASE_HOST"),
+		Port:         viper.GetString("DATABASE_PORT"),
+		Database:     viper.GetString("DATABASE_NAME"),
+		Username:     viper.GetString("DATABASE_USERNAME"),
+		Password:     viper.GetString("DATABASE_PASSWORD"),
+	}
+
+	// Set default database type and name if not provided
+	if dbConfig.DatabaseType == "" {
+		dbConfig.DatabaseType = "sqlite3" // Default to SQLite
+	}
+	if dbConfig.DatabaseType == "sqlite3" && dbConfig.Database == "" {
+		dbConfig.Database = "badgermaps.db"
+	}
+
+	// Create database client
+	dbClient, err := database.NewClient(dbConfig)
+	if err != nil {
+		fmt.Println(color.RedString("Error creating database client: %v", err))
+		os.Exit(1)
+	}
+	defer dbClient.Close()
+
+	// Validate database schema
+	err = dbClient.ValidateDatabaseSchema()
+	if err != nil {
+		fmt.Println(color.RedString("Database schema validation failed: %v", err))
+		fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
+		os.Exit(1)
+	}
 
 	// Get max parallel processes from config
 	maxParallel := viper.GetInt("MAX_PARALLEL_PROCESSES")
 	if maxParallel <= 0 {
 		maxParallel = 5 // Default value
 	}
+	fmt.Printf("Using maximum of %d concurrent operations\n", maxParallel)
 
 	// Create a semaphore to limit concurrent operations
 	sem := make(chan bool, maxParallel)
 	var wg sync.WaitGroup
 
 	// Process accounts in parallel
-	for _, id := range accountIDs {
+	detailedAccounts := make([]api.Account, 0, len(accountsList))
+	var accountsMutex sync.Mutex
+
+	fmt.Println(color.CyanString("Retrieving detailed account information..."))
+
+	for _, basicAccount := range accountsList {
 		wg.Add(1)
 		go func(accountID int) {
 			defer wg.Done()
@@ -107,87 +335,608 @@ func pullAllAccounts() {
 			sem <- true
 			defer func() { <-sem }()
 
-			// Simulate pulling account from API
-			fmt.Printf("Pulling account %d from API...\n", accountID)
-			// In a real implementation, we would call the API client here
-			// and store the result in the database
-		}(id)
+			// Get detailed account from API
+			detailedAccount, err := apiClient.GetAccount(accountID)
+			if err != nil {
+				fmt.Println(color.RedString("Error retrieving account %d: %v", accountID, err))
+				return
+			}
+
+			// Add account to the list
+			accountsMutex.Lock()
+			detailedAccounts = append(detailedAccounts, *detailedAccount)
+			accountsMutex.Unlock()
+
+			fmt.Printf("Retrieved account %d: %s\n", accountID, detailedAccount.FullName)
+		}(basicAccount.ID)
 	}
 
 	// Wait for all goroutines to finish
 	wg.Wait()
 
-	fmt.Println(color.GreenString("Successfully pulled all accounts from BadgerMaps"))
+	if len(detailedAccounts) == 0 {
+		fmt.Println(color.YellowString("No accounts were retrieved successfully"))
+		os.Exit(1)
+	}
+
+	fmt.Printf("Successfully retrieved %d/%d accounts\n", len(detailedAccounts), len(accountsList))
+
+	// Store accounts in database
+	err = dbClient.StoreAccounts(detailedAccounts)
+	if err != nil {
+		fmt.Println(color.RedString("Error storing accounts: %v", err))
+		os.Exit(1)
+	}
+
+	fmt.Println(color.GreenString("Successfully pulled and stored all accounts from BadgerMaps"))
 }
 
-// newPullCheckinCmd creates a command to pull a single checkin
-func newPullCheckinCmd() *cobra.Command {
+// pullCheckinCmd creates a command to pull a single checkin
+func pullCheckinCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "checkin [id]",
 		Short: "Pull a single checkin from BadgerMaps",
 		Long:  `Pull a single checkin from the BadgerMaps API to your local database.`,
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("Pulling checkin with ID: %s\n", args[0])
+			fmt.Println(color.CyanString("Pulling checkin with ID: %s", args[0]))
+
+			// Get API key from viper
+			apiKey := viper.GetString("API_KEY")
+			if apiKey == "" {
+				fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
+				os.Exit(1)
+			}
+
+			// Parse checkin ID
+			checkinID, err := strconv.Atoi(args[0])
+			if err != nil {
+				fmt.Println(color.RedString("Invalid checkin ID: %s", args[0]))
+				os.Exit(1)
+			}
+
+			// Create API client
+			apiClient := api.NewAPIClient(apiKey)
+
+			// Get checkin from API
+			checkin, err := apiClient.GetCheckin(checkinID)
+			if err != nil {
+				fmt.Println(color.RedString("Error retrieving checkin: %v", err))
+				os.Exit(1)
+			}
+
+			// Get database configuration
+			dbConfig := &database.Config{
+				DatabaseType: viper.GetString("DATABASE_TYPE"),
+				Host:         viper.GetString("DATABASE_HOST"),
+				Port:         viper.GetString("DATABASE_PORT"),
+				Database:     viper.GetString("DATABASE_NAME"),
+				Username:     viper.GetString("DATABASE_USERNAME"),
+				Password:     viper.GetString("DATABASE_PASSWORD"),
+			}
+
+			// Set default database type and name if not provided
+			if dbConfig.DatabaseType == "" {
+				dbConfig.DatabaseType = "sqlite3" // Default to SQLite
+			}
+			if dbConfig.DatabaseType == "sqlite3" && dbConfig.Database == "" {
+				dbConfig.Database = "badgermaps.db"
+			}
+
+			// Create database client
+			dbClient, err := database.NewClient(dbConfig)
+			if err != nil {
+				fmt.Println(color.RedString("Error creating database client: %v", err))
+				os.Exit(1)
+			}
+			defer dbClient.Close()
+
+			// Validate database schema
+			err = dbClient.ValidateDatabaseSchema()
+			if err != nil {
+				fmt.Println(color.RedString("Database schema validation failed: %v", err))
+				fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
+				os.Exit(1)
+			}
+
+			// Store checkin in database
+			checkins := []api.Checkin{*checkin}
+			err = dbClient.StoreCheckins(checkins)
+			if err != nil {
+				fmt.Println(color.RedString("Error storing checkin: %v", err))
+				os.Exit(1)
+			}
+
+			fmt.Println(color.GreenString("Successfully pulled and stored checkin"))
+			fmt.Printf("Checkin ID: %d\n", checkin.ID)
+			fmt.Printf("Customer: %d\n", checkin.Customer)
+			fmt.Printf("Type: %s\n", checkin.Type)
+			fmt.Printf("Date: %s\n", checkin.LogDatetime)
 		},
 	}
 	return cmd
 }
 
-// newPullCheckinsCmd creates a command to pull multiple checkins
-func newPullCheckinsCmd() *cobra.Command {
+// pullCheckinsCmd creates a command to pull multiple checkins
+func pullCheckinsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "checkins [id...]",
 		Short: "Pull multiple checkins from BadgerMaps",
 		Long:  `Pull multiple checkins from the BadgerMaps API to your local database.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) == 0 {
-				fmt.Println("Pulling all checkins")
-				// Implementation for all checkins will go here
+				fmt.Println(color.CyanString("Pulling all checkins"))
+				pullAllCheckins()
 			} else {
-				fmt.Printf("Pulling checkins with IDs: %v\n", args)
-				// Implementation for specific checkins will go here
+				fmt.Println(color.CyanString("Pulling checkins with IDs: %v", args))
+
+				// Get API key from viper
+				apiKey := viper.GetString("API_KEY")
+				if apiKey == "" {
+					fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
+					os.Exit(1)
+				}
+
+				// Create API client
+				apiClient := api.NewAPIClient(apiKey)
+
+				// Get database configuration
+				dbConfig := &database.Config{
+					DatabaseType: viper.GetString("DATABASE_TYPE"),
+					Host:         viper.GetString("DATABASE_HOST"),
+					Port:         viper.GetString("DATABASE_PORT"),
+					Database:     viper.GetString("DATABASE_NAME"),
+					Username:     viper.GetString("DATABASE_USERNAME"),
+					Password:     viper.GetString("DATABASE_PASSWORD"),
+				}
+
+				// Set default database type and name if not provided
+				if dbConfig.DatabaseType == "" {
+					dbConfig.DatabaseType = "sqlite3" // Default to SQLite
+				}
+				if dbConfig.DatabaseType == "sqlite3" && dbConfig.Database == "" {
+					dbConfig.Database = "badgermaps.db"
+				}
+
+				// Create database client
+				dbClient, err := database.NewClient(dbConfig)
+				if err != nil {
+					fmt.Println(color.RedString("Error creating database client: %v", err))
+					os.Exit(1)
+				}
+				defer dbClient.Close()
+
+				// Validate database schema
+				err = dbClient.ValidateDatabaseSchema()
+				if err != nil {
+					fmt.Println(color.RedString("Database schema validation failed: %v", err))
+					fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
+					os.Exit(1)
+				}
+
+				// Parse checkin IDs
+				checkinIDs := make([]int, 0, len(args))
+				for _, arg := range args {
+					id, err := strconv.Atoi(arg)
+					if err != nil {
+						fmt.Println(color.RedString("Invalid checkin ID: %s", arg))
+						os.Exit(1)
+					}
+					checkinIDs = append(checkinIDs, id)
+				}
+
+				// Get max parallel processes from config
+				maxParallel := viper.GetInt("MAX_PARALLEL_PROCESSES")
+				if maxParallel <= 0 {
+					maxParallel = 5 // Default value
+				}
+
+				// Create a semaphore to limit concurrent operations
+				sem := make(chan bool, maxParallel)
+				var wg sync.WaitGroup
+
+				// Process checkins in parallel
+				checkins := make([]api.Checkin, 0, len(checkinIDs))
+				var checkinsMutex sync.Mutex
+
+				for _, id := range checkinIDs {
+					wg.Add(1)
+					go func(checkinID int) {
+						defer wg.Done()
+
+						// Acquire semaphore
+						sem <- true
+						defer func() { <-sem }()
+
+						fmt.Printf("Pulling checkin %d from API...\n", checkinID)
+
+						// Get checkin from API
+						checkin, err := apiClient.GetCheckin(checkinID)
+						if err != nil {
+							fmt.Println(color.RedString("Error retrieving checkin %d: %v", checkinID, err))
+							return
+						}
+
+						// Add checkin to the list
+						checkinsMutex.Lock()
+						checkins = append(checkins, *checkin)
+						checkinsMutex.Unlock()
+					}(id)
+				}
+
+				// Wait for all goroutines to finish
+				wg.Wait()
+
+				if len(checkins) == 0 {
+					fmt.Println(color.YellowString("No checkins were retrieved successfully"))
+					os.Exit(1)
+				}
+
+				// Store checkins in database
+				err = dbClient.StoreCheckins(checkins)
+				if err != nil {
+					fmt.Println(color.RedString("Error storing checkins: %v", err))
+					os.Exit(1)
+				}
+
+				fmt.Println(color.GreenString("Successfully pulled and stored %d checkins", len(checkins)))
 			}
 		},
 	}
 	return cmd
 }
 
-// newPullRouteCmd creates a command to pull a single route
-func newPullRouteCmd() *cobra.Command {
+// pullAllCheckins pulls all checkins from the API
+func pullAllCheckins() {
+	fmt.Println(color.CyanString("Retrieving all checkins from BadgerMaps API..."))
+
+	// Get API key from viper
+	apiKey := viper.GetString("API_KEY")
+	if apiKey == "" {
+		fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
+		os.Exit(1)
+	}
+
+	// Create API client
+	apiClient := api.NewAPIClient(apiKey)
+
+	// Get all checkins from API
+	checkins, err := apiClient.GetCheckins()
+	if err != nil {
+		fmt.Println(color.RedString("Error retrieving checkins: %v", err))
+		os.Exit(1)
+	}
+
+	fmt.Printf("Found %d checkins to pull\n", len(checkins))
+
+	// Get database configuration
+	dbConfig := &database.Config{
+		DatabaseType: viper.GetString("DATABASE_TYPE"),
+		Host:         viper.GetString("DATABASE_HOST"),
+		Port:         viper.GetString("DATABASE_PORT"),
+		Database:     viper.GetString("DATABASE_NAME"),
+		Username:     viper.GetString("DATABASE_USERNAME"),
+		Password:     viper.GetString("DATABASE_PASSWORD"),
+	}
+
+	// Set default database type and name if not provided
+	if dbConfig.DatabaseType == "" {
+		dbConfig.DatabaseType = "sqlite3" // Default to SQLite
+	}
+	if dbConfig.DatabaseType == "sqlite3" && dbConfig.Database == "" {
+		dbConfig.Database = "badgermaps.db"
+	}
+
+	// Create database client
+	dbClient, err := database.NewClient(dbConfig)
+	if err != nil {
+		fmt.Println(color.RedString("Error creating database client: %v", err))
+		os.Exit(1)
+	}
+	defer dbClient.Close()
+
+	// Validate database schema
+	err = dbClient.ValidateDatabaseSchema()
+	if err != nil {
+		fmt.Println(color.RedString("Database schema validation failed: %v", err))
+		fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
+		os.Exit(1)
+	}
+
+	// Store checkins in database
+	err = dbClient.StoreCheckins(checkins)
+	if err != nil {
+		fmt.Println(color.RedString("Error storing checkins: %v", err))
+		os.Exit(1)
+	}
+
+	fmt.Println(color.GreenString("Successfully pulled and stored all checkins from BadgerMaps"))
+}
+
+// pullRouteCmd creates a command to pull a single route
+func pullRouteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "route [id]",
 		Short: "Pull a single route from BadgerMaps",
 		Long:  `Pull a single route from the BadgerMaps API to your local database.`,
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("Pulling route with ID: %s\n", args[0])
+			fmt.Println(color.CyanString("Pulling route with ID: %s", args[0]))
+
+			// Get API key from viper
+			apiKey := viper.GetString("API_KEY")
+			if apiKey == "" {
+				fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
+				os.Exit(1)
+			}
+
+			// Parse route ID
+			routeID, err := strconv.Atoi(args[0])
+			if err != nil {
+				fmt.Println(color.RedString("Invalid route ID: %s", args[0]))
+				os.Exit(1)
+			}
+
+			// Create API client
+			apiClient := api.NewAPIClient(apiKey)
+
+			// Get route from API
+			route, err := apiClient.GetRoute(routeID)
+			if err != nil {
+				fmt.Println(color.RedString("Error retrieving route: %v", err))
+				os.Exit(1)
+			}
+
+			// Get database configuration
+			dbConfig := &database.Config{
+				DatabaseType: viper.GetString("DATABASE_TYPE"),
+				Host:         viper.GetString("DATABASE_HOST"),
+				Port:         viper.GetString("DATABASE_PORT"),
+				Database:     viper.GetString("DATABASE_NAME"),
+				Username:     viper.GetString("DATABASE_USERNAME"),
+				Password:     viper.GetString("DATABASE_PASSWORD"),
+			}
+
+			// Set default database type and name if not provided
+			if dbConfig.DatabaseType == "" {
+				dbConfig.DatabaseType = "sqlite3" // Default to SQLite
+			}
+			if dbConfig.DatabaseType == "sqlite3" && dbConfig.Database == "" {
+				dbConfig.Database = "badgermaps.db"
+			}
+
+			// Create database client
+			dbClient, err := database.NewClient(dbConfig)
+			if err != nil {
+				fmt.Println(color.RedString("Error creating database client: %v", err))
+				os.Exit(1)
+			}
+			defer dbClient.Close()
+
+			// Validate database schema
+			err = dbClient.ValidateDatabaseSchema()
+			if err != nil {
+				fmt.Println(color.RedString("Database schema validation failed: %v", err))
+				fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
+				os.Exit(1)
+			}
+
+			// Store route in database
+			routes := []api.Route{*route}
+			err = dbClient.StoreRoutes(routes)
+			if err != nil {
+				fmt.Println(color.RedString("Error storing route: %v", err))
+				os.Exit(1)
+			}
+
+			fmt.Println(color.GreenString("Successfully pulled and stored route"))
+			fmt.Printf("Route ID: %d\n", route.ID)
+			fmt.Printf("Name: %s\n", route.Name)
+			fmt.Printf("Date: %s\n", route.RouteDate)
+			fmt.Printf("Waypoints: %d\n", len(route.Waypoints))
 		},
 	}
 	return cmd
 }
 
-// newPullRoutesCmd creates a command to pull multiple routes
-func newPullRoutesCmd() *cobra.Command {
+// pullRoutesCmd creates a command to pull multiple routes
+func pullRoutesCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "routes [id...]",
 		Short: "Pull multiple routes from BadgerMaps",
 		Long:  `Pull multiple routes from the BadgerMaps API to your local database.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) == 0 {
-				fmt.Println("Pulling all routes")
-				// Implementation for all routes will go here
+				fmt.Println(color.CyanString("Pulling all routes"))
+				pullAllRoutes()
 			} else {
-				fmt.Printf("Pulling routes with IDs: %v\n", args)
-				// Implementation for specific routes will go here
+				fmt.Println(color.CyanString("Pulling routes with IDs: %v", args))
+
+				// Get API key from viper
+				apiKey := viper.GetString("API_KEY")
+				if apiKey == "" {
+					fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
+					os.Exit(1)
+				}
+
+				// Create API client
+				apiClient := api.NewAPIClient(apiKey)
+
+				// Get database configuration
+				dbConfig := &database.Config{
+					DatabaseType: viper.GetString("DATABASE_TYPE"),
+					Host:         viper.GetString("DATABASE_HOST"),
+					Port:         viper.GetString("DATABASE_PORT"),
+					Database:     viper.GetString("DATABASE_NAME"),
+					Username:     viper.GetString("DATABASE_USERNAME"),
+					Password:     viper.GetString("DATABASE_PASSWORD"),
+				}
+
+				// Set default database type and name if not provided
+				if dbConfig.DatabaseType == "" {
+					dbConfig.DatabaseType = "sqlite3" // Default to SQLite
+				}
+				if dbConfig.DatabaseType == "sqlite3" && dbConfig.Database == "" {
+					dbConfig.Database = "badgermaps.db"
+				}
+
+				// Create database client
+				dbClient, err := database.NewClient(dbConfig)
+				if err != nil {
+					fmt.Println(color.RedString("Error creating database client: %v", err))
+					os.Exit(1)
+				}
+				defer dbClient.Close()
+
+				// Validate database schema
+				err = dbClient.ValidateDatabaseSchema()
+				if err != nil {
+					fmt.Println(color.RedString("Database schema validation failed: %v", err))
+					fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
+					os.Exit(1)
+				}
+
+				// Parse route IDs
+				routeIDs := make([]int, 0, len(args))
+				for _, arg := range args {
+					id, err := strconv.Atoi(arg)
+					if err != nil {
+						fmt.Println(color.RedString("Invalid route ID: %s", arg))
+						os.Exit(1)
+					}
+					routeIDs = append(routeIDs, id)
+				}
+
+				// Get max parallel processes from config
+				maxParallel := viper.GetInt("MAX_PARALLEL_PROCESSES")
+				if maxParallel <= 0 {
+					maxParallel = 5 // Default value
+				}
+
+				// Create a semaphore to limit concurrent operations
+				sem := make(chan bool, maxParallel)
+				var wg sync.WaitGroup
+
+				// Process routes in parallel
+				routes := make([]api.Route, 0, len(routeIDs))
+				var routesMutex sync.Mutex
+
+				for _, id := range routeIDs {
+					wg.Add(1)
+					go func(routeID int) {
+						defer wg.Done()
+
+						// Acquire semaphore
+						sem <- true
+						defer func() { <-sem }()
+
+						fmt.Printf("Pulling route %d from API...\n", routeID)
+
+						// Get route from API
+						route, err := apiClient.GetRoute(routeID)
+						if err != nil {
+							fmt.Println(color.RedString("Error retrieving route %d: %v", routeID, err))
+							return
+						}
+
+						// Add route to the list
+						routesMutex.Lock()
+						routes = append(routes, *route)
+						routesMutex.Unlock()
+					}(id)
+				}
+
+				// Wait for all goroutines to finish
+				wg.Wait()
+
+				if len(routes) == 0 {
+					fmt.Println(color.YellowString("No routes were retrieved successfully"))
+					os.Exit(1)
+				}
+
+				// Store routes in database
+				err = dbClient.StoreRoutes(routes)
+				if err != nil {
+					fmt.Println(color.RedString("Error storing routes: %v", err))
+					os.Exit(1)
+				}
+
+				fmt.Println(color.GreenString("Successfully pulled and stored %d routes", len(routes)))
 			}
 		},
 	}
 	return cmd
 }
 
-// newPullProfileCmd creates a command to pull the user profile
-func newPullProfileCmd() *cobra.Command {
+// pullAllRoutes pulls all routes from the API
+func pullAllRoutes() {
+	fmt.Println(color.CyanString("Retrieving all routes from BadgerMaps API..."))
+
+	// Get API key from viper
+	apiKey := viper.GetString("API_KEY")
+	if apiKey == "" {
+		fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
+		os.Exit(1)
+	}
+
+	// Create API client
+	apiClient := api.NewAPIClient(apiKey)
+
+	// Get all routes from API
+	routes, err := apiClient.GetRoutes()
+	if err != nil {
+		fmt.Println(color.RedString("Error retrieving routes: %v", err))
+		os.Exit(1)
+	}
+
+	fmt.Printf("Found %d routes to pull\n", len(routes))
+
+	// Get database configuration
+	dbConfig := &database.Config{
+		DatabaseType: viper.GetString("DATABASE_TYPE"),
+		Host:         viper.GetString("DATABASE_HOST"),
+		Port:         viper.GetString("DATABASE_PORT"),
+		Database:     viper.GetString("DATABASE_NAME"),
+		Username:     viper.GetString("DATABASE_USERNAME"),
+		Password:     viper.GetString("DATABASE_PASSWORD"),
+	}
+
+	// Set default database type and name if not provided
+	if dbConfig.DatabaseType == "" {
+		dbConfig.DatabaseType = "sqlite3" // Default to SQLite
+	}
+	if dbConfig.DatabaseType == "sqlite3" && dbConfig.Database == "" {
+		dbConfig.Database = "badgermaps.db"
+	}
+
+	// Create database client
+	dbClient, err := database.NewClient(dbConfig)
+	if err != nil {
+		fmt.Println(color.RedString("Error creating database client: %v", err))
+		os.Exit(1)
+	}
+	defer dbClient.Close()
+
+	// Validate database schema
+	err = dbClient.ValidateDatabaseSchema()
+	if err != nil {
+		fmt.Println(color.RedString("Database schema validation failed: %v", err))
+		fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
+		os.Exit(1)
+	}
+
+	// Store routes in database
+	err = dbClient.StoreRoutes(routes)
+	if err != nil {
+		fmt.Println(color.RedString("Error storing routes: %v", err))
+		os.Exit(1)
+	}
+
+	fmt.Println(color.GreenString("Successfully pulled and stored all routes from BadgerMaps"))
+}
+
+// pullProfileCmd creates a command to pull the user profile
+func pullProfileCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "profile",
 		Short: "Pull user profile from BadgerMaps",

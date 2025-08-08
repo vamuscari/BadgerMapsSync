@@ -1,8 +1,10 @@
 package test
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -14,8 +16,8 @@ import (
 	"github.com/spf13/viper"
 )
 
-// NewTestCmd creates a new test command
-func NewTestCmd() *cobra.Command {
+// TestCmd creates a new test command
+func TestCmd() *cobra.Command {
 	var (
 		saveResponses bool
 		apiKey        string
@@ -46,7 +48,8 @@ func NewTestCmd() *cobra.Command {
 
 	// Add subcommands
 	testCmd.AddCommand(newTestAPICmd())
-	testCmd.AddCommand(newTestDatabaseCmd())
+	testCmd.AddCommand(testDatabaseCmd())
+	testCmd.AddCommand(testEndpointsCmd())
 
 	return testCmd
 }
@@ -84,8 +87,8 @@ func newTestAPICmd() *cobra.Command {
 	return cmd
 }
 
-// newTestDatabaseCmd creates a command to test database functionality
-func newTestDatabaseCmd() *cobra.Command {
+// testDatabaseCmd creates a command to test database functionality
+func testDatabaseCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "database",
 		Short: "Test database functionality",
@@ -173,6 +176,39 @@ func saveAPIResponses(apiClient *api.APIClient) {
 	accounts, err := apiClient.GetAccounts()
 	if err == nil {
 		saveResponseToFile(accounts, filepath.Join(testDir, fmt.Sprintf("accounts_%s.json", timestamp)))
+
+		// Get and save details for the first account if available
+		if len(accounts) > 0 {
+			fmt.Println(color.CyanString("Getting details for the first account (ID: %d)...", accounts[0].ID))
+			accountDetails, err := apiClient.GetAccount(accounts[0].ID)
+			if err == nil {
+				// Display account details
+				fmt.Println(color.GreenString("First account details:"))
+				fmt.Printf("ID: %d\n", accountDetails.ID)
+
+				// Handle FirstName which is a pointer
+				firstName := ""
+				if accountDetails.FirstName != nil {
+					firstName = *accountDetails.FirstName
+				}
+				fmt.Printf("Name: %s %s\n", firstName, accountDetails.LastName)
+
+				if accountDetails.FullName != "" {
+					fmt.Printf("Full Name: %s\n", accountDetails.FullName)
+				}
+				if accountDetails.Email != "" {
+					fmt.Printf("Email: %s\n", accountDetails.Email)
+				}
+				if accountDetails.PhoneNumber != "" {
+					fmt.Printf("Phone: %s\n", accountDetails.PhoneNumber)
+				}
+
+				// Save detailed account to file
+				saveResponseToFile(accountDetails, filepath.Join(testDir, fmt.Sprintf("account_details_%d_%s.json", accountDetails.ID, timestamp)))
+			} else {
+				fmt.Printf("Error getting details for account %d: %v\n", accounts[0].ID, err)
+			}
+		}
 	}
 
 	// Save routes response
@@ -196,16 +232,262 @@ func saveAPIResponses(apiClient *api.APIClient) {
 	fmt.Println(color.GreenString("API responses saved to %s directory", testDir))
 }
 
-// saveResponseToFile saves a response to a file
+// saveResponseToFile saves a response to a file as properly formatted JSON
 func saveResponseToFile(response interface{}, filename string) {
-	// In a real implementation, we would serialize the response to JSON
-	// For now, just write a placeholder
-	content := fmt.Sprintf("%v", response)
-	err := ioutil.WriteFile(filename, []byte(content), 0644)
+	jsonData, err := json.MarshalIndent(response, "", "  ")
+	if err != nil {
+		fmt.Printf("Error serializing response to JSON: %v\n", err)
+		return
+	}
+
+	err = ioutil.WriteFile(filename, jsonData, 0644)
 	if err != nil {
 		fmt.Printf("Error saving response to %s: %v\n", filename, err)
 	} else {
 		fmt.Printf("Response saved to %s\n", filename)
+	}
+}
+
+// saveRawResponseToFile saves raw response bytes to a file
+func saveRawResponseToFile(response []byte, filename string) {
+	// Try to format the JSON for better readability
+	var jsonObj interface{}
+	err := json.Unmarshal(response, &jsonObj)
+	if err == nil {
+		// If it's valid JSON, pretty print it
+		formattedJSON, err := json.MarshalIndent(jsonObj, "", "  ")
+		if err == nil {
+			response = formattedJSON
+		}
+	}
+
+	err = ioutil.WriteFile(filename, response, 0644)
+	if err != nil {
+		fmt.Printf("Error saving response to %s: %v\n", filename, err)
+	} else {
+		fmt.Printf("Response saved to %s\n", filename)
+	}
+}
+
+// makeDirectRequest makes a direct HTTP request to the given URL with the API key
+func makeDirectRequest(url string, apiKey string) ([]byte, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", apiKey))
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return body, nil
+}
+
+// testEndpointsCmd creates a command to test API endpoints directly
+func testEndpointsCmd() *cobra.Command {
+	var (
+		saveResponses bool
+		apiKey        string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "endpoints",
+		Short: "Test API endpoints directly",
+		Long:  `Test API endpoints directly without using the API service layer, outputting the exact response.`,
+		Run: func(cmd *cobra.Command, args []string) {
+			// Get API key from flag or environment
+			if apiKey == "" {
+				apiKey = viper.GetString("API_KEY")
+				if apiKey == "" {
+					fmt.Println(color.RedString("Error: API key is required"))
+					fmt.Println("Please provide an API key using the --api-key flag or set it in the environment")
+					os.Exit(1)
+				}
+			}
+
+			testEndpoints(apiKey, saveResponses)
+		},
+	}
+
+	// Add flags
+	cmd.Flags().BoolVarP(&saveResponses, "save-responses", "s", false, "Save API response bodies to text files")
+	cmd.Flags().StringVar(&apiKey, "api-key", "", "BadgerMaps API key (default is from env)")
+
+	return cmd
+}
+
+// testEndpoints tests API endpoints directly
+func testEndpoints(apiKey string, saveResponses bool) {
+	fmt.Println(color.CyanString("Testing API endpoints..."))
+
+	// Create API endpoints
+	endpoints := api.DefaultEndpoints()
+
+	// Create test directory if it doesn't exist
+	testDir := "badgermaps__test"
+	if _, err := os.Stat(testDir); os.IsNotExist(err) {
+		os.Mkdir(testDir, 0755)
+	}
+
+	// Get timestamp for filenames
+	timestamp := time.Now().Format("20060102_150405")
+
+	// Store results in a list
+	type EndpointResult struct {
+		Name     string
+		Status   string
+		Duration time.Duration
+	}
+	var results []EndpointResult
+
+	// Test customers endpoint
+	startTime := time.Now()
+	customersURL := endpoints.Customers()
+	customersResp, err := makeDirectRequest(customersURL, apiKey)
+	duration := time.Since(startTime)
+	status := "Success"
+	if err != nil {
+		status = fmt.Sprintf("Error: %v", err)
+	} else {
+		if saveResponses {
+			filename := filepath.Join(testDir, fmt.Sprintf("direct_customers_%s.json", timestamp))
+			saveRawResponseToFile(customersResp, filename)
+		}
+
+		// Get first customer ID for detailed customer test
+		var customers []map[string]interface{}
+		if err := json.Unmarshal(customersResp, &customers); err == nil && len(customers) > 0 {
+			if customerID, ok := customers[0]["id"].(float64); ok {
+				// Test customer detail endpoint (required)
+				startTime = time.Now()
+				customerDetailURL := endpoints.Customer(int(customerID))
+				customerDetailResp, err := makeDirectRequest(customerDetailURL, apiKey)
+				customerDetailDuration := time.Since(startTime)
+				customerDetailStatus := "Success"
+				if err != nil {
+					customerDetailStatus = fmt.Sprintf("Error: %v", err)
+				} else {
+					if saveResponses {
+						filename := filepath.Join(testDir, fmt.Sprintf("direct_customer_detail_%d_%s.json", int(customerID), timestamp))
+						saveRawResponseToFile(customerDetailResp, filename)
+					}
+				}
+				results = append(results, EndpointResult{
+					Name:     "Customer Detail",
+					Status:   customerDetailStatus,
+					Duration: customerDetailDuration,
+				})
+
+				// Test account checkin list endpoint for this customer (required)
+				startTime = time.Now()
+				accountCheckinsURL := endpoints.AppointmentsForCustomer(int(customerID))
+				accountCheckinsResp, err := makeDirectRequest(accountCheckinsURL, apiKey)
+				accountCheckinsDuration := time.Since(startTime)
+				accountCheckinsStatus := "Success"
+				if err != nil {
+					accountCheckinsStatus = fmt.Sprintf("Error: %v", err)
+				} else {
+					if saveResponses {
+						filename := filepath.Join(testDir, fmt.Sprintf("direct_account_checkins_%d_%s.json", int(customerID), timestamp))
+						saveRawResponseToFile(accountCheckinsResp, filename)
+					}
+				}
+				results = append(results, EndpointResult{
+					Name:     "Account Checkins",
+					Status:   accountCheckinsStatus,
+					Duration: accountCheckinsDuration,
+				})
+			}
+		}
+	}
+	results = append(results, EndpointResult{
+		Name:     "Customers",
+		Status:   status,
+		Duration: duration,
+	})
+
+	// Test routes endpoint
+	startTime = time.Now()
+	routesURL := endpoints.Routes()
+	routesResp, err := makeDirectRequest(routesURL, apiKey)
+	duration = time.Since(startTime)
+	status = "Success"
+	if err != nil {
+		status = fmt.Sprintf("Error: %v", err)
+	} else {
+		if saveResponses {
+			filename := filepath.Join(testDir, fmt.Sprintf("direct_routes_%s.json", timestamp))
+			saveRawResponseToFile(routesResp, filename)
+		}
+	}
+	results = append(results, EndpointResult{
+		Name:     "Routes",
+		Status:   status,
+		Duration: duration,
+	})
+
+	// Test appointments endpoint
+	startTime = time.Now()
+	appointmentsURL := endpoints.Appointments()
+	appointmentsResp, err := makeDirectRequest(appointmentsURL, apiKey)
+	duration = time.Since(startTime)
+	status = "Success"
+	if err != nil {
+		status = fmt.Sprintf("Error: %v", err)
+	} else {
+		if saveResponses {
+			filename := filepath.Join(testDir, fmt.Sprintf("direct_appointments_%s.json", timestamp))
+			saveRawResponseToFile(appointmentsResp, filename)
+		}
+	}
+	results = append(results, EndpointResult{
+		Name:     "Appointments",
+		Status:   status,
+		Duration: duration,
+	})
+
+	// Test profiles endpoint
+	startTime = time.Now()
+	profilesURL := endpoints.Profiles()
+	profilesResp, err := makeDirectRequest(profilesURL, apiKey)
+	duration = time.Since(startTime)
+	status = "Success"
+	if err != nil {
+		status = fmt.Sprintf("Error: %v", err)
+	} else {
+		if saveResponses {
+			filename := filepath.Join(testDir, fmt.Sprintf("direct_profiles_%s.json", timestamp))
+			saveRawResponseToFile(profilesResp, filename)
+		}
+	}
+	results = append(results, EndpointResult{
+		Name:     "Profiles",
+		Status:   status,
+		Duration: duration,
+	})
+
+	// Display results
+	fmt.Println("\nEndpoint Test Results:")
+	for _, result := range results {
+		fmt.Printf("- %s: %s (%.2fs)\n", result.Name, result.Status, result.Duration.Seconds())
 	}
 }
 

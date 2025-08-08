@@ -10,6 +10,7 @@ CREATE TABLE account_locations (
     latitude FLOAT,
     address_line1 NTEXT,
     location NTEXT,
+    is_approximate BIT DEFAULT 0,
     created_at DATETIME2 DEFAULT GETDATE(),
     updated_at DATETIME2 DEFAULT GETDATE()
 ); 

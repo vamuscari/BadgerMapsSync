@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS AccountLocations (
     Latitude DECIMAL(10, 8),
     AddressLine1 TEXT,
     Location TEXT,
+    IsApproximate BOOLEAN DEFAULT FALSE,
     CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

@@ -41,90 +41,96 @@ func NewAPIClientWithURL(apiKey, baseURL string) *APIClient {
 
 // Account represents a BadgerMaps account (customer)
 type Account struct {
-	ID              int        `json:"id"`
-	FirstName       *string    `json:"first_name"`
-	LastName        string     `json:"last_name"`
-	FullName        string     `json:"full_name"`
-	PhoneNumber     string     `json:"phone_number"`
-	Email           string     `json:"email"`
-	CustomerID      *string    `json:"customer_id"`
-	Notes           *string    `json:"notes"`
-	OriginalAddress string     `json:"original_address"`
-	CRMID           *string    `json:"crm_id"`
-	Locations       []Location `json:"locations"`
-	CustomNumeric   *float64   `json:"custom_numeric"`
-	CustomText      *string    `json:"custom_text"`
-	CustomNumeric2  *float64   `json:"custom_numeric2"`
-	CustomText2     *string    `json:"custom_text2"`
-	CustomNumeric3  *float64   `json:"custom_numeric3"`
-	CustomText3     *string    `json:"custom_text3"`
-	CustomNumeric4  *float64   `json:"custom_numeric4"`
-	CustomText4     *string    `json:"custom_text4"`
-	CustomNumeric5  *float64   `json:"custom_numeric5"`
-	CustomText5     *string    `json:"custom_text5"`
-	CustomNumeric6  *float64   `json:"custom_numeric6"`
-	CustomText6     *string    `json:"custom_text6"`
-	CustomNumeric7  *float64   `json:"custom_numeric7"`
-	CustomText7     *string    `json:"custom_text7"`
-	CustomNumeric8  *float64   `json:"custom_numeric8"`
-	CustomText8     *string    `json:"custom_text8"`
-	CustomNumeric9  *float64   `json:"custom_numeric9"`
-	CustomText9     *string    `json:"custom_text9"`
-	CustomNumeric10 *float64   `json:"custom_numeric10"`
-	CustomText10    *string    `json:"custom_text10"`
-	CustomNumeric11 *float64   `json:"custom_numeric11"`
-	CustomText11    *string    `json:"custom_text11"`
-	CustomNumeric12 *float64   `json:"custom_numeric12"`
-	CustomText12    *string    `json:"custom_text12"`
-	CustomNumeric13 *float64   `json:"custom_numeric13"`
-	CustomText13    *string    `json:"custom_text13"`
-	CustomNumeric14 *float64   `json:"custom_numeric14"`
-	CustomText14    *string    `json:"custom_text14"`
-	CustomNumeric15 *float64   `json:"custom_numeric15"`
-	CustomText15    *string    `json:"custom_text15"`
-	CustomNumeric16 *float64   `json:"custom_numeric16"`
-	CustomText16    *string    `json:"custom_text16"`
-	CustomNumeric17 *float64   `json:"custom_numeric17"`
-	CustomText17    *string    `json:"custom_text17"`
-	CustomNumeric18 *float64   `json:"custom_numeric18"`
-	CustomText18    *string    `json:"custom_text18"`
-	CustomNumeric19 *float64   `json:"custom_numeric19"`
-	CustomText19    *string    `json:"custom_text19"`
-	CustomNumeric20 *float64   `json:"custom_numeric20"`
-	CustomText20    *string    `json:"custom_text20"`
-	CustomNumeric21 *float64   `json:"custom_numeric21"`
-	CustomText21    *string    `json:"custom_text21"`
-	CustomNumeric22 *float64   `json:"custom_numeric22"`
-	CustomText22    *string    `json:"custom_text22"`
-	CustomNumeric23 *float64   `json:"custom_numeric23"`
-	CustomText23    *string    `json:"custom_text23"`
-	CustomNumeric24 *float64   `json:"custom_numeric24"`
-	CustomText24    *string    `json:"custom_text24"`
-	CustomNumeric25 *float64   `json:"custom_numeric25"`
-	CustomText25    *string    `json:"custom_text25"`
-	CustomNumeric26 *float64   `json:"custom_numeric26"`
-	CustomText26    *string    `json:"custom_text26"`
-	CustomNumeric27 *float64   `json:"custom_numeric27"`
-	CustomText27    *string    `json:"custom_text27"`
-	CustomNumeric28 *float64   `json:"custom_numeric28"`
-	CustomText28    *string    `json:"custom_text28"`
-	CustomNumeric29 *float64   `json:"custom_numeric29"`
-	CustomText29    *string    `json:"custom_text29"`
-	CustomNumeric30 *float64   `json:"custom_numeric30"`
-	CustomText30    *string    `json:"custom_text30"`
+	ID                   int        `json:"id"`
+	FirstName            *string    `json:"first_name"`
+	LastName             string     `json:"last_name"`
+	FullName             string     `json:"full_name"`
+	PhoneNumber          string     `json:"phone_number"`
+	Email                string     `json:"email"`
+	CustomerID           *string    `json:"customer_id"`
+	Notes                *string    `json:"notes"`
+	OriginalAddress      string     `json:"original_address"`
+	CRMID                *string    `json:"crm_id"`
+	AccountOwner         *string    `json:"account_owner"`
+	DaysSinceLastCheckin int        `json:"days_since_last_checkin"`
+	LastCheckinDate      *string    `json:"last_checkin_date"`
+	LastModifiedDate     *string    `json:"last_modified_date"`
+	FollowUpDate         *string    `json:"follow_up_date"`
+	Locations            []Location `json:"locations"`
+	CustomNumeric        *float64   `json:"custom_numeric"`
+	CustomText           *string    `json:"custom_text"`
+	CustomNumeric2       *float64   `json:"custom_numeric2"`
+	CustomText2          *string    `json:"custom_text2"`
+	CustomNumeric3       *float64   `json:"custom_numeric3"`
+	CustomText3          *string    `json:"custom_text3"`
+	CustomNumeric4       *float64   `json:"custom_numeric4"`
+	CustomText4          *string    `json:"custom_text4"`
+	CustomNumeric5       *float64   `json:"custom_numeric5"`
+	CustomText5          *string    `json:"custom_text5"`
+	CustomNumeric6       *float64   `json:"custom_numeric6"`
+	CustomText6          *string    `json:"custom_text6"`
+	CustomNumeric7       *float64   `json:"custom_numeric7"`
+	CustomText7          *string    `json:"custom_text7"`
+	CustomNumeric8       *float64   `json:"custom_numeric8"`
+	CustomText8          *string    `json:"custom_text8"`
+	CustomNumeric9       *float64   `json:"custom_numeric9"`
+	CustomText9          *string    `json:"custom_text9"`
+	CustomNumeric10      *float64   `json:"custom_numeric10"`
+	CustomText10         *string    `json:"custom_text10"`
+	CustomNumeric11      *float64   `json:"custom_numeric11"`
+	CustomText11         *string    `json:"custom_text11"`
+	CustomNumeric12      *float64   `json:"custom_numeric12"`
+	CustomText12         *string    `json:"custom_text12"`
+	CustomNumeric13      *float64   `json:"custom_numeric13"`
+	CustomText13         *string    `json:"custom_text13"`
+	CustomNumeric14      *float64   `json:"custom_numeric14"`
+	CustomText14         *string    `json:"custom_text14"`
+	CustomNumeric15      *float64   `json:"custom_numeric15"`
+	CustomText15         *string    `json:"custom_text15"`
+	CustomNumeric16      *float64   `json:"custom_numeric16"`
+	CustomText16         *string    `json:"custom_text16"`
+	CustomNumeric17      *float64   `json:"custom_numeric17"`
+	CustomText17         *string    `json:"custom_text17"`
+	CustomNumeric18      *float64   `json:"custom_numeric18"`
+	CustomText18         *string    `json:"custom_text18"`
+	CustomNumeric19      *float64   `json:"custom_numeric19"`
+	CustomText19         *string    `json:"custom_text19"`
+	CustomNumeric20      *float64   `json:"custom_numeric20"`
+	CustomText20         *string    `json:"custom_text20"`
+	CustomNumeric21      *float64   `json:"custom_numeric21"`
+	CustomText21         *string    `json:"custom_text21"`
+	CustomNumeric22      *float64   `json:"custom_numeric22"`
+	CustomText22         *string    `json:"custom_text22"`
+	CustomNumeric23      *float64   `json:"custom_numeric23"`
+	CustomText23         *string    `json:"custom_text23"`
+	CustomNumeric24      *float64   `json:"custom_numeric24"`
+	CustomText24         *string    `json:"custom_text24"`
+	CustomNumeric25      *float64   `json:"custom_numeric25"`
+	CustomText25         *string    `json:"custom_text25"`
+	CustomNumeric26      *float64   `json:"custom_numeric26"`
+	CustomText26         *string    `json:"custom_text26"`
+	CustomNumeric27      *float64   `json:"custom_numeric27"`
+	CustomText27         *string    `json:"custom_text27"`
+	CustomNumeric28      *float64   `json:"custom_numeric28"`
+	CustomText28         *string    `json:"custom_text28"`
+	CustomNumeric29      *float64   `json:"custom_numeric29"`
+	CustomText29         *string    `json:"custom_text29"`
+	CustomNumeric30      *float64   `json:"custom_numeric30"`
+	CustomText30         *string    `json:"custom_text30"`
 }
 
 // Location represents a BadgerMaps location
 type Location struct {
-	ID           int     `json:"id"`
-	City         string  `json:"city"`
-	Name         *string `json:"name"`
-	Zipcode      string  `json:"zipcode"`
-	Long         float64 `json:"long"`
-	State        string  `json:"state"`
-	Lat          float64 `json:"lat"`
-	AddressLine1 string  `json:"address_line_1"`
-	Location     string  `json:"location"`
+	ID            int     `json:"id"`
+	City          string  `json:"city"`
+	Name          *string `json:"name"`
+	Zipcode       string  `json:"zipcode"`
+	Long          float64 `json:"long"`
+	State         string  `json:"state"`
+	Lat           float64 `json:"lat"`
+	AddressLine1  string  `json:"address_line_1"`
+	Location      string  `json:"location"`
+	IsApproximate bool    `json:"is_approximate"`
 }
 
 // Route represents a BadgerMaps route
@@ -801,4 +807,34 @@ func (api *APIClient) SearchProfiles(query string) ([]UserProfile, error) {
 	}
 
 	return profiles, nil
+}
+
+// GetCheckin retrieves a specific checkin by ID
+func (api *APIClient) GetCheckin(checkinID int) (*Checkin, error) {
+	url := api.endpoints.Appointment(checkinID)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := api.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to appointment %d: %w", checkinID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := ioutil.ReadAll(resp.Body)
+		return nil, fmt.Errorf("endpoint appointment %d test failed with status %d: %s", checkinID, resp.StatusCode, string(body))
+	}
+
+	var checkin Checkin
+	if err := json.NewDecoder(resp.Body).Decode(&checkin); err != nil {
+		return nil, fmt.Errorf("failed to decode appointment response: %w", err)
+	}
+
+	return &checkin, nil
 }
