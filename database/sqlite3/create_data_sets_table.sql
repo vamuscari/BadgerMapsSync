@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS DataSets (
-    Name TEXT PRIMARY KEY,
+    Name TEXT,
     ProfileId INTEGER,
     Filterable BOOLEAN,
     Label TEXT,
@@ -13,5 +13,6 @@ CREATE TABLE IF NOT EXISTS DataSets (
     RawMax REAL,
     CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
     UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (Name, ProfileId),
     FOREIGN KEY (ProfileId) REFERENCES UserProfiles (ProfileId)
 );

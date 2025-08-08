@@ -26,8 +26,7 @@ func PullCmd() *cobra.Command {
 		},
 	}
 
-	// Add global flags
-	pullCmd.PersistentFlags().Bool("verbose", false, "Enable verbose output")
+	// Global flags are defined in main.go
 
 	// Add subcommands
 	pullCmd.AddCommand(pullAccountCmd())
@@ -50,8 +49,8 @@ func pullAccountCmd() *cobra.Command {
 		Long:  `Pull a single account from the BadgerMaps API to your local database.`,
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			// Get verbose flag
-			verbose, _ := cmd.Flags().GetBool("verbose")
+			// Get verbose flag from global config
+			verbose := viper.GetBool("verbose")
 
 			if verbose {
 				fmt.Println(color.CyanString("Pulling account with ID: %s", args[0]))
@@ -142,8 +141,8 @@ func pullAccountsCmd() *cobra.Command {
 		Short: "Pull multiple accounts from BadgerMaps",
 		Long:  `Pull multiple accounts from the BadgerMaps API to your local database.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			// Get verbose flag
-			verbose, _ := cmd.Flags().GetBool("verbose")
+			// Get verbose flag from global config
+			verbose := viper.GetBool("verbose")
 			// Get top flag
 			top, _ := cmd.Flags().GetInt("top")
 			if len(args) == 0 {
@@ -446,8 +445,8 @@ func pullCheckinCmd() *cobra.Command {
 		Long:  `Pull a single checkin from the BadgerMaps API to your local database.`,
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			// Get verbose flag
-			verbose, _ := cmd.Flags().GetBool("verbose")
+			// Get verbose flag from global config
+			verbose := viper.GetBool("verbose")
 
 			if verbose {
 				fmt.Println(color.CyanString("Pulling checkin with ID: %s", args[0]))
@@ -538,8 +537,8 @@ func pullCheckinsCmd() *cobra.Command {
 		Short: "Pull multiple checkins from BadgerMaps",
 		Long:  `Pull multiple checkins from the BadgerMaps API to your local database.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			// Get verbose flag
-			verbose, _ := cmd.Flags().GetBool("verbose")
+			// Get verbose flag from global config
+			verbose := viper.GetBool("verbose")
 			if len(args) == 0 {
 				if verbose {
 					fmt.Println(color.CyanString("Pulling all checkins"))
@@ -777,8 +776,8 @@ func pullRouteCmd() *cobra.Command {
 		Long:  `Pull a single route from the BadgerMaps API to your local database.`,
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			// Get verbose flag
-			verbose, _ := cmd.Flags().GetBool("verbose")
+			// Get verbose flag from global config
+			verbose := viper.GetBool("verbose")
 
 			if verbose {
 				fmt.Println(color.CyanString("Pulling route with ID: %s", args[0]))
@@ -869,8 +868,8 @@ func pullRoutesCmd() *cobra.Command {
 		Short: "Pull multiple routes from BadgerMaps",
 		Long:  `Pull multiple routes from the BadgerMaps API to your local database.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			// Get verbose flag
-			verbose, _ := cmd.Flags().GetBool("verbose")
+			// Get verbose flag from global config
+			verbose := viper.GetBool("verbose")
 			if len(args) == 0 {
 				if verbose {
 					fmt.Println(color.CyanString("Pulling all routes"))
@@ -1107,8 +1106,8 @@ func pullProfileCmd() *cobra.Command {
 		Short: "Pull user profile from BadgerMaps",
 		Long:  `Pull your user profile from the BadgerMaps API to your local database.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			// Get verbose flag
-			verbose, _ := cmd.Flags().GetBool("verbose")
+			// Get verbose flag from global config
+			verbose := viper.GetBool("verbose")
 
 			if verbose {
 				fmt.Println(color.CyanString("Pulling user profile..."))
@@ -1191,8 +1190,8 @@ func pullAllCmd() *cobra.Command {
 		Short: "Pull all data types from BadgerMaps",
 		Long:  `Pull all data types from the BadgerMaps API to your local database in the order: profile, accounts, checkins, routes.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			// Get verbose flag
-			verbose, _ := cmd.Flags().GetBool("verbose")
+			// Get verbose flag from global config
+			verbose := viper.GetBool("verbose")
 
 			if verbose {
 				fmt.Println(color.CyanString("Pulling all data types in order: profile, accounts, checkins, routes"))

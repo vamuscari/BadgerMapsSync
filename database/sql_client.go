@@ -970,15 +970,15 @@ func (c *Client) storeDataSets(tx *sql.Tx, profileID int, datafields []api.DataF
 	// Load SQL for inserting datasets
 	sqlLoader := NewSQLLoader(c.config.DatabaseType, c.verbose)
 
+	deleteDataSetValuesSQL, err := sqlLoader.LoadDeleteDataSetValuesSQL()
+	if err != nil {
+		return fmt.Errorf("failed to load delete_data_set_values SQL: %w", err)
+	}
+
 	// First, delete existing datasets and values for this profile
 	deleteDataSetsSQL, err := sqlLoader.LoadDeleteDataSetsSQL()
 	if err != nil {
 		return fmt.Errorf("failed to load delete_data_sets SQL: %w", err)
-	}
-
-	deleteDataSetValuesSQL, err := sqlLoader.LoadDeleteDataSetValuesSQL()
-	if err != nil {
-		return fmt.Errorf("failed to load delete_data_set_values SQL: %w", err)
 	}
 
 	// Delete existing dataset values
