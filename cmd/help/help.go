@@ -25,10 +25,10 @@ func NewHelpCmd(rootCmd *cobra.Command) *cobra.Command {
 				fmt.Println(colors.Blue("BadgerMaps CLI Help"))
 				fmt.Println(colors.Blue("================="))
 				fmt.Println()
-				fmt.Println("Usage:")
-				fmt.Println("  badgermaps [command] [flags]")
+				fmt.Println(colors.Yellow("Usage:"))
+				fmt.Println("  " + colors.Green("badgermaps") + " [command] [flags]")
 				fmt.Println()
-				fmt.Println("Available Commands:")
+				fmt.Println(colors.Yellow("Available Commands:"))
 
 				// Get all commands from root command
 				commands := rootCmd.Commands()
@@ -52,15 +52,15 @@ func NewHelpCmd(rootCmd *cobra.Command) *cobra.Command {
 				}
 
 				fmt.Println()
-				fmt.Println("Global Flags:")
-				fmt.Println("  -h, --help      Help for this command")
-				fmt.Println("  -v, --verbose   Enable verbose output")
-				fmt.Println("  -q, --quiet     Suppress all non-essential output")
-				fmt.Println("      --debug     Enable debug mode with maximum verbosity")
-				fmt.Println("      --no-color  Disable colored output")
+				fmt.Println(colors.Yellow("Global Flags:"))
+				fmt.Println("  " + colors.Cyan("-h, --help") + "      Help for this command")
+				fmt.Println("  " + colors.Cyan("-v, --verbose") + "   Enable verbose output")
+				fmt.Println("  " + colors.Cyan("-q, --quiet") + "     Suppress all non-essential output")
+				fmt.Println("      " + colors.Cyan("--debug") + "     Enable debug mode with maximum verbosity")
+				fmt.Println("      " + colors.Cyan("--no-color") + "  Disable colored output")
 
 				fmt.Println()
-				fmt.Println("Use \"badgermaps help [command]\" for more information about a command.")
+				fmt.Println("Use " + colors.Green("\"badgermaps help [command]\"") + " for more information about a command.")
 			} else {
 				// Show help for specific command
 				cmdName := args[0]
@@ -84,34 +84,35 @@ func NewHelpCmd(rootCmd *cobra.Command) *cobra.Command {
 				fmt.Printf("%s\n", colors.Blue("Help for command: "+cmdName))
 				fmt.Println(colors.Blue(strings.Repeat("=", 14+len(cmdName))))
 				fmt.Println()
-
-				fmt.Println("Usage:")
-				fmt.Printf("  badgermaps %s [flags]\n", targetCmd.Use)
+				fmt.Println(colors.Yellow("Usage:"))
+				fmt.Printf("  %s %s [flags]\n", colors.Green("badgermaps"), colors.Cyan(targetCmd.Use))
 
 				if targetCmd.Long != "" {
 					fmt.Println()
-					fmt.Println("Description:")
+					fmt.Println(colors.Yellow("Description:"))
 					fmt.Println("  " + targetCmd.Long)
 				}
 
 				// Show examples if verbose
 				if verbose && len(targetCmd.Example) > 0 {
 					fmt.Println()
-					fmt.Println("Examples:")
-					fmt.Println(targetCmd.Example)
+					fmt.Println(colors.Yellow("Examples:"))
+					fmt.Println(colors.Green(targetCmd.Example))
 				}
 
 				// Show flags
 				if len(targetCmd.Flags().FlagUsages()) > 0 {
 					fmt.Println()
-					fmt.Println("Flags:")
+					fmt.Println(colors.Yellow("Flags:"))
+					// We can't directly color the flag usages as they come pre-formatted
+					// But we can print them as is
 					fmt.Print(targetCmd.Flags().FlagUsages())
 				}
 
 				// Show subcommands if any
 				if len(targetCmd.Commands()) > 0 {
 					fmt.Println()
-					fmt.Println("Subcommands:")
+					fmt.Println(colors.Yellow("Subcommands:"))
 
 					// Calculate the longest subcommand name for alignment
 					maxLen := 0

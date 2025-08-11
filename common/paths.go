@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/spf13/viper"
 )
 
 // GetConfigDir returns the appropriate directory for configuration files
@@ -38,7 +40,14 @@ func GetConfigDir() string {
 // based on the current operating system:
 // - Linux/Darwin: ~/.cache/badgermaps/
 // - Windows: %TEMP%\badgermaps\
+// This can be overridden by setting the CACHE_DIR configuration value.
 func GetCacheDir() string {
+	// Check if a custom cache directory is specified in the configuration
+	if customCacheDir := viper.GetString("CACHE_DIR"); customCacheDir != "" {
+		return customCacheDir
+	}
+
+	// Otherwise, use OS-specific defaults
 	switch runtime.GOOS {
 	case "windows":
 		// On Windows, use %TEMP%\badgermaps\

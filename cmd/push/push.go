@@ -11,7 +11,7 @@ import (
 )
 
 // NewPushCmd creates a new push command
-func NewPushCmd() *cobra.Command {
+func NewPushCmd(globalConfig) *cobra.Command {
 	pushCmd := &cobra.Command{
 		Use:   "push",
 		Short: "Send data to BadgerMaps API",
@@ -76,6 +76,10 @@ func pushAllAccounts() {
 	// 2. Push them to the API in parallel using goroutines
 	// 3. Handle rate limiting and errors
 
+	// Create a slice to collect errors
+	var errors []string
+	var errorsMutex sync.Mutex
+
 	// Example of how this might look:
 	fmt.Println("Retrieving all accounts from database...")
 
@@ -107,11 +111,27 @@ func pushAllAccounts() {
 			// Simulate pushing account to API
 			fmt.Printf("Pushing account %d to API...\n", accountID)
 			// In a real implementation, we would call the API client here
+
+			// Simulate an error for demonstration purposes (for account ID 3)
+			if accountID == 3 {
+				errorMsg := fmt.Sprintf("Error pushing account %d: simulated error", accountID)
+				errorsMutex.Lock()
+				errors = append(errors, errorMsg)
+				errorsMutex.Unlock()
+			}
 		}(id)
 	}
 
 	// Wait for all goroutines to finish
 	wg.Wait()
+
+	// Print all collected errors
+	if len(errors) > 0 {
+		fmt.Println(color.RedString("\nErrors encountered during account push:"))
+		for _, err := range errors {
+			fmt.Println(color.RedString("- %s", err))
+		}
+	}
 
 	fmt.Println(color.GreenString("Successfully pushed all accounts to BadgerMaps"))
 }

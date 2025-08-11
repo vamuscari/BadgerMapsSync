@@ -315,6 +315,16 @@ func (loader *SQLLoader) CreateIndexes(db *sql.DB) error {
 	return nil
 }
 
+// loads the SQL for deleting datasets
+func (loader *SQLLoader) LoadInsertRouteWaypointsSQL() (string, error) {
+	return loader.LoadSQL("insert_route_waypoints.sql")
+}
+
+// LoadDeleteRouteWaypointsSQL loads the SQL for deleting datasets
+func (loader *SQLLoader) LoadDeleteRouteWaypointsSQL() (string, error) {
+	return loader.LoadSQL("delete_route_waypoints.sql")
+}
+
 // LoadDeleteDataSetsSQL loads the SQL for deleting datasets
 func (loader *SQLLoader) LoadDeleteDataSetsSQL() (string, error) {
 	return loader.LoadSQL("delete_data_sets.sql")
@@ -333,6 +343,16 @@ func (loader *SQLLoader) LoadInsertDataSetsSQL() (string, error) {
 // LoadInsertDataSetValuesSQL loads the SQL for inserting dataset values
 func (loader *SQLLoader) LoadInsertDataSetValuesSQL() (string, error) {
 	return loader.LoadSQL("insert_data_set_values.sql")
+}
+
+// LoadSearchAccountsSQL loads the SQL for searching accounts
+func (loader *SQLLoader) LoadSearchAccountsSQL() (string, error) {
+	return loader.LoadSQL("search_accounts.sql")
+}
+
+// LoadSearchRoutesSQL loads the SQL for searching routes
+func (loader *SQLLoader) LoadSearchRoutesSQL() (string, error) {
+	return loader.LoadSQL("search_routes.sql")
 }
 
 // Helper function for min

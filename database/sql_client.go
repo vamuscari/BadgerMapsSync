@@ -221,7 +221,7 @@ func (c *Client) InitializeSchema() error {
 		return fmt.Errorf("failed to create indexes: %w (check SQL syntax in create_indexes.sql)", err)
 	}
 
-	log.Println("Database schema initialized successfully")
+	c.logf("Database schema initialized successfully")
 	return nil
 }
 
@@ -236,7 +236,7 @@ func (c *Client) createTableIfNotExists(tableName string) error {
 		return c.createTable(tableName)
 	}
 
-	log.Printf("Table %s already exists, skipping creation", tableName)
+	c.logf("Table %s already exists, skipping creation", tableName)
 	return nil
 }
 
@@ -299,7 +299,7 @@ func (c *Client) createTable(tableName string) error {
 
 // ValidateDatabaseSchema checks if all required tables exist with the correct fields
 func (c *Client) ValidateDatabaseSchema() error {
-	log.Println("Validating database schema...")
+	c.logf("Validating database schema...")
 
 	// Get required tables and their essential columns
 	requiredTables := c.GetRequiredTables()
@@ -327,7 +327,7 @@ func (c *Client) ValidateDatabaseSchema() error {
 		}
 	}
 
-	log.Println("Database schema validation successful")
+	c.logf("Database schema validation successful")
 	return nil
 }
 
@@ -378,7 +378,7 @@ func (c *Client) createIndexes() error {
 
 // DropAllTables drops all tables from the database
 func (c *Client) DropAllTables() error {
-	log.Println("Dropping all tables...")
+	c.logf("Dropping all tables...")
 
 	tables := []string{
 		"data_set_values",
@@ -397,7 +397,7 @@ func (c *Client) DropAllTables() error {
 		}
 	}
 
-	log.Println("All tables dropped successfully")
+	c.logf("All tables dropped successfully")
 	return nil
 }
 
@@ -409,7 +409,7 @@ func (c *Client) dropTable(tableName string) error {
 	}
 
 	if !exists {
-		log.Printf("Table %s does not exist, skipping drop", tableName)
+		c.logf("Table %s does not exist, skipping drop", tableName)
 		return nil
 	}
 
@@ -419,7 +419,7 @@ func (c *Client) dropTable(tableName string) error {
 		return fmt.Errorf("failed to drop table %s: %w", tableName, err)
 	}
 
-	log.Printf("Successfully dropped table: %s", tableName)
+	c.logf("Successfully dropped table: %s", tableName)
 	return nil
 }
 
@@ -869,7 +869,7 @@ func (c *Client) StoreAccounts(accounts []api.Account) error {
 
 // GetAccountIDs retrieves all account IDs from the database
 func (c *Client) GetAccountIDs() ([]int, error) {
-	log.Println("Retrieving all account IDs from database")
+	c.logf("Retrieving all account IDs from database")
 
 	query := "SELECT Id FROM Accounts ORDER BY Id"
 	rows, err := c.db.Query(query)
@@ -891,7 +891,7 @@ func (c *Client) GetAccountIDs() ([]int, error) {
 		return nil, fmt.Errorf("error iterating account IDs: %w", err)
 	}
 
-	log.Printf("Retrieved %d account IDs from database", len(accountIDs))
+	c.logf("Retrieved %d account IDs from database", len(accountIDs))
 	return accountIDs, nil
 }
 
@@ -961,7 +961,7 @@ func (c *Client) StoreProfiles(profile *api.UserProfile) error {
 		return fmt.Errorf("failed to commit transaction: %w (check database connection and transaction state)", err)
 	}
 
-	log.Printf("Successfully stored user profile using merge_user_profiles")
+	c.logf("Successfully stored user profile using merge_user_profiles")
 	return nil
 }
 
@@ -1017,12 +1017,15 @@ func (c *Client) storeDataSets(tx *sql.Tx, profileID int, datafields []api.DataF
 	}
 	defer insertDataSetValuesStmt.Close()
 
+	// Collect errors in an array
+	var errors []error
+
 	// Insert datasets and their values
 	for _, datafield := range datafields {
 		// Insert dataset
 		_, err = insertDataSetsStmt.Exec(
-			profileID,
 			datafield.Name,
+			profileID,
 			datafield.Label,
 			datafield.Type,
 			datafield.Filterable,
@@ -1030,7 +1033,8 @@ func (c *Client) storeDataSets(tx *sql.Tx, profileID int, datafields []api.DataF
 			datafield.HasData,
 		)
 		if err != nil {
-			return fmt.Errorf("failed to insert dataset %s: %w", datafield.Name, err)
+			errors = append(errors, fmt.Errorf("failed to insert dataset %s: %w", datafield.Name, err))
+			continue
 		}
 
 		// Insert dataset values
@@ -1049,9 +1053,19 @@ func (c *Client) storeDataSets(tx *sql.Tx, profileID int, datafields []api.DataF
 				value.Text,
 			)
 			if err != nil {
-				return fmt.Errorf("failed to insert dataset value for %s: %w", datafield.Name, err)
+				errors = append(errors, fmt.Errorf("failed to insert dataset value for %s: %w", datafield.Name, err))
+				continue
 			}
 		}
+	}
+
+	// Print all errors after processing
+	if len(errors) > 0 {
+		c.logf("Errors occurred while storing datasets:")
+		for _, err := range errors {
+			log.Println(err)
+		}
+		return fmt.Errorf("failed to store %d datasets or values", len(errors))
 	}
 
 	return nil
@@ -1117,7 +1131,7 @@ func (c *Client) StoreCheckins(checkins []api.Checkin) error {
 		return fmt.Errorf("failed to commit transaction: %w (check database connection and transaction state)", err)
 	}
 
-	log.Printf("Successfully stored %d checkins using merge_account_checkins", len(checkins))
+	c.logf("Successfully stored %d checkins using merge_account_checkins", len(checkins))
 	return nil
 }
 
@@ -1181,27 +1195,30 @@ func (c *Client) StoreRoutes(routes []api.Route) error {
 		return fmt.Errorf("failed to commit transaction: %w (check database connection and transaction state)", err)
 	}
 
-	log.Printf("Successfully stored %d routes using merge_routes", len(routes))
+	c.logf("Successfully stored %d routes using merge_routes", len(routes))
 	return nil
 }
 
 // storeWaypoints stores waypoints for a route
 func (c *Client) storeWaypoints(tx *sql.Tx, routeID int, waypoints []api.Waypoint) error {
 	// First, delete existing waypoints for this route
-	deleteSQL := fmt.Sprintf("DELETE FROM route_waypoints WHERE route_id = %d", routeID)
-	_, err := tx.Exec(deleteSQL)
+	sqlLoader := NewSQLLoader(c.config.DatabaseType)
+	deleteSQL, err := sqlLoader.LoadDeleteRouteWaypointsSQL()
+	if err != nil {
+		return fmt.Errorf("failed to load delete_route_waypoints SQL: %w (check if delete_route_waypoints.sql exists in database/%s directory)",
+			err, c.config.DatabaseType)
+	}
+	_, err = tx.Exec(deleteSQL, routeID)
 	if err != nil {
 		return fmt.Errorf("failed to delete existing waypoints for route ID %d: %w", routeID, err)
 	}
 
 	// Prepare insert statement
-	insertSQL := `
-		INSERT INTO route_waypoints (
-			id, route_id, name, address, suite, city, state, zipcode, 
-			location, latitude, longitude, layover_minutes, position, 
-			complete_address, location_id, customer_id, appt_time, type, place_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`
+	insertSQL, err := sqlLoader.LoadInsertRouteWaypointsSQL()
+	if err != nil {
+		return fmt.Errorf("failed to load insert_route_waypoints SQL: %w (check if insert_route_waypoints.sql exists in database/%s directory)",
+			err, c.config.DatabaseType)
+	}
 	stmt, err := tx.Prepare(insertSQL)
 	if err != nil {
 		return fmt.Errorf("failed to prepare waypoint insert statement: %w", err)

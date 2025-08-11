@@ -53,6 +53,7 @@ func Execute() {
 
 func init() {
 	cobra.OnInitialize(initConfig)
+	cobra.EnableCommandSorting = false
 
 	// Global flags
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output with additional details")
@@ -67,16 +68,18 @@ func init() {
 	viper.BindPFlag("debug", rootCmd.PersistentFlags().Lookup("debug"))
 	viper.BindPFlag("no-color", rootCmd.PersistentFlags().Lookup("no-color"))
 
+	viper.G
+
 	// Create commands
-	versionCmd := version.NewVersionCmd()
 	pushCmd := push.NewPushCmd()
 	pullCmd := pull.PullCmd()
+	searchCmd := search.NewSearchCmd()
 	serverCmd := server.NewServerCmd()
 	testCmd := test.TestCmd()
 	utilsCmd := utils.NewUtilsCmd()
 	setupCmd := setup.NewSetupCmd()
-	searchCmd := search.NewSearchCmd()
 	helpCmd := help.NewHelpCmd(rootCmd)
+	versionCmd := version.NewVersionCmd()
 
 	// Apply setup verification to commands that need it
 	wrapCommandWithSetupCheck(pushCmd)

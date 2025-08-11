@@ -278,3 +278,33 @@ func (e *Endpoints) Waypoint(id int) string {
 func (e *Endpoints) WaypointsForRoute(routeID int) string {
 	return fmt.Sprintf("%s/waypoints/?route_id=%d", e.baseURL, routeID)
 }
+
+// GetEndpoint returns the URL for a specific endpoint by name.
+// This function uses a map to search for the endpoint by name.
+//
+// Parameters:
+//   - name: The name of the endpoint (e.g., "customers", "routes", "appointments")
+//
+// Returns:
+//   - string: The URL for the specified endpoint, or an empty string if the endpoint is not found
+func (e *Endpoints) GetEndpoint(name string) string {
+	// Map of endpoint names to their URL-generating functions
+	endpointMap := map[string]func() string{
+		"customers":       e.Customers,
+		"routes":          e.Routes,
+		"appointments":    e.Appointments,
+		"profiles":        e.Profiles,
+		"locations":       e.Locations,
+		"waypoints":       e.Waypoints,
+		"data_sets":       e.DataSets,
+		"data_set_values": e.DataSetValues,
+	}
+
+	// Check if the endpoint exists in the map
+	if fn, ok := endpointMap[name]; ok {
+		return fn()
+	}
+
+	// Return empty string if endpoint not found
+	return ""
+}

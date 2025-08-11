@@ -114,18 +114,33 @@ badgermaps auth --token YOUR_API_TOKEN
 
 ### search
 
-Find items by name or ID.
+Find items by name or ID with fuzzy matching. The search displays the item's ID, name, type, and three additional fields to help with identification.
 
 ```bash
-# Search for accounts
-badgermaps search accounts "Acme Corp"
+# Search for all item types
+badgermaps search "Acme Corp"
 
-# Search for users
-badgermaps search users "john.doe@example.com"
+# Search for accounts only
+badgermaps search "Acme Corp" --type accounts
 
-# Search for locations
-badgermaps search locations "San Francisco"
+# Search for routes only
+badgermaps search "Route" --type routes
+
+# Search for locations only
+badgermaps search "San Francisco" --type locations
+
+# Search for profiles only
+badgermaps search "John" --type profiles
+
+# Force online search (bypassing cache)
+badgermaps search "Acme Corp" --online
 ```
+
+The search uses fuzzy finding to match keywords in various fields, not just the name. Results are displayed with additional fields specific to each item type:
+- Accounts: Email, Phone, Owner
+- Routes: Date, Start Address, Destination Address
+- Locations: Address, City, State
+- Profiles: Email, First Name, Last Name
 
 ### autocomplete
 

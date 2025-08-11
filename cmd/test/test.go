@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"badgermapscli/api"
+	"badgermapscli/database"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -47,15 +49,15 @@ func TestCmd() *cobra.Command {
 	testCmd.Flags().StringVar(&apiKey, "api-key", "", "BadgerMaps API key (default is from env)")
 
 	// Add subcommands
-	testCmd.AddCommand(newTestAPICmd())
+	testCmd.AddCommand(newAPICmd())
 	testCmd.AddCommand(testDatabaseCmd())
 	testCmd.AddCommand(testEndpointsCmd())
 
 	return testCmd
 }
 
-// newTestAPICmd creates a command to test API connectivity
-func newTestAPICmd() *cobra.Command {
+// newAPICmd creates a command to test API connectivity
+func newAPICmd() *cobra.Command {
 	var (
 		saveResponses bool
 		apiKey        string
@@ -134,15 +136,23 @@ func testAPI(apiKey string, saveResponses bool) {
 	fmt.Println(color.CyanString("Testing API endpoints..."))
 	results := apiClient.TestAllEndpoints()
 
+	maxNameLen := 0
+	for ep := range results {
+		if len(ep) > maxNameLen {
+			maxNameLen = len(ep)
+		}
+	}
+
 	// Check results
 	allPassed := true
 	for endpoint, err := range results {
+		spacer := strings.Repeat(" ", maxNameLen-len(endpoint))
 		if err != nil {
-			fmt.Printf("%s: %s\n", endpoint, color.RedString("FAILED"))
+			fmt.Printf("%s:%s %s\n", endpoint, spacer, color.RedString("FAILED"))
 			fmt.Printf("  Error: %v\n", err)
 			allPassed = false
 		} else {
-			fmt.Printf("%s: %s\n", endpoint, color.GreenString("PASSED"))
+			fmt.Printf("%s:%s %s\n", endpoint, spacer, color.GreenString("PASSED"))
 		}
 	}
 
@@ -334,12 +344,99 @@ func testEndpointsCmd() *cobra.Command {
 	return cmd
 }
 
+// Store results in a list
+type EndpointResult struct {
+	Name     string
+	Status   string
+	Response *[]byte
+	Error    error
+	Duration time.Duration
+}
+
 // testEndpoints tests API endpoints directly
 func testEndpoints(apiKey string, saveResponses bool) {
 	fmt.Println(color.CyanString("Testing API endpoints..."))
 
-	// Create API endpoints
+	// Create test directory if it doesn't exist
+	testDir := "badgermaps__test"
+	if _, err := os.Stat(testDir); os.IsNotExist(err) {
+		os.Mkdir(testDir, 0755)
+	}
+
+	var results []EndpointResult
+
 	endpoints := api.DefaultEndpoints()
+	// Test profile
+	results = append(results, testEndpoint("Profile", endpoints.Profiles(), apiKey, saveResponses))
+	results = append(results, testEndpoint("Accounts", endpoints.Customers(), apiKey, saveResponses))
+	results = append(results, testEndpoint("Routes", endpoints.Routes(), apiKey, saveResponses))
+
+	if results[1].Error == nil {
+
+		var accounts_json []map[string]interface{}
+
+		err := json.Unmarshal(*results[1].Response, &accounts_json)
+
+		if err != nil {
+			fmt.Printf("Error unmarshalling accounts response: %v\n", err)
+		} else {
+			if len(accounts_json) > 0 {
+				customerID := int(accounts_json[1]["id"].(float64))
+				results = append(results, testEndpoint(
+					fmt.Sprintf("AccountDetails_%d", customerID),
+					endpoints.Customer(customerID),
+					apiKey,
+					saveResponses,
+				))
+				results = append(results, testEndpoint(
+					fmt.Sprintf("Checkins_%d", customerID),
+					endpoints.AppointmentsForCustomer(customerID),
+					apiKey,
+					saveResponses,
+				))
+			}
+		}
+	}
+
+	if results[2].Error == nil {
+		var routes []map[string]interface{}
+		err := json.Unmarshal(*results[2].Response, &routes)
+		if err != nil {
+			fmt.Printf("Error unmarshalling routes response: %v\n", err)
+		} else {
+			if len(routes) > 0 {
+				routeID := int(routes[0]["id"].(float64))
+				results = append(results, testEndpoint(
+					"Route Detail",
+					endpoints.Route(routeID),
+					apiKey,
+					saveResponses,
+				))
+			}
+		}
+	}
+
+	maxNameLen := 0
+	for _, ep := range results {
+		if len(ep.Name) > maxNameLen {
+			maxNameLen = len(ep.Name)
+		}
+	}
+
+	// Check results
+	for _, ep := range results {
+		spacer := strings.Repeat(" ", maxNameLen-len(ep.Name))
+		if ep.Error != nil {
+			fmt.Printf("%s:%s %s (%.2fs)\n", ep.Name, spacer, color.RedString(ep.Status), ep.Duration.Seconds())
+			fmt.Printf("  Error: %v\n", ep.Error)
+		} else {
+			fmt.Printf("%s:%s %s (%.2fs)\n", ep.Name, spacer, color.GreenString(ep.Status), ep.Duration.Seconds())
+		}
+	}
+}
+
+// testEndpoint tests a single API endpoint directly
+func testEndpoint(endpoint string, url string, apiKey string, saveResponses bool) EndpointResult {
 
 	// Create test directory if it doesn't exist
 	testDir := "badgermaps__test"
@@ -350,144 +447,25 @@ func testEndpoints(apiKey string, saveResponses bool) {
 	// Get timestamp for filenames
 	timestamp := time.Now().Format("20060102_150405")
 
-	// Store results in a list
-	type EndpointResult struct {
-		Name     string
-		Status   string
-		Duration time.Duration
-	}
-	var results []EndpointResult
-
-	// Test customers endpoint
+	// Test the endpoint
 	startTime := time.Now()
-	customersURL := endpoints.Customers()
-	customersResp, err := makeDirectRequest(customersURL, apiKey)
+	resp, err := makeDirectRequest(url, apiKey)
 	duration := time.Since(startTime)
-	status := "Success"
+
+	status := "PASSED"
 	if err != nil {
-		status = fmt.Sprintf("Error: %v", err)
-	} else {
-		if saveResponses {
-			filename := filepath.Join(testDir, fmt.Sprintf("direct_customers_%s.json", timestamp))
-			saveRawResponseToFile(customersResp, filename)
-		}
-
-		// Get first customer ID for detailed customer test
-		var customers []map[string]interface{}
-		if err := json.Unmarshal(customersResp, &customers); err == nil && len(customers) > 0 {
-			if customerID, ok := customers[0]["id"].(float64); ok {
-				// Test customer detail endpoint (required)
-				startTime = time.Now()
-				customerDetailURL := endpoints.Customer(int(customerID))
-				customerDetailResp, err := makeDirectRequest(customerDetailURL, apiKey)
-				customerDetailDuration := time.Since(startTime)
-				customerDetailStatus := "Success"
-				if err != nil {
-					customerDetailStatus = fmt.Sprintf("Error: %v", err)
-				} else {
-					if saveResponses {
-						filename := filepath.Join(testDir, fmt.Sprintf("direct_customer_detail_%d_%s.json", int(customerID), timestamp))
-						saveRawResponseToFile(customerDetailResp, filename)
-					}
-				}
-				results = append(results, EndpointResult{
-					Name:     "Customer Detail",
-					Status:   customerDetailStatus,
-					Duration: customerDetailDuration,
-				})
-
-				// Test account checkin list endpoint for this customer (required)
-				startTime = time.Now()
-				accountCheckinsURL := endpoints.AppointmentsForCustomer(int(customerID))
-				accountCheckinsResp, err := makeDirectRequest(accountCheckinsURL, apiKey)
-				accountCheckinsDuration := time.Since(startTime)
-				accountCheckinsStatus := "Success"
-				if err != nil {
-					accountCheckinsStatus = fmt.Sprintf("Error: %v", err)
-				} else {
-					if saveResponses {
-						filename := filepath.Join(testDir, fmt.Sprintf("direct_account_checkins_%d_%s.json", int(customerID), timestamp))
-						saveRawResponseToFile(accountCheckinsResp, filename)
-					}
-				}
-				results = append(results, EndpointResult{
-					Name:     "Account Checkins",
-					Status:   accountCheckinsStatus,
-					Duration: accountCheckinsDuration,
-				})
-			}
-		}
+		status = fmt.Sprintf("FAILED: %v", err)
+	} else if saveResponses {
+		filename := filepath.Join(testDir, fmt.Sprintf("direct_%s_%s.json", endpoint, timestamp))
+		saveRawResponseToFile(resp, filename)
 	}
-	results = append(results, EndpointResult{
-		Name:     "Customers",
-		Status:   status,
-		Duration: duration,
-	})
 
-	// Test routes endpoint
-	startTime = time.Now()
-	routesURL := endpoints.Routes()
-	routesResp, err := makeDirectRequest(routesURL, apiKey)
-	duration = time.Since(startTime)
-	status = "Success"
-	if err != nil {
-		status = fmt.Sprintf("Error: %v", err)
-	} else {
-		if saveResponses {
-			filename := filepath.Join(testDir, fmt.Sprintf("direct_routes_%s.json", timestamp))
-			saveRawResponseToFile(routesResp, filename)
-		}
-	}
-	results = append(results, EndpointResult{
-		Name:     "Routes",
+	return EndpointResult{
+		Name:     endpoint,
 		Status:   status,
+		Error:    err,
+		Response: &resp,
 		Duration: duration,
-	})
-
-	// Test appointments endpoint
-	startTime = time.Now()
-	appointmentsURL := endpoints.Appointments()
-	appointmentsResp, err := makeDirectRequest(appointmentsURL, apiKey)
-	duration = time.Since(startTime)
-	status = "Success"
-	if err != nil {
-		status = fmt.Sprintf("Error: %v", err)
-	} else {
-		if saveResponses {
-			filename := filepath.Join(testDir, fmt.Sprintf("direct_appointments_%s.json", timestamp))
-			saveRawResponseToFile(appointmentsResp, filename)
-		}
-	}
-	results = append(results, EndpointResult{
-		Name:     "Appointments",
-		Status:   status,
-		Duration: duration,
-	})
-
-	// Test profiles endpoint
-	startTime = time.Now()
-	profilesURL := endpoints.Profiles()
-	profilesResp, err := makeDirectRequest(profilesURL, apiKey)
-	duration = time.Since(startTime)
-	status = "Success"
-	if err != nil {
-		status = fmt.Sprintf("Error: %v", err)
-	} else {
-		if saveResponses {
-			filename := filepath.Join(testDir, fmt.Sprintf("direct_profiles_%s.json", timestamp))
-			saveRawResponseToFile(profilesResp, filename)
-		}
-	}
-	results = append(results, EndpointResult{
-		Name:     "Profiles",
-		Status:   status,
-		Duration: duration,
-	})
-
-	// Display results
-	fmt.Println("\nEndpoint Test Results:")
-	for _, result := range results {
-		fmt.Printf("- %s: %s (%.2fs)\n", result.Name, result.Status, result.Duration.Seconds())
 	}
 }
 
@@ -501,22 +479,74 @@ func testDatabase() {
 		os.Mkdir(testDir, 0755)
 	}
 
-	// In a real implementation, we would:
-	// 1. Create a test database in the badgermaps__test directory
-	// 2. Initialize the schema
-	// 3. Verify that all required tables exist with the correct schema
-	// 4. Run some basic CRUD operations
+	// Get database configuration from viper
+	dbType := viper.GetString("DATABASE_TYPE")
+	if dbType == "" {
+		dbType = "sqlite3" // Default to SQLite
+	}
 
-	// For example:
-	// dbPath := filepath.Join(testDir, "test_database.db")
-	// db, err := sql.Open("sqlite3", dbPath)
-	// if err != nil {
-	//     fmt.Println(color.RedString("Failed to create test database: %v", err))
-	//     os.Exit(1)
-	// }
-	// defer db.Close()
+	// Create database config
+	dbConfig := &database.Config{
+		DatabaseType: dbType,
+		Host:         viper.GetString("DATABASE_HOST"),
+		Port:         viper.GetString("DATABASE_PORT"),
+		Database:     viper.GetString("DATABASE_NAME"),
+		Username:     viper.GetString("DATABASE_USER"),
+		Password:     viper.GetString("DATABASE_PASSWORD"),
+	}
 
-	// For now, just print a placeholder message
-	fmt.Println(color.GreenString("Database functionality test passed"))
-	fmt.Println(color.CyanString("Test database would be created in the %s directory", testDir))
+	// For SQLite, use a test database if no path is specified
+	if dbType == "sqlite3" && dbConfig.Database == "" {
+		dbConfig.Database = "test.db"
+	}
+
+	// Test database connection
+	fmt.Println(color.CyanString("Connecting to %s database...", dbType))
+	client, err := database.NewClient(dbConfig, true)
+	if err != nil {
+		fmt.Println(color.RedString("FAILED: Could not connect to database"))
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer client.Close()
+
+	fmt.Println(color.GreenString("PASSED: Database connection successful"))
+
+	// Validate database schema
+	fmt.Println(color.CyanString("\nValidating database tables:"))
+
+	// Get required tables
+	requiredTables := client.GetRequiredTables()
+
+	// Calculate the longest table name for alignment
+	maxNameLen := 0
+	for tableName := range requiredTables {
+		if len(tableName) > maxNameLen {
+			maxNameLen = len(tableName)
+		}
+	}
+
+	// Check each table individually
+	allTablesValid := true
+
+	for tableName, _ := range requiredTables {
+		spacer := strings.Repeat(" ", maxNameLen-len(tableName))
+
+		// Try to query the table to see if it exists and is accessible
+		_, err := client.GetDB().Query(fmt.Sprintf("SELECT 1 FROM %s LIMIT 1", tableName))
+		if err != nil {
+			fmt.Printf("%s:%s %s\n", tableName, spacer, color.RedString("FAILED"))
+			fmt.Printf("  Error: %v\n", err)
+			allTablesValid = false
+		} else {
+			fmt.Printf("%s:%s %s\n", tableName, spacer, color.GreenString("PASSED"))
+		}
+	}
+
+	if allTablesValid {
+		fmt.Println(color.GreenString("\nAll database tables validated successfully"))
+	} else {
+		fmt.Println(color.RedString("\nSome database tables failed validation"))
+		fmt.Println("Run 'badgermaps utils create-tables' to create missing tables")
+	}
 }
