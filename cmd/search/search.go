@@ -3,383 +3,549 @@ package search
 import (
 	"database/sql"
 	"fmt"
+	"os"
 	"strings"
-	"time"
+	"unicode"
 
 	"badgermapscli/api"
 	"badgermapscli/common"
+	"badgermapscli/database"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" // SQLite driver
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-// SearchResult represents a search result
-type SearchResult struct {
-	ID   string
-	Name string
-	Type string
-}
-
-// NewSearchCmd creates a new search command
-func NewSearchCmd() *cobra.Command {
-	var (
-		forceOnline bool
-		searchType  string
-	)
-
-	searchCmd := &cobra.Command{
+// SearchCmd creates a new search command
+func SearchCmd() *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "search [query]",
-		Short: "Find items by name",
-		Long:  `Search for accounts, locations, and other items by name.`,
-		Args:  cobra.MinimumNArgs(1),
+		Short: "Search for accounts and routes",
+		Long: `Search for accounts and routes in the local database.
+The search uses fuzzy matching to find items that match the query.
+Results include the item type and three additional fields to help with filtering.`,
+		Args: cobra.MinimumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			colors := common.Colors
 			query := strings.Join(args, " ")
+			verbose := viper.GetBool("verbose")
+			online, _ := cmd.Flags().GetBool("online")
 
-			// Get API key from environment
-			apiKey := viper.GetString("API_KEY")
-			if apiKey == "" && forceOnline {
-				fmt.Println(colors.Red("API key not found. Please authenticate first with 'badgermaps auth'"))
-				common.Errors.ExitWithAuthFailure("API key not found")
-			}
-
-			// Determine search type
-			searchTypes := []string{"all"}
-			if searchType != "" {
-				searchTypes = strings.Split(searchType, ",")
-			}
-
-			// Search offline first unless force online
-			if !forceOnline {
-				results, err := searchOffline(query, searchTypes)
-				if err != nil {
-					fmt.Println(colors.Yellow("Offline search failed: %v", err))
-					fmt.Println(colors.Yellow("Falling back to online search..."))
-				} else if len(results) > 0 {
-					displayResults(results)
-					return
+			if verbose {
+				fmt.Printf("Searching for: %s\n", query)
+				if online {
+					fmt.Println("Using online mode")
 				} else {
-					fmt.Println(colors.Yellow("No results found in offline cache."))
-					fmt.Println(colors.Yellow("Falling back to online search..."))
+					fmt.Println("Using offline mode (local cache)")
 				}
 			}
 
-			// If we got here, we need to search online
-			if apiKey == "" {
-				fmt.Println(colors.Red("API key not found. Please authenticate first with 'badgermaps auth'"))
-				common.Errors.ExitWithAuthFailure("API key not found")
-			}
-
-			results, err := searchOnline(apiKey, query, searchTypes)
+			// Perform the search
+			results, err := performSearch(query, online, verbose)
 			if err != nil {
-				fmt.Println(colors.Red("Online search failed: %v", err))
-				common.Errors.ExitWithAPIError("Online search failed: %v", err)
-			}
-
-			if len(results) == 0 {
-				fmt.Println(colors.Yellow("No results found."))
+				fmt.Println(common.Colors.Red("Error: Search failed: %v", err))
 				return
 			}
 
+			// Display results
 			displayResults(results)
-
-			// Update cache in background
-			go updateSearchCache(apiKey)
 		},
 	}
 
 	// Add flags
-	searchCmd.Flags().BoolVar(&forceOnline, "online", false, "Force online search (default is to search offline first)")
-	searchCmd.Flags().StringVar(&searchType, "type", "", "Type of items to search (accounts,locations,profiles,all)")
+	cmd.Flags().BoolP("online", "o", false, "Use online mode instead of local cache")
 
-	return searchCmd
+	return cmd
 }
 
-// searchOffline searches the local SQLite database
-func searchOffline(query string, types []string) ([]SearchResult, error) {
+// initCacheDB initializes the cache database
+func initCacheDB(verbose bool) (*sqlite3.DB, error) {
+	// Get database configuration
+	dbConfig := &database.Config{
+		DatabaseType: "sqlite3",
+		Database:     viper.GetString("CACHE_DB_PATH"),
+		Host:         viper.GetString("CACHE_DB_HOST"),
+	}
+
+	db, err := database.NewClient(dbConfig, verbose)
+}
+
+// SearchResult represents a search result item
+type SearchResult struct {
+	ID          int
+	Name        string
+	Type        string
+	Field1Name  string
+	Field1Value string
+	Field2Name  string
+	Field2Value string
+	Field3Name  string
+	Field3Value string
+}
+
+
+// performSearch searches for accounts and routes that match the query
+func performSearch(query string, online, verbose bool) ([]SearchResult, error) {
 	var results []SearchResult
 
-	// Open SQLite database
-	dbPath := getCachePath()
-	db, err := sql.Open("sqlite3", dbPath)
+	if online {
+		// Use the API for online search
+		return searchOnline(query, verbose)
+	}
+
+	// Use the local database for offline search
+	// Get database client for the main database
+	dbConfig := &database.Config{
+		DatabaseType: "sqlite3"
+		Database:     viper.GetString("DB_PATH"),
+		Host:         viper.GetString("DB_HOST"),
+		Port:         viper.GetString("DB_PORT"),
+		Username:     viper.GetString("DB_USER"),
+		Password:     viper.GetString("DB_PASSWORD"),
+	}
+
+	client, err := database.NewClient(dbConfig, verbose)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open cache database: %w", err)
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
-	defer db.Close()
+	defer client.Close()
 
-	// Check if cache is too old
-	var lastUpdated time.Time
-	err = db.QueryRow("SELECT value FROM metadata WHERE key = 'last_updated'").Scan(&lastUpdated)
+	// Initialize the cache database
+	cacheDB, err := initCacheDB(verbose)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get cache update time: %w", err)
+		return nil, fmt.Errorf("failed to initialize cache database: %w", err)
+	}
+	defer cacheDB.Close()
+
+	// Populate the cache database if needed
+	if err := populateCache(cacheDB, client, verbose); err != nil {
+		return nil, fmt.Errorf("failed to populate cache database: %w", err)
 	}
 
-	// If cache is older than 1 day, consider it stale
-	if time.Since(lastUpdated) > 24*time.Hour {
-		return nil, fmt.Errorf("cache is stale (last updated %s)", lastUpdated.Format(time.RFC3339))
-	}
-
-	// Build query
-	searchQuery := "%" + query + "%"
-	sqlQuery := "SELECT id, name, type FROM search_items WHERE name LIKE ? OR id LIKE ?"
-
-	// Filter by type if specified
-	if len(types) > 0 && !(len(types) == 1 && types[0] == "all") {
-		sqlQuery += " AND type IN (" + strings.Repeat("?,", len(types)-1) + "?)"
-	}
-
-	// Prepare statement
-	stmt, err := db.Prepare(sqlQuery)
+	// Search accounts using the cache database
+	accountResults, err := searchAccountsCache(cacheDB, query, verbose)
 	if err != nil {
-		return nil, fmt.Errorf("failed to prepare search query: %w", err)
+		return nil, fmt.Errorf("failed to search accounts: %w", err)
 	}
-	defer stmt.Close()
+	results = append(results, accountResults...)
 
-	// Execute query
-	var rows *sql.Rows
-	if len(types) > 0 && !(len(types) == 1 && types[0] == "all") {
-		args := make([]interface{}, len(types)+2)
-		args[0] = searchQuery
-		args[1] = searchQuery
-		for i, t := range types {
-			args[i+2] = t
+	// Search routes using the cache database
+	routeResults, err := searchRoutesCache(cacheDB, query, verbose)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search routes: %w", err)
+	}
+	results = append(results, routeResults...)
+
+	return results, nil
+}
+
+// searchOnline searches for accounts and routes using the API
+func searchOnline(query string, verbose bool) ([]SearchResult, error) {
+	var results []SearchResult
+
+	// Get API client
+	apiKey := viper.GetString("API_KEY")
+	if apiKey == "" {
+		return nil, fmt.Errorf("API key not found in configuration")
+	}
+
+	apiClient := api.NewAPIClient(apiKey)
+
+	// Search accounts
+	if verbose {
+		fmt.Println("Searching accounts online...")
+	}
+
+	// Use the SearchAccounts method to search for accounts
+	accounts, err := apiClient.SearchAccounts(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search accounts online: %w", err)
+	}
+
+	// Convert account results to SearchResult
+	for _, account := range accounts {
+		// Create a SearchResult for each account
+		result := SearchResult{
+			ID:          account.ID,
+			Name:        account.FullName,
+			Type:        "Account",
+			Field1Name:  "Email",
+			Field1Value: account.Email,
+			Field2Name:  "Phone",
+			Field2Value: account.PhoneNumber,
+			Field3Name:  "Owner",
+			Field3Value: getStringValue(account.AccountOwner),
 		}
-		rows, err = stmt.Query(args...)
-	} else {
-		rows, err = stmt.Query(searchQuery, searchQuery)
+		results = append(results, result)
 	}
 
+	// For routes, we would need to get all routes and filter them
+	// since there's no direct search endpoint for routes
+	if verbose {
+		fmt.Println("Fetching routes online...")
+	}
+
+	// Use the GetRoutes method to get all routes
+	routes, err := apiClient.GetRoutes()
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute search query: %w", err)
+		return nil, fmt.Errorf("failed to fetch routes online: %w", err)
+	}
+
+	// Filter routes by name
+	for _, route := range routes {
+		// Calculate fuzzy match score
+		score := calculateFuzzyScore(query, route.Name)
+
+		// Only include results with a minimum score
+		if score > 0.3 {
+			// Create a SearchResult for each matching route
+			result := SearchResult{
+				ID:          route.ID,
+				Name:        route.Name,
+				Type:        "Route",
+				Field1Name:  "Date",
+				Field1Value: route.RouteDate,
+				Field2Name:  "Start",
+				Field2Value: route.StartAddress,
+				Field3Name:  "Destination",
+				Field3Value: route.DestinationAddress,
+			}
+			results = append(results, result)
+		}
+	}
+
+	return results, nil
+}
+
+// getStringValue safely gets the value of a string pointer
+func getStringValue(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// searchAccounts searches for accounts that match the query
+func searchAccounts(client *database.Client, query string) ([]SearchResult, error) {
+	var results []SearchResult
+
+	// Get database connection
+	db := client.GetDB()
+
+	// Load the SQL query from the appropriate file based on database type
+	sqlLoader := database.NewSQLLoader(viper.GetString("DB_TYPE"), viper.GetBool("verbose"))
+	sqlQuery, err := sqlLoader.LoadSearchAccountsSQL()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load search accounts SQL: %w", err)
+	}
+
+	// Prepare the query with wildcards for fuzzy matching
+	searchPattern := "%" + query + "%"
+	rows, err := db.Query(sqlQuery, searchPattern, searchPattern, searchPattern, searchPattern, searchPattern)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query accounts: %w", err)
 	}
 	defer rows.Close()
 
 	// Process results
 	for rows.Next() {
-		var result SearchResult
-		err := rows.Scan(&result.ID, &result.Name, &result.Type)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan search result: %w", err)
+		var id int
+		var fullName, firstName, lastName, email, phoneNumber string
+
+		if err := rows.Scan(&id, &fullName, &firstName, &lastName, &email, &phoneNumber); err != nil {
+			return nil, fmt.Errorf("failed to scan account row: %w", err)
 		}
-		results = append(results, result)
+
+		// Calculate fuzzy match score
+		score := calculateFuzzyScore(query, fullName)
+
+		// Only include results with a minimum score
+		if score > 0.3 {
+			result := SearchResult{
+				ID:          id,
+				Name:        fullName,
+				Type:        "Account",
+				Field1Name:  "Email",
+				Field1Value: email,
+				Field2Name:  "Phone",
+				Field2Value: phoneNumber,
+				Field3Name:  "Name",
+				Field3Value: fmt.Sprintf("%s %s", firstName, lastName),
+			}
+			results = append(results, result)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating account rows: %w", err)
 	}
 
 	return results, nil
 }
 
-// searchOnline searches using the BadgerMaps API
-func searchOnline(apiKey, query string, types []string) ([]SearchResult, error) {
+// searchRoutes searches for routes that watch the query
+func searchRoutes(client *database.Client, query string) ([]SearchResult, error) {
 	var results []SearchResult
 
-	// Create API client
-	apiClient := api.NewAPIClient(apiKey)
+	// Get database connection
+	db := client.GetDB()
 
-	// Search accounts
-	if contains(types, "all") || contains(types, "accounts") {
-		accounts, err := apiClient.SearchAccounts(query)
-		if err != nil {
-			return nil, fmt.Errorf("failed to search accounts: %w", err)
-		}
-
-		for _, account := range accounts {
-			results = append(results, SearchResult{
-				ID:   fmt.Sprintf("%d", account.ID),
-				Name: account.FullName,
-				Type: "account",
-			})
-		}
+	// Load the SQL query from the appropriate file based on database type
+	sqlLoader := database.NewSQLLoader(viper.GetString("DB_TYPE"), viper.GetBool("verbose"))
+	sqlQuery, err := sqlLoader.LoadSearchRoutesSQL()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load search routes SQL: %w", err)
 	}
 
-	// Search locations
-	if contains(types, "all") || contains(types, "locations") {
-		locations, err := apiClient.SearchLocations(query)
-		if err != nil {
-			return nil, fmt.Errorf("failed to search locations: %w", err)
+	// Prepare the query with wildcards for fuzzy matching
+	searchPattern := "%" + query + "%"
+	rows, err := db.Query(sqlQuery, searchPattern, searchPattern, searchPattern)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query routes: %w", err)
+	}
+	defer rows.Close()
+
+	// Process results
+	for rows.Next() {
+		var id int
+		var name, routeDate, startAddress, destinationAddress string
+
+		if err := rows.Scan(&id, &name, &routeDate, &startAddress, &destinationAddress); err != nil {
+			return nil, fmt.Errorf("failed to scan route row: %w", err)
 		}
 
-		for _, location := range locations {
-			// Handle nil pointer for location name
-			locationName := ""
-			if location.Name != nil {
-				locationName = *location.Name
+		// Calculate fuzzy match score
+		score := calculateFuzzyScore(query, name)
+
+		// Only include results with a minimum score
+		if score > 0.3 {
+			result := SearchResult{
+				ID:          id,
+				Name:        name,
+				Type:        "Route",
+				Field1Name:  "Date",
+				Field1Value: routeDate,
+				Field2Name:  "Start",
+				Field2Value: startAddress,
+				Field3Name:  "Destination",
+				Field3Value: destinationAddress,
 			}
-
-			results = append(results, SearchResult{
-				ID:   fmt.Sprintf("%d", location.ID),
-				Name: locationName,
-				Type: "location",
-			})
+			results = append(results, result)
 		}
 	}
 
-	// Search profiles
-	if contains(types, "all") || contains(types, "profiles") {
-		profiles, err := apiClient.SearchProfiles(query)
-		if err != nil {
-			return nil, fmt.Errorf("failed to search profiles: %w", err)
-		}
-
-		for _, profile := range profiles {
-			// Combine first and last name for display
-			fullName := profile.FirstName + " " + profile.LastName
-
-			results = append(results, SearchResult{
-				ID:   fmt.Sprintf("%d", profile.ID),
-				Name: fullName,
-				Type: "profile",
-			})
-		}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating route rows: %w", err)
 	}
 
 	return results, nil
 }
 
-// displayResults displays search results
+// calculateFuzzyScore calculates a similarity score between the query and the text
+// Returns a value between 0 and 1, where 1 is a perfect match
+func calculateFuzzyScore(query, text string) float64 {
+	// Convert to lowercase for case-insensitive matching
+	query = strings.ToLower(query)
+	text = strings.ToLower(text)
+
+	// If the query is found as a substring, that's a strong match
+	if strings.Contains(text, query) {
+		return 0.9
+	}
+
+	// Split into words for word-level matching
+	queryWords := splitIntoWords(query)
+	textWords := splitIntoWords(text)
+
+	// Count how many query words are found in the text
+	matchedWords := 0
+	for _, qWord := range queryWords {
+		for _, tWord := range textWords {
+			if strings.Contains(tWord, qWord) || levenshteinDistance(qWord, tWord) <= 2 {
+				matchedWords++
+				break
+			}
+		}
+	}
+
+	// Calculate score based on matched words
+	if len(queryWords) == 0 {
+		return 0
+	}
+
+	return float64(matchedWords) / float64(len(queryWords))
+}
+
+// splitIntoWords splits a string into words
+func splitIntoWords(s string) []string {
+	var words []string
+	var currentWord strings.Builder
+
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			currentWord.WriteRune(r)
+		} else {
+			if currentWord.Len() > 0 {
+				words = append(words, currentWord.String())
+				currentWord.Reset()
+			}
+		}
+	}
+
+	if currentWord.Len() > 0 {
+		words = append(words, currentWord.String())
+	}
+
+	return words
+}
+
+// levenshteinDistance calculates the Levenshtein distance between two strings
+func levenshteinDistance(s1, s2 string) int {
+	if len(s1) == 0 {
+		return len(s2)
+	}
+	if len(s2) == 0 {
+		return len(s1)
+	}
+
+	// Create a matrix to store the distances
+	matrix := make([][]int, len(s1)+1)
+	for i := range matrix {
+		matrix[i] = make([]int, len(s2)+1)
+	}
+
+	// Initialize the first row and column
+	for i := 0; i <= len(s1); i++ {
+		matrix[i][0] = i
+	}
+	for j := 0; j <= len(s2); j++ {
+		matrix[0][j] = j
+	}
+
+	// Fill in the rest of the matrix
+	for i := 1; i <= len(s1); i++ {
+		for j := 1; j <= len(s2); j++ {
+			cost := 1
+			if s1[i-1] == s2[j-1] {
+				cost = 0
+			}
+			matrix[i][j] = min(
+				matrix[i-1][j]+1,      // deletion
+				matrix[i][j-1]+1,      // insertion
+				matrix[i-1][j-1]+cost, // substitution
+			)
+		}
+	}
+
+	return matrix[len(s1)][len(s2)]
+}
+
+// min returns the minimum of three integers
+func min(a, b, c int) int {
+	if a < b {
+		if a < c {
+			return a
+		}
+		return c
+	}
+	if b < c {
+		return b
+	}
+	return c
+}
+
+// displayResults displays the search results in a formatted table
 func displayResults(results []SearchResult) {
-	colors := common.Colors
+	if len(results) == 0 {
+		fmt.Println("No results found.")
+		return
+	}
 
-	fmt.Printf("%s\n", colors.Blue("Search Results"))
-	fmt.Printf("%s\n", colors.Blue("=============="))
-
-	// Calculate column widths
-	idWidth := 10
-	nameWidth := 30
-	typeWidth := 10
+	// Find the maximum width for each column
+	maxIDWidth := 5          // "ID" header width
+	maxNameWidth := 4        // "Name" header width
+	maxTypeWidth := 4        // "Type" header width
+	maxField1NameWidth := 10 // Minimum width for field name
+	maxField2NameWidth := 10
+	maxField3NameWidth := 10
+	maxField1ValueWidth := 10 // Minimum width for field value
+	maxField2ValueWidth := 10
+	maxField3ValueWidth := 10
 
 	for _, result := range results {
-		if len(result.ID) > idWidth {
-			idWidth = len(result.ID)
+		idWidth := len(fmt.Sprintf("%d", result.ID))
+		if idWidth > maxIDWidth {
+			maxIDWidth = idWidth
 		}
-		if len(result.Name) > nameWidth {
-			nameWidth = len(result.Name)
+
+		if len(result.Name) > maxNameWidth {
+			maxNameWidth = len(result.Name)
 		}
-		if len(result.Type) > typeWidth {
-			typeWidth = len(result.Type)
+
+		if len(result.Type) > maxTypeWidth {
+			maxTypeWidth = len(result.Type)
+		}
+
+		if len(result.Field1Name) > maxField1NameWidth {
+			maxField1NameWidth = len(result.Field1Name)
+		}
+		if len(result.Field2Name) > maxField2NameWidth {
+			maxField2NameWidth = len(result.Field2Name)
+		}
+		if len(result.Field3Name) > maxField3NameWidth {
+			maxField3NameWidth = len(result.Field3Name)
+		}
+
+		if len(result.Field1Value) > maxField1ValueWidth {
+			maxField1ValueWidth = len(result.Field1Value)
+		}
+		if len(result.Field2Value) > maxField2ValueWidth {
+			maxField2ValueWidth = len(result.Field2Value)
+		}
+		if len(result.Field3Value) > maxField3ValueWidth {
+			maxField3ValueWidth = len(result.Field3Value)
 		}
 	}
 
 	// Print header
-	fmt.Printf("%-*s | %-*s | %-*s\n", idWidth, "ID", nameWidth, "Name", typeWidth, "Type")
-	fmt.Printf("%s+%s+%s\n",
-		strings.Repeat("-", idWidth+2),
-		strings.Repeat("-", nameWidth+2),
-		strings.Repeat("-", typeWidth+2))
+	fmt.Printf("%-*s | %-*s | %-*s | %-*s: %-*s | %-*s: %-*s | %-*s: %-*s\n",
+		maxIDWidth, "ID",
+		maxNameWidth, "Name",
+		maxTypeWidth, "Type",
+		maxField1NameWidth, "Field1",
+		maxField1ValueWidth, "Value",
+		maxField2NameWidth, "Field2",
+		maxField2ValueWidth, "Value",
+		maxField3NameWidth, "Field3",
+		maxField3ValueWidth, "Value",
+	)
+
+	// Print separator
+	separator := strings.Repeat("-", maxIDWidth) + "-+-" +
+		strings.Repeat("-", maxNameWidth) + "-+-" +
+		strings.Repeat("-", maxTypeWidth) + "-+-" +
+		strings.Repeat("-", maxField1NameWidth) + "-+-" +
+		strings.Repeat("-", maxField1ValueWidth) + "-+-" +
+		strings.Repeat("-", maxField2NameWidth) + "-+-" +
+		strings.Repeat("-", maxField2ValueWidth) + "-+-" +
+		strings.Repeat("-", maxField3NameWidth) + "-+-" +
+		strings.Repeat("-", maxField3ValueWidth)
+	fmt.Println(separator)
 
 	// Print results
 	for _, result := range results {
-		fmt.Printf("%-*s | %-*s | %-*s\n",
-			idWidth, result.ID,
-			nameWidth, result.Name,
-			typeWidth, result.Type)
-	}
-}
-
-// updateSearchCache updates the local SQLite database with the latest data
-func updateSearchCache(apiKey string) {
-	// Create API client
-	apiClient := api.NewAPIClient(apiKey)
-
-	// Create cache directory if it doesn't exist
-	if err := common.EnsureCacheDir(); err != nil {
-		fmt.Printf("Failed to create cache directory: %v\n", err)
-		return
+		fmt.Printf("%-*d | %-*s | %-*s | %-*s: %-*s | %-*s: %-*s | %-*s: %-*s\n",
+			maxIDWidth, result.ID,
+			maxNameWidth, result.Name,
+			maxTypeWidth, result.Type,
+			maxField1NameWidth, result.Field1Name,
+			maxField1ValueWidth, result.Field1Value,
+			maxField2NameWidth, result.Field2Name,
+			maxField2ValueWidth, result.Field2Value,
+			maxField3NameWidth, result.Field3Name,
+			maxField3ValueWidth, result.Field3Value,
+		)
 	}
 
-	// Open SQLite database
-	dbPath := getCachePath()
-	db, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
-		fmt.Printf("Failed to open cache database: %v\n", err)
-		return
-	}
-	defer db.Close()
-
-	// Create tables if they don't exist
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS search_items (
-			id TEXT PRIMARY KEY,
-			name TEXT,
-			type TEXT,
-			data TEXT
-		);
-		CREATE TABLE IF NOT EXISTS metadata (
-			key TEXT PRIMARY KEY,
-			value TEXT
-		);
-	`)
-	if err != nil {
-		fmt.Printf("Failed to create cache tables: %v\n", err)
-		return
-	}
-
-	// Begin transaction
-	tx, err := db.Begin()
-	if err != nil {
-		fmt.Printf("Failed to begin transaction: %v\n", err)
-		return
-	}
-
-	// Clear existing data
-	_, err = tx.Exec("DELETE FROM search_items")
-	if err != nil {
-		tx.Rollback()
-		fmt.Printf("Failed to clear cache: %v\n", err)
-		return
-	}
-
-	// Fetch and store accounts
-	accounts, err := apiClient.GetAccounts()
-	if err != nil {
-		tx.Rollback()
-		fmt.Printf("Failed to fetch accounts: %v\n", err)
-		return
-	}
-
-	stmt, err := tx.Prepare("INSERT INTO search_items (id, name, type, data) VALUES (?, ?, ?, ?)")
-	if err != nil {
-		tx.Rollback()
-		fmt.Printf("Failed to prepare statement: %v\n", err)
-		return
-	}
-
-	for _, account := range accounts {
-		_, err = stmt.Exec(account.ID, account.FullName, "account", "")
-		if err != nil {
-			tx.Rollback()
-			fmt.Printf("Failed to insert account: %v\n", err)
-			return
-		}
-	}
-
-	// Update last updated timestamp
-	_, err = tx.Exec("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
-		"last_updated", time.Now().Format(time.RFC3339))
-	if err != nil {
-		tx.Rollback()
-		fmt.Printf("Failed to update timestamp: %v\n", err)
-		return
-	}
-
-	// Commit transaction
-	err = tx.Commit()
-	if err != nil {
-		fmt.Printf("Failed to commit transaction: %v\n", err)
-		return
-	}
-}
-
-// getCachePath returns the path to the SQLite cache database
-func getCachePath() string {
-	return common.GetCacheFilePath("search_cache.db")
-}
-
-// contains checks if a string is in a slice
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
+	// Print summary
+	fmt.Printf("\nFound %d results.\n", len(results))
 }
