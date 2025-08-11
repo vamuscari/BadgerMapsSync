@@ -11,7 +11,7 @@ import (
 )
 
 // NewPushCmd creates a new push command
-func NewPushCmd(globalConfig) *cobra.Command {
+func NewPushCmd() *cobra.Command {
 	pushCmd := &cobra.Command{
 		Use:   "push",
 		Short: "Send data to BadgerMaps API",

@@ -68,8 +68,6 @@ func init() {
 	viper.BindPFlag("debug", rootCmd.PersistentFlags().Lookup("debug"))
 	viper.BindPFlag("no-color", rootCmd.PersistentFlags().Lookup("no-color"))
 
-	viper.G
-
 	// Create commands
 	pushCmd := push.NewPushCmd()
 	pullCmd := pull.PullCmd()

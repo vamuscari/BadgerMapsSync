@@ -1,9 +1,7 @@
 package search
 
 import (
-	"database/sql"
 	"fmt"
-	"os"
 	"strings"
 	"unicode"
 
@@ -16,8 +14,8 @@ import (
 	"github.com/spf13/viper"
 )
 
-// SearchCmd creates a new search command
-func SearchCmd() *cobra.Command {
+// NewSearchCmd creates a new search command
+func NewSearchCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "search [query]",
 		Short: "Search for accounts and routes",
@@ -58,7 +56,7 @@ Results include the item type and three additional fields to help with filtering
 }
 
 // initCacheDB initializes the cache database
-func initCacheDB(verbose bool) (*sqlite3.DB, error) {
+func initCacheDB(verbose bool) (*database.Client, error) {
 	// Get database configuration
 	dbConfig := &database.Config{
 		DatabaseType: "sqlite3",
@@ -67,6 +65,10 @@ func initCacheDB(verbose bool) (*sqlite3.DB, error) {
 	}
 
 	db, err := database.NewClient(dbConfig, verbose)
+	if err != nil {
+		return nil, err
+	}
+	return db, nil
 }
 
 // SearchResult represents a search result item
@@ -82,7 +84,6 @@ type SearchResult struct {
 	Field3Value string
 }
 
-
 // performSearch searches for accounts and routes that match the query
 func performSearch(query string, online, verbose bool) ([]SearchResult, error) {
 	var results []SearchResult
@@ -95,7 +96,7 @@ func performSearch(query string, online, verbose bool) ([]SearchResult, error) {
 	// Use the local database for offline search
 	// Get database client for the main database
 	dbConfig := &database.Config{
-		DatabaseType: "sqlite3"
+		DatabaseType: "sqlite3",
 		Database:     viper.GetString("DB_PATH"),
 		Host:         viper.GetString("DB_HOST"),
 		Port:         viper.GetString("DB_PORT"),
@@ -109,27 +110,15 @@ func performSearch(query string, online, verbose bool) ([]SearchResult, error) {
 	}
 	defer client.Close()
 
-	// Initialize the cache database
-	cacheDB, err := initCacheDB(verbose)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize cache database: %w", err)
-	}
-	defer cacheDB.Close()
-
-	// Populate the cache database if needed
-	if err := populateCache(cacheDB, client, verbose); err != nil {
-		return nil, fmt.Errorf("failed to populate cache database: %w", err)
-	}
-
-	// Search accounts using the cache database
-	accountResults, err := searchAccountsCache(cacheDB, query, verbose)
+	// Search accounts directly using the client
+	accountResults, err := searchAccounts(client, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search accounts: %w", err)
 	}
 	results = append(results, accountResults...)
 
-	// Search routes using the cache database
-	routeResults, err := searchRoutesCache(cacheDB, query, verbose)
+	// Search routes directly using the client
+	routeResults, err := searchRoutes(client, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search routes: %w", err)
 	}
