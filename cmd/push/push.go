@@ -5,13 +5,16 @@ import (
 	"os"
 	"sync"
 
+	"badgermapscli/app"
+
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
-// NewPushCmd creates a new push command
-func NewPushCmd() *cobra.Command {
+// PushCmd creates a new push command
+func PushCmd(config *app.Application) *cobra.Command {
+	config.VerifySetupOrExit()
+
 	pushCmd := &cobra.Command{
 		Use:   "push",
 		Short: "Send data to BadgerMaps API",
@@ -23,19 +26,19 @@ func NewPushCmd() *cobra.Command {
 	}
 
 	// Add subcommands
-	pushCmd.AddCommand(newPushAccountCmd())
-	pushCmd.AddCommand(newPushAccountsCmd())
-	pushCmd.AddCommand(newPushCheckinCmd())
-	pushCmd.AddCommand(newPushCheckinsCmd())
-	pushCmd.AddCommand(newPushRouteCmd())
-	pushCmd.AddCommand(newPushRoutesCmd())
-	pushCmd.AddCommand(newPushProfileCmd())
+	pushCmd.AddCommand(newPushAccountCmd(config))
+	pushCmd.AddCommand(newPushAccountsCmd(config))
+	pushCmd.AddCommand(newPushCheckinCmd(config))
+	pushCmd.AddCommand(newPushCheckinsCmd(config))
+	pushCmd.AddCommand(newPushRouteCmd(config))
+	pushCmd.AddCommand(newPushRoutesCmd(config))
+	pushCmd.AddCommand(newPushProfileCmd(config))
 
 	return pushCmd
 }
 
 // newPushAccountCmd creates a command to push a single account
-func newPushAccountCmd() *cobra.Command {
+func newPushAccountCmd(config *app.Config) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "account [id]",
 		Short: "Push a single account to BadgerMaps",
@@ -50,7 +53,7 @@ func newPushAccountCmd() *cobra.Command {
 }
 
 // newPushAccountsCmd creates a command to push multiple accounts
-func newPushAccountsCmd() *cobra.Command {
+func newPushAccountsCmd(config *app.Config) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "accounts [id...]",
 		Short: "Push multiple accounts to BadgerMaps",
@@ -58,7 +61,7 @@ func newPushAccountsCmd() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) == 0 {
 				fmt.Println("Pushing all accounts")
-				pushAllAccounts()
+				pushAllAccounts(config)
 			} else {
 				fmt.Printf("Pushing accounts with IDs: %v\n", args)
 				// Implementation for specific accounts will go here
@@ -69,7 +72,7 @@ func newPushAccountsCmd() *cobra.Command {
 }
 
 // pushAllAccounts pushes all accounts to the API
-func pushAllAccounts() {
+func pushAllAccounts(config *app.Config) {
 	// This is a placeholder for the actual implementation
 	// In a real implementation, we would:
 	// 1. Get all accounts from the database
@@ -89,7 +92,7 @@ func pushAllAccounts() {
 	fmt.Printf("Found %d accounts to push\n", len(accountIDs))
 
 	// Get max parallel processes from config
-	maxParallel := viper.GetInt("MAX_PARALLEL_PROCESSES")
+	maxParallel := config.MaxParallelProcesses
 	if maxParallel <= 0 {
 		maxParallel = 5 // Default value
 	}
@@ -137,7 +140,7 @@ func pushAllAccounts() {
 }
 
 // newPushCheckinCmd creates a command to push a single checkin
-func newPushCheckinCmd() *cobra.Command {
+func newPushCheckinCmd(config *app.Config) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "checkin [id]",
 		Short: "Push a single checkin to BadgerMaps",
@@ -151,7 +154,7 @@ func newPushCheckinCmd() *cobra.Command {
 }
 
 // newPushCheckinsCmd creates a command to push multiple checkins
-func newPushCheckinsCmd() *cobra.Command {
+func newPushCheckinsCmd(config *app.Config) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "checkins [id...]",
 		Short: "Push multiple checkins to BadgerMaps",
@@ -170,7 +173,7 @@ func newPushCheckinsCmd() *cobra.Command {
 }
 
 // newPushRouteCmd creates a command to push a single route
-func newPushRouteCmd() *cobra.Command {
+func newPushRouteCmd(config *app.Config) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "route [id]",
 		Short: "Push a single route to BadgerMaps",
@@ -184,7 +187,7 @@ func newPushRouteCmd() *cobra.Command {
 }
 
 // newPushRoutesCmd creates a command to push multiple routes
-func newPushRoutesCmd() *cobra.Command {
+func newPushRoutesCmd(config *app.Config) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "routes [id...]",
 		Short: "Push multiple routes to BadgerMaps",
@@ -203,7 +206,7 @@ func newPushRoutesCmd() *cobra.Command {
 }
 
 // newPushProfileCmd creates a command to push the user profile
-func newPushProfileCmd() *cobra.Command {
+func newPushProfileCmd(config *app.Config) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "profile",
 		Short: "Push user profile to BadgerMaps",

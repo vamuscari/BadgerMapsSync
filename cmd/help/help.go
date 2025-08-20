@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"strings"
 
-	"badgermapscli/common"
+	"badgermapscli/app"
 
 	"github.com/spf13/cobra"
 )
 
-// NewHelpCmd creates a new help command
-func NewHelpCmd(rootCmd *cobra.Command) *cobra.Command {
+// HelpCmd creates a new help command
+func HelpCmd(rootCmd *cobra.Command, App *app.Application) *cobra.Command {
 	var verbose bool
 
 	helpCmd := &cobra.Command{
@@ -18,12 +18,13 @@ func NewHelpCmd(rootCmd *cobra.Command) *cobra.Command {
 		Short: "Display help information",
 		Long:  `Display help information for BadgerMaps CLI commands.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			colors := common.Colors
+			// No debug output needed
+			colors := app.Colors
 
 			if len(args) == 0 {
 				// Show general help
-				fmt.Println(colors.Blue("BadgerMaps CLI Help"))
-				fmt.Println(colors.Blue("================="))
+				fmt.Println(colors.Blue("BadgerMaps CLI Help - Custom Help Command"))
+				fmt.Println(colors.Blue("==================================="))
 				fmt.Println()
 				fmt.Println(colors.Yellow("Usage:"))
 				fmt.Println("  " + colors.Green("badgermaps") + " [command] [flags]")

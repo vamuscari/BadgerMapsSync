@@ -6,16 +6,15 @@ import (
 	"unicode"
 
 	"badgermapscli/api"
-	"badgermapscli/common"
+	"badgermapscli/app"
 	"badgermapscli/database"
 
 	_ "github.com/mattn/go-sqlite3" // SQLite driver
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
-// NewSearchCmd creates a new search command
-func NewSearchCmd() *cobra.Command {
+// SearchCmd creates a new search command
+func SearchCmd(config *app.Application) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "search [query]",
 		Short: "Search for accounts and routes",
@@ -25,10 +24,9 @@ Results include the item type and three additional fields to help with filtering
 		Args: cobra.MinimumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			query := strings.Join(args, " ")
-			verbose := viper.GetBool("verbose")
 			online, _ := cmd.Flags().GetBool("online")
 
-			if verbose {
+			if config.Verbose {
 				fmt.Printf("Searching for: %s\n", query)
 				if online {
 					fmt.Println("Using online mode")
@@ -38,9 +36,9 @@ Results include the item type and three additional fields to help with filtering
 			}
 
 			// Perform the search
-			results, err := performSearch(query, online, verbose)
+			results, err := performSearch(query, online, config)
 			if err != nil {
-				fmt.Println(common.Colors.Red("Error: Search failed: %v", err))
+				fmt.Println(app.Colors.Red("Error: Search failed: %v", err))
 				return
 			}
 
@@ -56,15 +54,15 @@ Results include the item type and three additional fields to help with filtering
 }
 
 // initCacheDB initializes the cache database
-func initCacheDB(verbose bool) (*database.Client, error) {
+func initCacheDB(config *app.Config) (*database.Client, error) {
 	// Get database configuration
 	dbConfig := &database.Config{
 		DatabaseType: "sqlite3",
-		Database:     viper.GetString("CACHE_DB_PATH"),
-		Host:         viper.GetString("CACHE_DB_HOST"),
+		Database:     config.CacheDBPath,
+		Host:         config.CacheDBHost,
 	}
 
-	db, err := database.NewClient(dbConfig, verbose)
+	db, err := database.NewClient(dbConfig, config.Verbose)
 	if err != nil {
 		return nil, err
 	}
@@ -85,40 +83,40 @@ type SearchResult struct {
 }
 
 // performSearch searches for accounts and routes that match the query
-func performSearch(query string, online, verbose bool) ([]SearchResult, error) {
+func performSearch(query string, online bool, config *app.Config) ([]SearchResult, error) {
 	var results []SearchResult
 
 	if online {
 		// Use the API for online search
-		return searchOnline(query, verbose)
+		return searchOnline(query, config)
 	}
 
 	// Use the local database for offline search
 	// Get database client for the main database
 	dbConfig := &database.Config{
-		DatabaseType: "sqlite3",
-		Database:     viper.GetString("DB_PATH"),
-		Host:         viper.GetString("DB_HOST"),
-		Port:         viper.GetString("DB_PORT"),
-		Username:     viper.GetString("DB_USER"),
-		Password:     viper.GetString("DB_PASSWORD"),
+		DatabaseType: config.DBType,
+		Database:     config.DBPath,
+		Host:         config.DBHost,
+		Port:         config.DBPort,
+		Username:     config.DBUser,
+		Password:     config.DBPassword,
 	}
 
-	client, err := database.NewClient(dbConfig, verbose)
+	client, err := database.NewClient(dbConfig, config.Verbose)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 	defer client.Close()
 
 	// Search accounts directly using the client
-	accountResults, err := searchAccounts(client, query)
+	accountResults, err := searchAccounts(client, query, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search accounts: %w", err)
 	}
 	results = append(results, accountResults...)
 
 	// Search routes directly using the client
-	routeResults, err := searchRoutes(client, query)
+	routeResults, err := searchRoutes(client, query, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search routes: %w", err)
 	}
@@ -128,11 +126,11 @@ func performSearch(query string, online, verbose bool) ([]SearchResult, error) {
 }
 
 // searchOnline searches for accounts and routes using the API
-func searchOnline(query string, verbose bool) ([]SearchResult, error) {
+func searchOnline(query string, config *app.Config) ([]SearchResult, error) {
 	var results []SearchResult
 
 	// Get API client
-	apiKey := viper.GetString("API_KEY")
+	apiKey := config.APIKey
 	if apiKey == "" {
 		return nil, fmt.Errorf("API key not found in configuration")
 	}
@@ -140,7 +138,7 @@ func searchOnline(query string, verbose bool) ([]SearchResult, error) {
 	apiClient := api.NewAPIClient(apiKey)
 
 	// Search accounts
-	if verbose {
+	if config.Verbose {
 		fmt.Println("Searching accounts online...")
 	}
 
@@ -169,7 +167,7 @@ func searchOnline(query string, verbose bool) ([]SearchResult, error) {
 
 	// For routes, we would need to get all routes and filter them
 	// since there's no direct search endpoint for routes
-	if verbose {
+	if config.Verbose {
 		fmt.Println("Fetching routes online...")
 	}
 
@@ -214,14 +212,14 @@ func getStringValue(s *string) string {
 }
 
 // searchAccounts searches for accounts that match the query
-func searchAccounts(client *database.Client, query string) ([]SearchResult, error) {
+func searchAccounts(client *database.Client, query string, config *app.Config) ([]SearchResult, error) {
 	var results []SearchResult
 
 	// Get database connection
 	db := client.GetDB()
 
 	// Load the SQL query from the appropriate file based on database type
-	sqlLoader := database.NewSQLLoader(viper.GetString("DB_TYPE"), viper.GetBool("verbose"))
+	sqlLoader := database.NewSQLLoader(config.DBType, config.Verbose)
 	sqlQuery, err := sqlLoader.LoadSearchAccountsSQL()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load search accounts SQL: %w", err)
@@ -272,14 +270,14 @@ func searchAccounts(client *database.Client, query string) ([]SearchResult, erro
 }
 
 // searchRoutes searches for routes that watch the query
-func searchRoutes(client *database.Client, query string) ([]SearchResult, error) {
+func searchRoutes(client *database.Client, query string, config *app.Config) ([]SearchResult, error) {
 	var results []SearchResult
 
 	// Get database connection
 	db := client.GetDB()
 
 	// Load the SQL query from the appropriate file based on database type
-	sqlLoader := database.NewSQLLoader(viper.GetString("DB_TYPE"), viper.GetBool("verbose"))
+	sqlLoader := database.NewSQLLoader(config.DBType, config.Verbose)
 	sqlQuery, err := sqlLoader.LoadSearchRoutesSQL()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load search routes SQL: %w", err)

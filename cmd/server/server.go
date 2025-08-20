@@ -1,6 +1,7 @@
 package server
 
 import (
+	"badgermapscli/app"
 	"context"
 	"fmt"
 	"log"
@@ -15,8 +16,11 @@ import (
 	"github.com/spf13/viper"
 )
 
-// NewServerCmd creates a new server command
-func NewServerCmd() *cobra.Command {
+// ServerCmd creates a new server command
+func ServerCmd(config *app.Application) *cobra.Command {
+
+	config.VerifySetupOrExit()
+
 	var (
 		host       string
 		port       int

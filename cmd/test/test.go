@@ -1,6 +1,7 @@
 package test
 
 import (
+	"badgermapscli/app"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -19,7 +20,9 @@ import (
 )
 
 // TestCmd creates a new test command
-func TestCmd() *cobra.Command {
+func TestCmd(config *app.Application) *cobra.Command {
+	config.VerifySetupOrExit()
+
 	var (
 		saveResponses bool
 		apiKey        string
@@ -529,7 +532,7 @@ func testDatabase() {
 	// Check each table individually
 	allTablesValid := true
 
-	for tableName, _ := range requiredTables {
+	for tableName := range requiredTables {
 		spacer := strings.Repeat(" ", maxNameLen-len(tableName))
 
 		// Try to query the table to see if it exists and is accessible

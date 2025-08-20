@@ -23,16 +23,6 @@ func (c *Client) logf(format string, args ...interface{}) {
 	}
 }
 
-// Config holds the database configuration
-type Config struct {
-	DatabaseType string
-	Host         string
-	Port         string
-	Database     string
-	Username     string
-	Password     string
-}
-
 // Client represents the database client
 type Client struct {
 	config          *Config

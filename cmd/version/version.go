@@ -14,8 +14,8 @@ var (
 	Date    = "unknown"
 )
 
-// NewVersionCmd creates a new version command
-func NewVersionCmd() *cobra.Command {
+// VersionCmd creates a new version command
+func VersionCmd() *cobra.Command {
 	versionCmd := &cobra.Command{
 		Use:   "version",
 		Short: "Display version information",
