@@ -423,8 +423,8 @@ func (api *APIClient) TestAllEndpoints() map[string]error {
 	return results
 }
 
-// GetAccount retrieves a specific account by ID
-func (api *APIClient) GetAccount(accountID int) (*Account, error) {
+// GetAccountDetailed retrieves a specific account by ID
+func (api *APIClient) GetAccountDetailed(accountID int) (*Account, error) {
 	url := api.endpoints.Customer(accountID)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {

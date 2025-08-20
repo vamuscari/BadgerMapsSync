@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strings"
 
 	_ "github.com/lib/pq"               // PostgreSQL driver
 	_ "github.com/mattn/go-sqlite3"     // SQLite driver
@@ -14,7 +15,7 @@ import (
 )
 
 type DB interface {
-	// GetType returns the database type (e.g., "sqlite3", "postgres", "mssql")
+	// GetType returns the database driver type (e.g., "sqlite3", "postgres", "mssql")
 	GetType() string
 
 	// GetDatabaseConnection returns the url connection string for the database
@@ -33,12 +34,87 @@ type DB interface {
 
 	ValidateSchema() error
 
+	EnforceSchema() error
+
 	TestConnection() error
+
+	RunCommand() error
 }
 
 // SQLiteConfig represents a SQLite database configuration
 type SQLiteConfig struct {
 	Path string
+}
+
+// RunCommand implements the DB interface for SQLiteConfig.
+// Note: Prefer using the top-level RunCommand(db, command, args...) helper to execute a specific SQL command.
+func (db *SQLiteConfig) RunCommand() error { return nil }
+
+func (db *SQLiteConfig) EnforceSchema() error {
+	// Open a connection to the SQLite database
+	sqlDB, err := sql.Open("sqlite3", db.DatabaseConnection())
+	if err != nil {
+		return fmt.Errorf("failed to open SQLite database: %w", err)
+	}
+	defer sqlDB.Close()
+
+	// Ensure required tables exist
+	for _, tableName := range RequiredTables() {
+		exists, err := db.TableExists(tableName)
+		if err != nil {
+			return fmt.Errorf("error checking if table %s exists: %w", tableName, err)
+		}
+		if !exists {
+			createCmd := createCommandForTable(tableName)
+			if createCmd == "" {
+				return fmt.Errorf("no create command mapped for table %s", tableName)
+			}
+			sqlText := sqlCommandLoader(db.GetType(), createCmd)
+			if sqlText == "" {
+				return fmt.Errorf("failed to load SQL for command %s (%s)", createCmd, db.GetType())
+			}
+			if _, err := sqlDB.Exec(sqlText); err != nil {
+				return fmt.Errorf("failed to create table %s: %w", tableName, err)
+			}
+		}
+	}
+
+	// Ensure RouteWaypoints has columns required by insert statements (idempotent updates)
+	// This helps existing databases created with older schemas.
+	ensureColumn := func(table, column, colType string) error {
+		var cnt int
+		q := fmt.Sprintf("SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name=?", table)
+		if err := sqlDB.QueryRow(q, column).Scan(&cnt); err != nil {
+			return fmt.Errorf("failed to introspect columns for %s: %w", table, err)
+		}
+		if cnt == 0 {
+			alter := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, colType)
+			if _, err := sqlDB.Exec(alter); err != nil {
+				return fmt.Errorf("failed to add column %s to %s: %w", column, table, err)
+			}
+		}
+		return nil
+	}
+	if exists, _ := db.TableExists("RouteWaypoints"); exists {
+		if err := ensureColumn("RouteWaypoints", "CompleteAddress", "TEXT"); err != nil {
+			return err
+		}
+		if err := ensureColumn("RouteWaypoints", "ApptTime", "DATETIME"); err != nil {
+			return err
+		}
+		if err := ensureColumn("RouteWaypoints", "PlaceId", "TEXT"); err != nil {
+			return err
+		}
+	}
+
+	// Ensure indexes exist (idempotent SQL expected)
+	if idxSQL := sqlCommandLoader(db.GetType(), "create_indexes"); idxSQL != "" {
+		if _, err := sqlDB.Exec(idxSQL); err != nil {
+			return fmt.Errorf("failed to create indexes: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func (db *SQLiteConfig) TestConnection() error {
@@ -66,7 +142,7 @@ func (db *SQLiteConfig) ValidateSchema() error {
 	}
 	defer sqlDB.Close()
 
-	for _, tableName := range requiredTables() {
+	for _, tableName := range RequiredTables() {
 		exists, err := db.TableExists(tableName)
 		if err != nil {
 			return fmt.Errorf("error checking if table %s exists: %w", tableName, err)
@@ -150,6 +226,47 @@ type PostgreSQLConfig struct {
 	Password string
 }
 
+// RunCommand implements the DB interface for PostgreSQLConfig.
+// Note: Prefer using the top-level RunCommand(db, command, args...) helper to execute a specific SQL command.
+func (db *PostgreSQLConfig) RunCommand() error { return nil }
+
+func (db *PostgreSQLConfig) EnforceSchema() error {
+	// Open a connection to the PostgreSQL database
+	sqlDB, err := sql.Open("postgres", db.DatabaseConnection())
+	if err != nil {
+		return fmt.Errorf("failed to open PostgreSQL database: %w", err)
+	}
+	defer sqlDB.Close()
+
+	for _, tableName := range RequiredTables() {
+		exists, err := db.TableExists(tableName)
+		if err != nil {
+			return fmt.Errorf("error checking if table %s exists: %w", tableName, err)
+		}
+		if !exists {
+			createCmd := createCommandForTable(tableName)
+			if createCmd == "" {
+				return fmt.Errorf("no create command mapped for table %s", tableName)
+			}
+			sqlText := sqlCommandLoader(db.GetType(), createCmd)
+			if sqlText == "" {
+				return fmt.Errorf("failed to load SQL for command %s (%s)", createCmd, db.GetType())
+			}
+			if _, err := sqlDB.Exec(sqlText); err != nil {
+				return fmt.Errorf("failed to create table %s: %w", tableName, err)
+			}
+		}
+	}
+
+	if idxSQL := sqlCommandLoader(db.GetType(), "create_indexes"); idxSQL != "" {
+		if _, err := sqlDB.Exec(idxSQL); err != nil {
+			return fmt.Errorf("failed to create indexes: %w", err)
+		}
+	}
+
+	return nil
+}
+
 func (db *PostgreSQLConfig) TestConnection() error {
 
 	// Open a connection to the PostgreSQL database
@@ -176,7 +293,7 @@ func (db *PostgreSQLConfig) ValidateSchema() error {
 	}
 	defer sqlDB.Close()
 
-	for _, tableName := range requiredTables() {
+	for _, tableName := range RequiredTables() {
 		exists, err := db.TableExists(tableName)
 		if err != nil {
 			return fmt.Errorf("error checking if table %s exists: %w", tableName, err)
@@ -302,6 +419,47 @@ type MSSQLConfig struct {
 	Password string
 }
 
+// RunCommand implements the DB interface for MSSQLConfig.
+// Note: Prefer using the top-level RunCommand(db, command, args...) helper to execute a specific SQL command.
+func (db *MSSQLConfig) RunCommand() error { return nil }
+
+func (db *MSSQLConfig) EnforceSchema() error {
+	// Open a connection to the MSSQL database
+	sqlDB, err := sql.Open("mssql", db.DatabaseConnection())
+	if err != nil {
+		return fmt.Errorf("failed to open MSSQL database: %w", err)
+	}
+	defer sqlDB.Close()
+
+	for _, tableName := range RequiredTables() {
+		exists, err := db.TableExists(tableName)
+		if err != nil {
+			return fmt.Errorf("error checking if table %s exists: %w", tableName, err)
+		}
+		if !exists {
+			createCmd := createCommandForTable(tableName)
+			if createCmd == "" {
+				return fmt.Errorf("no create command mapped for table %s", tableName)
+			}
+			sqlText := sqlCommandLoader(db.GetType(), createCmd)
+			if sqlText == "" {
+				return fmt.Errorf("failed to load SQL for command %s (%s)", createCmd, db.GetType())
+			}
+			if _, err := sqlDB.Exec(sqlText); err != nil {
+				return fmt.Errorf("failed to create table %s: %w", tableName, err)
+			}
+		}
+	}
+
+	if idxSQL := sqlCommandLoader(db.GetType(), "create_indexes"); idxSQL != "" {
+		if _, err := sqlDB.Exec(idxSQL); err != nil {
+			return fmt.Errorf("failed to create indexes: %w", err)
+		}
+	}
+
+	return nil
+}
+
 func (db *MSSQLConfig) TestConnection() error {
 	// Open a connection to the MSSQL database
 	sqlDB, err := sql.Open("mssql", db.DatabaseConnection())
@@ -329,7 +487,7 @@ func (db *MSSQLConfig) ValidateSchema() error {
 
 	// Check if required tables exist
 
-	for _, tableName := range requiredTables() {
+	for _, tableName := range RequiredTables() {
 		exists, err := db.TableExists(tableName)
 		if err != nil {
 			return fmt.Errorf("error checking if table %s exists: %w", tableName, err)
@@ -479,8 +637,8 @@ func LoadDatabaseSettings(dbType string) (DB, error) {
 	return db, err
 }
 
-// requiredTables Returns a list of tables required for the app to work
-func requiredTables() []string {
+// RequiredTables Returns a list of tables required for the app to work
+func RequiredTables() []string {
 
 	return []string{
 		"Accounts",
@@ -529,7 +687,91 @@ func sqlCommandsList() []string {
 	}
 }
 
+func create_commands_list() []string {
+	create_commands := []string{}
+	for _, cmd := range sqlCommandsList() {
+		if strings.HasPrefix(cmd, "create") {
+			create_commands = append(create_commands, cmd)
+		}
+	}
+
+	return create_commands
+}
+
+// createCommandForTable maps logical table names to the corresponding create_* SQL command filename (without extension)
+func createCommandForTable(tableName string) string {
+	switch tableName {
+	case "Accounts":
+		return "create_accounts_table"
+	case "Routes":
+		return "create_routes_table"
+	case "AccountCheckins":
+		return "create_account_checkins_table"
+	case "UserProfiles":
+		return "create_user_profiles_table"
+	case "AccountLocations":
+		return "create_account_locations_table"
+	case "RouteWaypoints":
+		return "create_route_waypoints_table"
+	case "DataSets":
+		return "create_data_sets_table"
+	case "DataSetValues":
+		return "create_data_set_values_table"
+	default:
+		return ""
+	}
+}
+
 // sqlCommandLoader Loads a specific command for the corresponding database.
 func sqlCommandLoader(dbType string, command string) string {
+	// Validate command exists in the known commands list
+	valid := false
+	for _, c := range sqlCommandsList() {
+		if c == command {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return ""
+	}
 
+	// Normalize/validate dbType; default to sqlite3 if unknown
+	subdir := dbType
+	switch dbType {
+	case "postgres", "mssql", "sqlite3":
+		// keep as is
+	default:
+		subdir = "sqlite3"
+	}
+
+	path := fmt.Sprintf("database/%s/%s.sql", subdir, command)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// RunCommand loads a SQL command by name for the provided DB type and executes it with optional args.
+// It opens a short-lived connection, executes, and closes it. The SQL must exist under database/<dbtype>/<command>.sql
+func RunCommand(db DB, command string, args ...any) error {
+	// Load SQL text for the command
+	sqlText := sqlCommandLoader(db.GetType(), command)
+	if sqlText == "" {
+		return fmt.Errorf("unknown or unavailable SQL command: %s for dbType %s", command, db.GetType())
+	}
+
+	// Open connection
+	sqlDB, err := sql.Open(db.GetType(), db.DatabaseConnection())
+	if err != nil {
+		return fmt.Errorf("failed to open %s database: %w", db.GetType(), err)
+	}
+	defer sqlDB.Close()
+
+	// Execute
+	if _, err := sqlDB.Exec(sqlText, args...); err != nil {
+		return fmt.Errorf("failed to execute command %s: %w", command, err)
+	}
+	return nil
 }

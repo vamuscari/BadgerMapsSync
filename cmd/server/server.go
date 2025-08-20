@@ -17,7 +17,7 @@ import (
 )
 
 // ServerCmd creates a new server command
-func ServerCmd(config *app.Application) *cobra.Command {
+func ServerCmd(config *app.State) *cobra.Command {
 
 	config.VerifySetupOrExit()
 

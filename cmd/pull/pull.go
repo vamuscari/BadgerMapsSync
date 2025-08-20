@@ -14,8 +14,286 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// helper functions to store records using App.DB and database.RunCommand
+func storeAccountBasic(App *app.State, acc api.Account) error {
+	// merge basic account fields
+	first := ""
+	if acc.FirstName != nil {
+		first = *acc.FirstName
+	}
+	if err := database.RunCommand(App.DB, "merge_accounts_basic", acc.ID, first, acc.LastName); err != nil {
+		return err
+	}
+	// refresh locations: delete then insert
+	if err := database.RunCommand(App.DB, "delete_account_locations", acc.ID); err != nil {
+		return err
+	}
+	for _, loc := range acc.Locations {
+		name := ""
+		if loc.Name != nil {
+			name = *loc.Name
+		}
+		if err := database.RunCommand(App.DB, "insert_account_locations",
+			loc.ID,
+			acc.ID,
+			loc.City,
+			name,
+			loc.Zipcode,
+			loc.Long,
+			loc.State,
+			loc.Lat,
+			loc.AddressLine1,
+			loc.Location,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// storeAccountDetailed stores the full account information, including all standard and custom fields, and refreshes locations.
+func storeAccountDetailed(App *app.State, acc *api.Account) error {
+	valStr := func(p *string) any {
+		if p == nil {
+			return nil
+		}
+		return *p
+	}
+	valF := func(p *float64) any {
+		if p == nil {
+			return nil
+		}
+		return *p
+	}
+
+	args := []any{
+		acc.ID,
+		valStr(acc.FirstName),
+		acc.LastName,
+		acc.FullName,
+		acc.PhoneNumber,
+		acc.Email,
+		valStr(acc.AccountOwner),
+		valStr(acc.CustomerID),
+		valStr(acc.Notes),
+		acc.OriginalAddress,
+		valStr(acc.CRMID),
+		acc.DaysSinceLastCheckin,
+		valStr(acc.FollowUpDate),
+		valStr(acc.LastCheckinDate),
+		valStr(acc.LastModifiedDate),
+		valF(acc.CustomNumeric),
+		valStr(acc.CustomText),
+		valF(acc.CustomNumeric2),
+		valStr(acc.CustomText2),
+		valF(acc.CustomNumeric3),
+		valStr(acc.CustomText3),
+		valF(acc.CustomNumeric4),
+		valStr(acc.CustomText4),
+		valF(acc.CustomNumeric5),
+		valStr(acc.CustomText5),
+		valF(acc.CustomNumeric6),
+		valStr(acc.CustomText6),
+		valF(acc.CustomNumeric7),
+		valStr(acc.CustomText7),
+		valF(acc.CustomNumeric8),
+		valStr(acc.CustomText8),
+		valF(acc.CustomNumeric9),
+		valStr(acc.CustomText9),
+		valF(acc.CustomNumeric10),
+		valStr(acc.CustomText10),
+		valF(acc.CustomNumeric11),
+		valStr(acc.CustomText11),
+		valF(acc.CustomNumeric12),
+		valStr(acc.CustomText12),
+		valF(acc.CustomNumeric13),
+		valStr(acc.CustomText13),
+		valF(acc.CustomNumeric14),
+		valStr(acc.CustomText14),
+		valF(acc.CustomNumeric15),
+		valStr(acc.CustomText15),
+		valF(acc.CustomNumeric16),
+		valStr(acc.CustomText16),
+		valF(acc.CustomNumeric17),
+		valStr(acc.CustomText17),
+		valF(acc.CustomNumeric18),
+		valStr(acc.CustomText18),
+		valF(acc.CustomNumeric19),
+		valStr(acc.CustomText19),
+		valF(acc.CustomNumeric20),
+		valStr(acc.CustomText20),
+		valF(acc.CustomNumeric21),
+		valStr(acc.CustomText21),
+		valF(acc.CustomNumeric22),
+		valStr(acc.CustomText22),
+		valF(acc.CustomNumeric23),
+		valStr(acc.CustomText23),
+		valF(acc.CustomNumeric24),
+		valStr(acc.CustomText24),
+		valF(acc.CustomNumeric25),
+		valStr(acc.CustomText25),
+		valF(acc.CustomNumeric26),
+		valStr(acc.CustomText26),
+		valF(acc.CustomNumeric27),
+		valStr(acc.CustomText27),
+		valF(acc.CustomNumeric28),
+		valStr(acc.CustomText28),
+		valF(acc.CustomNumeric29),
+		valStr(acc.CustomText29),
+		valF(acc.CustomNumeric30),
+		valStr(acc.CustomText30),
+	}
+
+	if err := database.RunCommand(App.DB, "merge_accounts_detailed", args...); err != nil {
+		return err
+	}
+
+	// refresh locations
+	if err := database.RunCommand(App.DB, "delete_account_locations", acc.ID); err != nil {
+		return err
+	}
+	for _, loc := range acc.Locations {
+		name := ""
+		if loc.Name != nil {
+			name = *loc.Name
+		}
+		if err := database.RunCommand(App.DB, "insert_account_locations",
+			loc.ID,
+			acc.ID,
+			loc.City,
+			name,
+			loc.Zipcode,
+			loc.Long,
+			loc.State,
+			loc.Lat,
+			loc.AddressLine1,
+			loc.Location,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func storeCheckin(App *app.State, c api.Checkin) error {
+	// SQLite expects Type TEXT; other DBs have corresponding SQL. Pass as-is.
+	crm := ""
+	if c.CRMID != nil {
+		crm = *c.CRMID
+	}
+	extra := ""
+	if c.ExtraFields != nil {
+		extra = *c.ExtraFields
+	}
+	return database.RunCommand(App.DB, "merge_account_checkins",
+		c.ID,
+		crm,
+		c.Customer,
+		c.LogDatetime,
+		c.Type,
+		c.Comments,
+		extra,
+		c.CreatedBy,
+	)
+}
+
+func storeRoute(App *app.State, r api.Route) error {
+	// upsert route
+	if err := database.RunCommand(App.DB, "merge_routes",
+		r.ID,
+		r.Name,
+		r.RouteDate,
+		r.StartTime,
+		r.Duration,
+		r.StartAddress,
+		r.DestinationAddress,
+	); err != nil {
+		return err
+	}
+	// refresh waypoints
+	if err := database.RunCommand(App.DB, "delete_route_waypoints", r.ID); err != nil {
+		return err
+	}
+	for _, w := range r.Waypoints {
+		suite := ""
+		if w.Suite != nil {
+			suite = *w.Suite
+		}
+		city := ""
+		if w.City != nil {
+			city = *w.City
+		}
+		state := ""
+		if w.State != nil {
+			state = *w.State
+		}
+		zip := ""
+		if w.Zipcode != nil {
+			zip = *w.Zipcode
+		}
+		complete := ""
+		if w.CompleteAddress != nil {
+			complete = *w.CompleteAddress
+		}
+		appt := ""
+		if w.ApptTime != nil {
+			appt = *w.ApptTime
+		}
+		place := ""
+		if w.PlaceID != nil {
+			place = *w.PlaceID
+		}
+		if err := database.RunCommand(App.DB, "insert_route_waypoints",
+			w.ID,
+			r.ID,
+			w.Name,
+			w.Address,
+			suite,
+			city,
+			state,
+			zip,
+			w.Location,
+			w.Lat,
+			w.Long,
+			w.LayoverMinutes,
+			w.Position,
+			complete,
+			w.LocationID,
+			w.CustomerID,
+			appt,
+			w.Type,
+			place,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func storeProfile(App *app.State, p *api.UserProfile) error {
+	manager := ""
+	if p.Manager != nil {
+		manager = *p.Manager
+	}
+	return database.RunCommand(App.DB, "merge_user_profiles",
+		p.ID,
+		p.FirstName,
+		p.LastName,
+		p.Email,
+		p.IsManager,
+		manager,
+		p.Company.ID,
+		p.Company.Name,
+		p.Company.ShortName,
+		p.Completed,
+		p.TrialDaysLeft,
+		p.HasData,
+		p.DefaultApptLength,
+	)
+}
+
 // PullCmd creates a new pull command
-func PullCmd(App *app.Application) *cobra.Command {
+func PullCmd(App *app.State) *cobra.Command {
 	App.VerifySetupOrExit()
 
 	pullCmd := &cobra.Command{
@@ -42,7 +320,7 @@ func PullCmd(App *app.Application) *cobra.Command {
 }
 
 // pullAccountCmd creates a command to pull a single account
-func pullAccountCmd(App *app.Application) *cobra.Command {
+func pullAccountCmd(App *app.State) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "account [id]",
 		Short: "Pull a single account from BadgerMaps",
@@ -54,7 +332,7 @@ func pullAccountCmd(App *app.Application) *cobra.Command {
 			}
 
 			// Get API key from App
-			apiKey := App.APIKey
+			apiKey := App.Config.APIKey
 			if apiKey == "" {
 				fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
 				os.Exit(1)
@@ -71,49 +349,23 @@ func pullAccountCmd(App *app.Application) *cobra.Command {
 			apiClient := api.NewAPIClient(apiKey)
 
 			// Get account from API
-			account, err := apiClient.GetAccount(accountID)
+			account, err := apiClient.GetAccountDetailed(accountID)
 			if err != nil {
 				fmt.Println(color.RedString("Error retrieving account: %v", err))
 				os.Exit(1)
 			}
 
-			// Get database Appuration
-			dbConfig := &database.Config{
-				DatabaseType: App.DBType,
-				Host:         App.DBHost,
-				Port:         App.DBPort,
-				Database:     App.DBPath,
-				Username:     App.DBUser,
-				Password:     App.DBPassword,
-			}
-
-			// Set default database type and name if not provided
-			if dbConfig.DatabaseType == "" {
-				dbConfig.DatabaseType = "sqlite3" // Default to SQLite
-			}
-			if dbConfig.DatabaseType == "sqlite3" && dbConfig.Database == "" {
-				dbConfig.Database = "badgermaps.db"
-			}
-
-			// Create database client
-			dbClient, err := database.NewClient(dbConfig, App.Verbose)
-			if err != nil {
-				fmt.Println(color.RedString("Error creating database client: %v", err))
+			// Ensure schema and store using App.DB
+			if err := App.DB.EnforceSchema(); err != nil {
+				fmt.Println(color.RedString("Error ensuring database schema: %v", err))
 				os.Exit(1)
 			}
-			defer dbClient.Close()
-
-			// Validate database schema
-			err = dbClient.ValidateDatabaseSchema()
-			if err != nil {
+			if err := App.DB.ValidateSchema(); err != nil {
 				fmt.Println(color.RedString("Error validating database schema: %v", err))
 				os.Exit(1)
 			}
 
-			// Store account in database
-			accounts := []api.Account{*account}
-			err = dbClient.StoreAccounts(accounts)
-			if err != nil {
+			if err := storeAccountDetailed(App, account); err != nil {
 				fmt.Println(color.RedString("Error storing account: %v", err))
 				os.Exit(1)
 			}
@@ -125,7 +377,7 @@ func pullAccountCmd(App *app.Application) *cobra.Command {
 }
 
 // pullAccountsCmd creates a command to pull multiple accounts
-func pullAccountsCmd(App *app.Application) *cobra.Command {
+func pullAccountsCmd(App *app.State) *cobra.Command {
 	var top int
 
 	cmd := &cobra.Command{
@@ -139,80 +391,7 @@ func pullAccountsCmd(App *app.Application) *cobra.Command {
 					fmt.Println(color.CyanString("Pulling all accounts"))
 				}
 				PullAllAccounts(App, top)
-			} else {
-				// Pull specific accounts
-				if App.Verbose {
-					fmt.Printf(color.CyanString("Pulling accounts with IDs: %v\n"), args)
-				}
-
-				// Get API key from App
-				apiKey := App.APIKey
-				if apiKey == "" {
-					fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
-					os.Exit(1)
-				}
-
-				// Create API client
-				apiClient := api.NewAPIClient(apiKey)
-
-				// Get database Appuration
-				dbConfig := &database.Config{
-					DatabaseType: App.DBType,
-					Host:         App.DBHost,
-					Port:         App.DBPort,
-					Database:     App.DBPath,
-					Username:     App.DBUser,
-					Password:     App.DBPassword,
-				}
-
-				// Set default database type and name if not provided
-				if dbConfig.DatabaseType == "" {
-					dbConfig.DatabaseType = "sqlite3" // Default to SQLite
-				}
-				if dbConfig.DatabaseType == "sqlite3" && dbConfig.Database == "" {
-					dbConfig.Database = "badgermaps.db"
-				}
-
-				// Create database client
-				dbClient, err := database.NewClient(dbConfig, App.Verbose)
-				if err != nil {
-					fmt.Println(color.RedString("Error creating database client: %v", err))
-					os.Exit(1)
-				}
-				defer dbClient.Close()
-
-				// Validate database schema
-				err = dbClient.ValidateDatabaseSchema()
-				if err != nil {
-					fmt.Println(color.RedString("Error validating database schema: %v", err))
-					os.Exit(1)
-				}
-
-				// Pull each account
-				for _, arg := range args {
-					accountID, err := strconv.Atoi(arg)
-					if err != nil {
-						fmt.Println(color.RedString("Invalid account ID: %s", arg))
-						continue
-					}
-
-					// Get account from API
-					account, err := apiClient.GetAccount(accountID)
-					if err != nil {
-						fmt.Println(color.RedString("Error retrieving account %d: %v", accountID, err))
-						continue
-					}
-
-					// Store account in database
-					accounts := []api.Account{*account}
-					err = dbClient.StoreAccounts(accounts)
-					if err != nil {
-						fmt.Println(color.RedString("Error storing account %d: %v", accountID, err))
-						continue
-					}
-
-					fmt.Println(color.GreenString("Successfully pulled account: %s", account.FullName))
-				}
+				return
 			}
 		},
 	}
@@ -224,49 +403,9 @@ func pullAccountsCmd(App *app.Application) *cobra.Command {
 }
 
 // PullAllAccounts pulls all accounts from the API
-func PullAllAccounts(App *app.Application, top int) {
-	// Get API key from App
-	apiKey := App.APIKey
-	if apiKey == "" {
-		fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
-		os.Exit(1)
-	}
-
+func PullAllAccounts(App *app.State, top int) {
 	// Create API client
-	apiClient := api.NewAPIClient(apiKey)
-
-	// Get database Appuration
-	dbConfig := &database.Config{
-		DatabaseType: App.DBType,
-		Host:         App.DBHost,
-		Port:         App.DBPort,
-		Database:     App.DBPath,
-		Username:     App.DBUser,
-		Password:     App.DBPassword,
-	}
-
-	// Set default database type and name if not provided
-	if dbConfig.DatabaseType == "" {
-		dbConfig.DatabaseType = "sqlite3" // Default to SQLite
-	}
-	if dbConfig.DatabaseType == "sqlite3" && dbConfig.Database == "" {
-		dbConfig.Database = "badgermaps.db"
-	}
-
-	// Create database client
-	dbClient, err := database.NewClient(dbConfig, App.Verbose)
-	if err != nil {
-		fmt.Println(color.RedString("Error creating database client: %v", err))
-		os.Exit(1)
-	}
-	defer dbClient.Close()
-
-	// Validate database schema
-	err = dbClient.ValidateDatabaseSchema()
-	if err != nil {
-		fmt.Println(color.RedString("Error validating database schema: %v", err))
-		os.Exit(1)
-	}
+	apiClient := api.NewAPIClient(App.Config.APIKey)
 
 	// Get all accounts from API
 	fmt.Println(color.CyanString("Retrieving accounts from BadgerMaps API..."))
@@ -286,8 +425,8 @@ func PullAllAccounts(App *app.Application, top int) {
 	// Create a progress bar
 	bar := progressbar.Default(int64(len(accounts)))
 
-	// Get max parallel processes from App
-	maxParallel := App.MaxParallelProcesses
+	// Get max parallel processes from config
+	maxParallel := App.Config.MaxParallelProcesses
 	if maxParallel <= 0 {
 		maxParallel = 5 // Default value
 	}
@@ -310,14 +449,17 @@ func PullAllAccounts(App *app.Application, top int) {
 			sem <- true
 			defer func() { <-sem }()
 
-			// Store account in database
-			accounts := []api.Account{acc}
-			err := dbClient.StoreAccounts(accounts)
+			detailedAcc, err := apiClient.GetAccountDetailed(acc.ID)
 			if err != nil {
-				errorMsg := fmt.Sprintf("Error storing account %d (%s): %v", acc.ID, acc.FullName, err)
+				errorMsg := fmt.Sprintf("Error retrieving account %d (%s): %v", acc.ID, acc.FullName, err)
 				errorsMutex.Lock()
 				errors = append(errors, errorMsg)
 				errorsMutex.Unlock()
+				return
+			}
+
+			if err := storeAccountDetailed(App, detailedAcc); err != nil {
+				fmt.Println(color.RedString("Error storing account %d: %v", acc, err))
 			}
 
 			// Update progress bar
@@ -340,7 +482,7 @@ func PullAllAccounts(App *app.Application, top int) {
 }
 
 // pullCheckinCmd creates a command to pull a single checkin
-func pullCheckinCmd(App *app.Application) *cobra.Command {
+func pullCheckinCmd(App *app.State) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "checkin [id]",
 		Short: "Pull a single checkin from BadgerMaps",
@@ -352,7 +494,7 @@ func pullCheckinCmd(App *app.Application) *cobra.Command {
 			}
 
 			// Get API key from App
-			apiKey := App.APIKey
+			apiKey := App.Config.APIKey
 			if apiKey == "" {
 				fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
 				os.Exit(1)
@@ -375,44 +517,19 @@ func pullCheckinCmd(App *app.Application) *cobra.Command {
 				os.Exit(1)
 			}
 
-			// Get database Appuration
-			dbConfig := &database.Config{
-				DatabaseType: App.DBType,
-				Host:         App.DBHost,
-				Port:         App.DBPort,
-				Database:     App.DBPath,
-				Username:     App.DBUser,
-				Password:     App.DBPassword,
-			}
-
-			// Set default database type and name if not provided
-			if dbConfig.DatabaseType == "" {
-				dbConfig.DatabaseType = "sqlite3" // Default to SQLite
-			}
-			if dbConfig.DatabaseType == "sqlite3" && dbConfig.Database == "" {
-				dbConfig.Database = "badgermaps.db"
-			}
-
-			// Create database client
-			dbClient, err := database.NewClient(dbConfig, App.Verbose)
-			if err != nil {
-				fmt.Println(color.RedString("Error creating database client: %v", err))
+			// Ensure schema
+			if err := App.DB.EnforceSchema(); err != nil {
+				fmt.Println(color.RedString("Error ensuring database schema: %v", err))
 				os.Exit(1)
 			}
-			defer dbClient.Close()
-
-			// Validate database schema
-			err = dbClient.ValidateDatabaseSchema()
-			if err != nil {
+			if err := App.DB.ValidateSchema(); err != nil {
 				fmt.Println(color.RedString("Database schema validation failed: %v", err))
 				fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
 				os.Exit(1)
 			}
 
 			// Store checkin in database
-			checkins := []api.Checkin{*checkin}
-			err = dbClient.StoreCheckins(checkins)
-			if err != nil {
+			if err := storeCheckin(App, *checkin); err != nil {
 				fmt.Println(color.RedString("Error storing checkin: %v", err))
 				os.Exit(1)
 			}
@@ -430,7 +547,7 @@ func pullCheckinCmd(App *app.Application) *cobra.Command {
 }
 
 // pullCheckinsCmd creates a command to pull multiple checkins
-func pullCheckinsCmd(App *app.Application) *cobra.Command {
+func pullCheckinsCmd(App *app.State) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "checkins [id...]",
 		Short: "Pull multiple checkins from BadgerMaps",
@@ -441,81 +558,55 @@ func pullCheckinsCmd(App *app.Application) *cobra.Command {
 					fmt.Println(color.CyanString("Pulling all checkins"))
 				}
 				pullAllCheckins(App)
-			} else {
+				return
+			}
+
+			if App.Verbose {
+				fmt.Println(color.CyanString("Pulling checkins with IDs: %v", args))
+			}
+
+			// Get API key from App
+			apiKey := App.Config.APIKey
+			if apiKey == "" {
+				fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
+				os.Exit(1)
+			}
+
+			// Ensure schema
+			if err := App.DB.EnforceSchema(); err != nil {
+				fmt.Println(color.RedString("Error ensuring database schema: %v", err))
+				os.Exit(1)
+			}
+			if err := App.DB.ValidateSchema(); err != nil {
+				fmt.Println(color.RedString("Database schema validation failed: %v", err))
+				fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
+				os.Exit(1)
+			}
+
+			// Create API client
+			apiClient := api.NewAPIClient(apiKey)
+
+			// Pull each checkin
+			for _, arg := range args {
+				checkinID, err := strconv.Atoi(arg)
+				if err != nil {
+					fmt.Println(color.RedString("Invalid checkin ID: %s", arg))
+					continue
+				}
+
+				checkin, err := apiClient.GetCheckin(checkinID)
+				if err != nil {
+					fmt.Println(color.RedString("Error retrieving checkin %d: %v", checkinID, err))
+					continue
+				}
+
+				if err := storeCheckin(App, *checkin); err != nil {
+					fmt.Println(color.RedString("Error storing checkin %d: %v", checkinID, err))
+					continue
+				}
+
 				if App.Verbose {
-					fmt.Println(color.CyanString("Pulling checkins with IDs: %v", args))
-				}
-
-				// Get API key from App
-				apiKey := App.APIKey
-				if apiKey == "" {
-					fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
-					os.Exit(1)
-				}
-
-				// Create API client
-				apiClient := api.NewAPIClient(apiKey)
-
-				// Get database Appuration
-				dbConfig := &database.Config{
-					DatabaseType: App.DBType,
-					Host:         App.DBHost,
-					Port:         App.DBPort,
-					Database:     App.DBPath,
-					Username:     App.DBUser,
-					Password:     App.DBPassword,
-				}
-
-				// Set default database type and name if not provided
-				if dbConfig.DatabaseType == "" {
-					dbConfig.DatabaseType = "sqlite3" // Default to SQLite
-				}
-				if dbConfig.DatabaseType == "sqlite3" && dbConfig.Database == "" {
-					dbConfig.Database = "badgermaps.db"
-				}
-
-				// Create database client
-				dbClient, err := database.NewClient(dbConfig, App.Verbose)
-				if err != nil {
-					fmt.Println(color.RedString("Error creating database client: %v", err))
-					os.Exit(1)
-				}
-				defer dbClient.Close()
-
-				// Validate database schema
-				err = dbClient.ValidateDatabaseSchema()
-				if err != nil {
-					fmt.Println(color.RedString("Database schema validation failed: %v", err))
-					fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
-					os.Exit(1)
-				}
-
-				// Pull each checkin
-				for _, arg := range args {
-					checkinID, err := strconv.Atoi(arg)
-					if err != nil {
-						fmt.Println(color.RedString("Invalid checkin ID: %s", arg))
-						continue
-					}
-
-					// Get checkin from API
-					checkin, err := apiClient.GetCheckin(checkinID)
-					if err != nil {
-						fmt.Println(color.RedString("Error retrieving checkin %d: %v", checkinID, err))
-						continue
-					}
-
-					// Store checkin in database
-					checkins := []api.Checkin{*checkin}
-					err = dbClient.StoreCheckins(checkins)
-					if err != nil {
-						fmt.Println(color.RedString("Error storing checkin %d: %v", checkinID, err))
-						continue
-					}
-
-					if App.Verbose {
-						fmt.Println(color.GreenString("Successfully pulled and stored checkin %d", checkinID))
-					}
+					fmt.Println(color.GreenString("Successfully pulled and stored checkin %d", checkinID))
 				}
 			}
 		},
@@ -523,74 +614,106 @@ func pullCheckinsCmd(App *app.Application) *cobra.Command {
 	return cmd
 }
 
-// pullAllCheckins pulls all checkins from the API
-func pullAllCheckins(App *app.Application) {
+// pullAllCheckins pulls all checkins by first retrieving accounts, then per-account checkins
+func pullAllCheckins(App *app.State) {
 	// Get API key from App
-	apiKey := App.APIKey
+	apiKey := App.Config.APIKey
 	if apiKey == "" {
 		fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
+		os.Exit(1)
+	}
+
+	// Ensure schema
+	if err := App.DB.EnforceSchema(); err != nil {
+		fmt.Println(color.RedString("Error ensuring database schema: %v", err))
+		os.Exit(1)
+	}
+	if err := App.DB.ValidateSchema(); err != nil {
+		fmt.Println(color.RedString("Database schema validation failed: %v", err))
+		fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
 		os.Exit(1)
 	}
 
 	// Create API client
 	apiClient := api.NewAPIClient(apiKey)
 
-	// Get database Appuration
-	dbConfig := &database.Config{
-		DatabaseType: App.DBType,
-		Host:         App.DBHost,
-		Port:         App.DBPort,
-		Database:     App.DBPath,
-		Username:     App.DBUser,
-		Password:     App.DBPassword,
-	}
-
-	// Set default database type and name if not provided
-	if dbConfig.DatabaseType == "" {
-		dbConfig.DatabaseType = "sqlite3" // Default to SQLite
-	}
-	if dbConfig.DatabaseType == "sqlite3" && dbConfig.Database == "" {
-		dbConfig.Database = "badgermaps.db"
-	}
-
-	// Create database client
-	dbClient, err := database.NewClient(dbConfig, App.Verbose)
+	// Get all accounts first
+	fmt.Println(color.CyanString("Retrieving accounts from BadgerMaps API..."))
+	accounts, err := apiClient.GetAccounts()
 	if err != nil {
-		fmt.Println(color.RedString("Error creating database client: %v", err))
+		fmt.Println(color.RedString("Error retrieving accounts: %v", err))
 		os.Exit(1)
 	}
-	defer dbClient.Close()
+	fmt.Printf(color.CyanString("Found %d accounts\n"), len(accounts))
 
-	// Validate database schema
-	err = dbClient.ValidateDatabaseSchema()
-	if err != nil {
-		fmt.Println(color.RedString("Database schema validation failed: %v", err))
-		fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
-		os.Exit(1)
+	// Set up concurrency control
+	maxParallel := App.Config.MaxParallelProcesses
+	if maxParallel <= 0 {
+		maxParallel = 5
+	}
+	sem := make(chan bool, maxParallel)
+	var wg sync.WaitGroup
+
+	// Progress bar per account processed
+	bar := progressbar.Default(int64(len(accounts)))
+
+	// Track totals and errors
+	var totalStored int
+	var totalStoredMutex sync.Mutex
+	var errors []string
+	var errorsMutex sync.Mutex
+
+	for _, acc := range accounts {
+		wg.Add(1)
+		sem <- true
+		go func(a api.Account) {
+			defer func() {
+				<-sem
+				wg.Done()
+			}()
+
+			// Fetch checkins for this account
+			checkins, err := apiClient.GetCheckinsForAccount(a.ID)
+			if err != nil {
+				errorsMutex.Lock()
+				errors = append(errors, fmt.Sprintf("Error retrieving checkins for account %d (%s): %v", a.ID, a.FullName, err))
+				errorsMutex.Unlock()
+				bar.Add(1)
+				return
+			}
+
+			stored := 0
+			for _, c := range checkins {
+				if err := storeCheckin(App, c); err != nil {
+					errorsMutex.Lock()
+					errors = append(errors, fmt.Sprintf("Error storing checkin %d for account %d: %v", c.ID, a.ID, err))
+					errorsMutex.Unlock()
+					continue
+				}
+				stored++
+			}
+			totalStoredMutex.Lock()
+			totalStored += stored
+			totalStoredMutex.Unlock()
+
+			bar.Add(1)
+		}(acc)
 	}
 
-	// Get all checkins from API
-	fmt.Println(color.CyanString("Retrieving checkins from BadgerMaps API..."))
-	checkins, err := apiClient.GetCheckins()
-	if err != nil {
-		fmt.Println(color.RedString("Error retrieving checkins: %v", err))
-		os.Exit(1)
+	wg.Wait()
+
+	if len(errors) > 0 {
+		fmt.Println(color.RedString("\nErrors encountered during checkin pull:"))
+		for _, e := range errors {
+			fmt.Println(color.RedString("- %s", e))
+		}
 	}
 
-	fmt.Printf(color.CyanString("Found %d checkins\n"), len(checkins))
-
-	// Store checkins in database
-	err = dbClient.StoreCheckins(checkins)
-	if err != nil {
-		fmt.Println(color.RedString("Error storing checkins: %v", err))
-		os.Exit(1)
-	}
-
-	fmt.Println(color.GreenString("Successfully pulled and stored %d checkins", len(checkins)))
+	fmt.Println(color.GreenString("\nSuccessfully pulled and stored %d checkins across %d accounts", totalStored, len(accounts)))
 }
 
 // pullRouteCmd creates a command to pull a single route
-func pullRouteCmd(App *app.Application) *cobra.Command {
+func pullRouteCmd(App *app.State) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "route [id]",
 		Short: "Pull a single route from BadgerMaps",
@@ -620,7 +743,7 @@ func pullRouteCmd(App *app.Application) *cobra.Command {
 }
 
 // pullRoutesCmd creates a command to pull multiple routes
-func pullRoutesCmd(App *app.Application) *cobra.Command {
+func pullRoutesCmd(App *app.State) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "routes [id...]",
 		Short: "Pull multiple routes from BadgerMaps",
@@ -648,7 +771,7 @@ func pullRoutesCmd(App *app.Application) *cobra.Command {
 				}
 
 				// Get max parallel processes from App
-				maxParallel := App.MaxParallelProcesses
+				maxParallel := App.Config.MaxParallelProcesses
 				if maxParallel <= 0 {
 					maxParallel = 10 // Default to 10 concurrent connections as specified
 				}
@@ -725,46 +848,23 @@ func pullRoutesCmd(App *app.Application) *cobra.Command {
 }
 
 // PullRoute pulls a single route from the API
-func PullRoute(routeID int, App *app.Application) error {
+func PullRoute(routeID int, App *app.State) error {
 	// Get API key from App
-	apiKey := App.APIKey
+	apiKey := App.Config.APIKey
 	if apiKey == "" {
 		return fmt.Errorf("API key not found. Please authenticate first with 'badgermaps auth'")
 	}
 
-	// Create API client
-	apiClient := api.NewAPIClient(apiKey)
-
-	// Get database Appuration
-	dbConfig := &database.Config{
-		DatabaseType: App.DBType,
-		Host:         App.DBHost,
-		Port:         App.DBPort,
-		Database:     App.DBPath,
-		Username:     App.DBUser,
-		Password:     App.DBPassword,
+	// Ensure schema
+	if err := App.DB.EnforceSchema(); err != nil {
+		return fmt.Errorf("error ensuring database schema: %w", err)
 	}
-
-	// Set default database type and name if not provided
-	if dbConfig.DatabaseType == "" {
-		dbConfig.DatabaseType = "sqlite3" // Default to SQLite
-	}
-	if dbConfig.DatabaseType == "sqlite3" && dbConfig.Database == "" {
-		dbConfig.Database = "badgermaps.db"
-	}
-
-	// Create database client
-	dbClient, err := database.NewClient(dbConfig, App.Verbose)
-	if err != nil {
-		return fmt.Errorf("error creating database client: %w", err)
-	}
-	defer dbClient.Close()
-
-	// Validate database schema
-	err = dbClient.ValidateDatabaseSchema()
-	if err != nil {
+	if err := App.DB.ValidateSchema(); err != nil {
 		return fmt.Errorf("database schema validation failed: %w", err)
 	}
+
+	// Create API client
+	apiClient := api.NewAPIClient(apiKey)
 
 	// Get route from API
 	route, err := apiClient.GetRoute(routeID)
@@ -772,64 +872,36 @@ func PullRoute(routeID int, App *app.Application) error {
 		return fmt.Errorf("error retrieving route: %w", err)
 	}
 
-	// Store route in database
-	routes := []api.Route{*route}
-	err = dbClient.StoreRoutes(routes)
-	if err != nil {
+	// Store route and its waypoints
+	if err := storeRoute(App, *route); err != nil {
 		return fmt.Errorf("error storing route: %w", err)
 	}
-
-	// Note: The API doesn't have a GetRouteWaypoints method and waypoints are stored
-	// as part of the route in StoreRoutes, so we don't need to handle waypoints separately
 
 	return nil
 }
 
 // PullAllRoutes pulls all routes from the API
-func PullAllRoutes(App *app.Application) {
+func PullAllRoutes(App *app.State) {
 	// Get API key from App
-	apiKey := App.APIKey
+	apiKey := App.Config.APIKey
 	if apiKey == "" {
 		fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
 		os.Exit(1)
 	}
 
-	// Create API client
-	apiClient := api.NewAPIClient(apiKey)
-
-	// Get database Appuration
-	dbConfig := &database.Config{
-		DatabaseType: App.DBType,
-		Host:         App.DBHost,
-		Port:         App.DBPort,
-		Database:     App.DBPath,
-		Username:     App.DBUser,
-		Password:     App.DBPassword,
-	}
-
-	// Set default database type and name if not provided
-	if dbConfig.DatabaseType == "" {
-		dbConfig.DatabaseType = "sqlite3" // Default to SQLite
-	}
-	if dbConfig.DatabaseType == "sqlite3" && dbConfig.Database == "" {
-		dbConfig.Database = "badgermaps.db"
-	}
-
-	// Create database client
-	dbClient, err := database.NewClient(dbConfig, App.Verbose)
-	if err != nil {
-		fmt.Println(color.RedString("Error creating database client: %v", err))
+	// Ensure schema
+	if err := App.DB.EnforceSchema(); err != nil {
+		fmt.Println(color.RedString("Error ensuring database schema: %v", err))
 		os.Exit(1)
 	}
-	defer dbClient.Close()
-
-	// Validate database schema
-	err = dbClient.ValidateDatabaseSchema()
-	if err != nil {
+	if err := App.DB.ValidateSchema(); err != nil {
 		fmt.Println(color.RedString("Database schema validation failed: %v", err))
 		fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
 		os.Exit(1)
 	}
+
+	// Create API client
+	apiClient := api.NewAPIClient(apiKey)
 
 	// Get all routes from API
 	fmt.Println(color.CyanString("Retrieving routes from BadgerMaps API..."))
@@ -841,11 +913,11 @@ func PullAllRoutes(App *app.Application) {
 
 	fmt.Printf(color.CyanString("Found %d routes\n"), len(routes))
 
-	// Store routes in database
-	err = dbClient.StoreRoutes(routes)
-	if err != nil {
-		fmt.Println(color.RedString("Error storing routes: %v", err))
-		os.Exit(1)
+	// Store routes one by one (with waypoints)
+	for _, r := range routes {
+		if err := storeRoute(App, r); err != nil {
+			fmt.Println(color.RedString("Error storing route %d: %v", r.ID, err))
+		}
 	}
 
 	if App.Verbose {
@@ -856,7 +928,7 @@ func PullAllRoutes(App *app.Application) {
 }
 
 // pullProfileCmd creates a command to pull the user profile
-func pullProfileCmd(App *app.Application) *cobra.Command {
+func pullProfileCmd(App *app.State) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "profile",
 		Short: "Pull user profile from BadgerMaps",
@@ -870,7 +942,7 @@ func pullProfileCmd(App *app.Application) *cobra.Command {
 			var errors []string
 
 			// Get API key from App
-			apiKey := App.APIKey
+			apiKey := App.Config.APIKey
 			if apiKey == "" {
 				fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
 				os.Exit(1)
@@ -889,37 +961,14 @@ func pullProfileCmd(App *app.Application) *cobra.Command {
 				return
 			}
 
-			// Get database Appuration
-			dbConfig := &database.Config{
-				DatabaseType: App.DBType,
-				Host:         App.DBHost,
-				Port:         App.DBPort,
-				Database:     App.DBPath,
-				Username:     App.DBUser,
-				Password:     App.DBPassword,
-			}
-
-			// Set default database type and name if not provided
-			if dbConfig.DatabaseType == "" {
-				dbConfig.DatabaseType = "sqlite3" // Default to SQLite
-			}
-			if dbConfig.DatabaseType == "sqlite3" && dbConfig.Database == "" {
-				dbConfig.Database = "badgermaps.db"
-			}
-
-			// Create database client
-			dbClient, err := database.NewClient(dbConfig, App.Verbose)
-			if err != nil {
-				errorMsg := fmt.Sprintf("Error creating database client: %v", err)
+			// Ensure schema
+			if err := App.DB.EnforceSchema(); err != nil {
+				errorMsg := fmt.Sprintf("Error ensuring database schema: %v", err)
 				errors = append(errors, errorMsg)
 				fmt.Println(color.RedString(errorMsg))
 				return
 			}
-			defer dbClient.Close()
-
-			// Validate database schema
-			err = dbClient.ValidateDatabaseSchema()
-			if err != nil {
+			if err := App.DB.ValidateSchema(); err != nil {
 				errorMsg := fmt.Sprintf("Database schema validation failed: %v", err)
 				errors = append(errors, errorMsg)
 				fmt.Println(color.RedString(errorMsg))
@@ -928,8 +977,7 @@ func pullProfileCmd(App *app.Application) *cobra.Command {
 			}
 
 			// Store profile in database
-			err = dbClient.StoreProfiles(profile)
-			if err != nil {
+			if err := storeProfile(App, profile); err != nil {
 				errorMsg := fmt.Sprintf("Error storing user profile: %v", err)
 				errors = append(errors, errorMsg)
 				fmt.Println(color.RedString(errorMsg))
@@ -960,7 +1008,7 @@ func pullProfileCmd(App *app.Application) *cobra.Command {
 }
 
 // pullAllCmd creates a command to pull all data types in order
-func pullAllCmd(App *app.Application) *cobra.Command {
+func pullAllCmd(App *app.State) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "all",
 		Short: "Pull all data from BadgerMaps",
@@ -970,95 +1018,54 @@ func pullAllCmd(App *app.Application) *cobra.Command {
 				fmt.Println(color.CyanString("Pulling all data from BadgerMaps..."))
 			}
 
-			// Pull user profile
 			if App.Verbose {
 				fmt.Println(color.CyanString("\n=== Pulling User Profile ==="))
 			}
 
-			// Create a slice to collect errors
 			var errors []string
 
-			// Get API key from App
-			apiKey := App.APIKey
+			apiKey := App.Config.APIKey
 			if apiKey == "" {
 				fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
 				os.Exit(1)
 			}
-
-			// Create API client
 			apiClient := api.NewAPIClient(apiKey)
 
-			// Get database Appuration
-			dbConfig := &database.Config{
-				DatabaseType: App.DBType,
-				Host:         App.DBHost,
-				Port:         App.DBPort,
-				Database:     App.DBPath,
-				Username:     App.DBUser,
-				Password:     App.DBPassword,
+			// Ensure schema
+			if err := App.DB.EnforceSchema(); err != nil {
+				errors = append(errors, fmt.Sprintf("Error ensuring database schema: %v", err))
 			}
-
-			// Set default database type and name if not provided
-			if dbConfig.DatabaseType == "" {
-				dbConfig.DatabaseType = "sqlite3" // Default to SQLite
-			}
-			if dbConfig.DatabaseType == "sqlite3" && dbConfig.Database == "" {
-				dbConfig.Database = "badgermaps.db"
-			}
-
-			// Create database client
-			dbClient, err := database.NewClient(dbConfig, App.Verbose)
-			if err != nil {
-				fmt.Println(color.RedString("Error creating database client: %v", err))
-				os.Exit(1)
-			}
-			defer dbClient.Close()
-
-			// Validate database schema
-			err = dbClient.ValidateDatabaseSchema()
-			if err != nil {
-				fmt.Println(color.RedString("Database schema validation failed: %v", err))
+			if err := App.DB.ValidateSchema(); err != nil {
+				errors = append(errors, fmt.Sprintf("Database schema validation failed: %v", err))
 				fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
-				os.Exit(1)
 			}
 
-			// Pull user profile
 			profile, err := apiClient.GetUserProfile()
 			if err != nil {
-				errorMsg := fmt.Sprintf("Error retrieving user profile: %v", err)
-				errors = append(errors, errorMsg)
-				fmt.Println(color.RedString(errorMsg))
+				errors = append(errors, fmt.Sprintf("Error retrieving user profile: %v", err))
 			} else {
-				// Store profile in database
-				err = dbClient.StoreProfiles(profile)
-				if err != nil {
-					errorMsg := fmt.Sprintf("Error storing user profile: %v", err)
-					errors = append(errors, errorMsg)
-					fmt.Println(color.RedString(errorMsg))
+				if err := storeProfile(App, profile); err != nil {
+					errors = append(errors, fmt.Sprintf("Error storing user profile: %v", err))
 				} else if App.Verbose {
 					fmt.Println(color.GreenString("Successfully pulled and stored user profile"))
 				}
 			}
 
-			// Pull all accounts
 			if App.Verbose {
 				fmt.Println(color.CyanString("\n=== Pulling Accounts ==="))
 			}
 			PullAllAccounts(App, 0)
 
-			// Pull all checkins
 			if App.Verbose {
 				fmt.Println(color.CyanString("\n=== Pulling Checkins ==="))
 			}
 			pullAllCheckins(App)
 
-			// Pull all routes
 			if App.Verbose {
 				fmt.Println(color.CyanString("\n=== Pulling Routes ==="))
 			}
 			PullAllRoutes(App)
 
-			// Print summary
 			if len(errors) > 0 {
 				fmt.Println(color.RedString("\nErrors encountered during data pull:"))
 				for _, err := range errors {

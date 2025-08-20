@@ -5,10 +5,8 @@ import (
 	"os"
 
 	"badgermapscli/app"
-	"badgermapscli/cmd/help"
 	"badgermapscli/cmd/pull"
 	"badgermapscli/cmd/push"
-	"badgermapscli/cmd/search"
 	"badgermapscli/cmd/server"
 	"badgermapscli/cmd/test"
 	"badgermapscli/cmd/version"
@@ -18,7 +16,7 @@ import (
 
 var (
 	// Global configuration
-	App *app.Application
+	App *app.State
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -33,10 +31,8 @@ func bind() {
 	// Create commands with the configuration
 	pullCmd := pull.PullCmd(App)
 	pushCmd := push.PushCmd(App)
-	searchCmd := search.SearchCmd(App)
 	serverCmd := server.ServerCmd(App)
 	testCmd := test.TestCmd(App)
-	helpCmd := help.HelpCmd(rootCmd, App)
 	versionCmd := version.VersionCmd()
 
 	cobra.EnableCommandSorting = false
@@ -46,11 +42,7 @@ func bind() {
 	rootCmd.AddCommand(pullCmd)
 	rootCmd.AddCommand(serverCmd)
 	rootCmd.AddCommand(testCmd)
-	rootCmd.AddCommand(searchCmd)
 	rootCmd.AddCommand(versionCmd)
-
-	// Add our custom help command
-	rootCmd.AddCommand(helpCmd)
 
 	// Global flags
 	rootCmd.PersistentFlags().BoolVarP(&App.Verbose, "verbose", "v", false, "Enable verbose output with additional details")

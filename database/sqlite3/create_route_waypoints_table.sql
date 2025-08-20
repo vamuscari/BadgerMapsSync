@@ -12,9 +12,12 @@ CREATE TABLE IF NOT EXISTS RouteWaypoints (
     Longitude REAL,
     LayoverMinutes INTEGER,
     Position INTEGER,
+    CompleteAddress TEXT,
     LocationId INTEGER,
     CustomerId INTEGER,
+    ApptTime DATETIME,
     Type INTEGER,
+    PlaceId TEXT,
     CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
     UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
 );

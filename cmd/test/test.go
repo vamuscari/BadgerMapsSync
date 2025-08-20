@@ -2,10 +2,12 @@ package test
 
 import (
 	"badgermapscli/app"
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +15,7 @@ import (
 
 	"badgermapscli/api"
 	"badgermapscli/database"
+	"badgermapscli/utils"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -20,8 +23,8 @@ import (
 )
 
 // TestCmd creates a new test command
-func TestCmd(config *app.Application) *cobra.Command {
-	config.VerifySetupOrExit()
+func TestCmd(app *app.State) *cobra.Command {
+	app.VerifySetupOrExit()
 
 	var (
 		saveResponses bool
@@ -43,206 +46,31 @@ func TestCmd(config *app.Application) *cobra.Command {
 				}
 			}
 
-			runTests(apiKey, saveResponses)
+			fmt.Println("")
+			runTests(app, apiKey, saveResponses)
 		},
 	}
 
 	// Add flags
 	testCmd.Flags().BoolVarP(&saveResponses, "save-responses", "s", false, "Save API response bodies to text files")
-	testCmd.Flags().StringVar(&apiKey, "api-key", "", "BadgerMaps API key (default is from env)")
 
-	// Add subcommands
-	testCmd.AddCommand(newAPICmd())
-	testCmd.AddCommand(testDatabaseCmd())
-	testCmd.AddCommand(testEndpointsCmd())
+	testCmd.AddCommand(testDatabaseCmd(app))
+	testCmd.AddCommand(testEndpointsCmd(app))
 
 	return testCmd
 }
 
-// newAPICmd creates a command to test API connectivity
-func newAPICmd() *cobra.Command {
-	var (
-		saveResponses bool
-		apiKey        string
-	)
-
-	cmd := &cobra.Command{
-		Use:   "api",
-		Short: "Test API connectivity",
-		Long:  `Test connectivity to the BadgerMaps API and verify that all endpoints are accessible.`,
-		Run: func(cmd *cobra.Command, args []string) {
-			// Get API key from flag or environment
-			if apiKey == "" {
-				apiKey = viper.GetString("API_KEY")
-				if apiKey == "" {
-					fmt.Println(color.RedString("Error: API key is required"))
-					fmt.Println("Please provide an API key using the --api-key flag or set it in the environment")
-					os.Exit(1)
-				}
-			}
-
-			testAPI(apiKey, saveResponses)
-		},
-	}
-
-	// Add flags
-	cmd.Flags().BoolVarP(&saveResponses, "save-responses", "s", false, "Save API response bodies to text files")
-	cmd.Flags().StringVar(&apiKey, "api-key", "", "BadgerMaps API key (default is from env)")
-
-	return cmd
-}
-
-// testDatabaseCmd creates a command to test database functionality
-func testDatabaseCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "database",
-		Short: "Test database functionality",
-		Long:  `Test database connectivity and verify that all required tables exist with the correct schema.`,
-		Run: func(cmd *cobra.Command, args []string) {
-			testDatabase()
-		},
-	}
-
-	return cmd
-}
-
 // runTests runs all tests
-func runTests(apiKey string, saveResponses bool) {
+func runTests(app *app.State, apiKey string, saveResponses bool) {
 	fmt.Println(color.CyanString("Running all tests..."))
 
-	// Test API connectivity
-	testAPI(apiKey, saveResponses)
+	// Test Endpoint
+	testEndpoints(apiKey, saveResponses)
 
 	// Test database functionality
-	testDatabase()
+	testDatabase(app)
 
 	fmt.Println(color.GreenString("All tests completed successfully"))
-}
-
-// testAPI tests API connectivity
-func testAPI(apiKey string, saveResponses bool) {
-	fmt.Println(color.CyanString("Testing API connectivity..."))
-
-	// Create API client
-	apiClient := api.NewAPIClient(apiKey)
-
-	// Test API connection
-	err := apiClient.TestAPIConnection()
-	if err != nil {
-		fmt.Println(color.RedString("API connection test failed: %v", err))
-		os.Exit(1)
-	}
-
-	fmt.Println(color.GreenString("API connection test passed"))
-
-	// Test all endpoints
-	fmt.Println(color.CyanString("Testing API endpoints..."))
-	results := apiClient.TestAllEndpoints()
-
-	maxNameLen := 0
-	for ep := range results {
-		if len(ep) > maxNameLen {
-			maxNameLen = len(ep)
-		}
-	}
-
-	// Check results
-	allPassed := true
-	for endpoint, err := range results {
-		spacer := strings.Repeat(" ", maxNameLen-len(endpoint))
-		if err != nil {
-			fmt.Printf("%s:%s %s\n", endpoint, spacer, color.RedString("FAILED"))
-			fmt.Printf("  Error: %v\n", err)
-			allPassed = false
-		} else {
-			fmt.Printf("%s:%s %s\n", endpoint, spacer, color.GreenString("PASSED"))
-		}
-	}
-
-	if !allPassed {
-		fmt.Println(color.RedString("Some API endpoint tests failed"))
-		os.Exit(1)
-	}
-
-	fmt.Println(color.GreenString("All API endpoint tests passed"))
-
-	// Save responses if requested
-	if saveResponses {
-		saveAPIResponses(apiClient)
-	}
-}
-
-// saveAPIResponses saves API responses to text files
-func saveAPIResponses(apiClient *api.APIClient) {
-	fmt.Println(color.CyanString("Saving API responses..."))
-
-	// Create test directory if it doesn't exist
-	testDir := "badgermaps__test"
-	if _, err := os.Stat(testDir); os.IsNotExist(err) {
-		os.Mkdir(testDir, 0755)
-	}
-
-	// Get timestamp for filenames
-	timestamp := time.Now().Format("20060102_150405")
-
-	// Save account response
-	accounts, err := apiClient.GetAccounts()
-	if err == nil {
-		saveResponseToFile(accounts, filepath.Join(testDir, fmt.Sprintf("accounts_%s.json", timestamp)))
-
-		// Get and save details for the first account if available
-		if len(accounts) > 0 {
-			fmt.Println(color.CyanString("Getting details for the first account (ID: %d)...", accounts[0].ID))
-			accountDetails, err := apiClient.GetAccount(accounts[0].ID)
-			if err == nil {
-				// Display account details
-				fmt.Println(color.GreenString("First account details:"))
-				fmt.Printf("ID: %d\n", accountDetails.ID)
-
-				// Handle FirstName which is a pointer
-				firstName := ""
-				if accountDetails.FirstName != nil {
-					firstName = *accountDetails.FirstName
-				}
-				fmt.Printf("Name: %s %s\n", firstName, accountDetails.LastName)
-
-				if accountDetails.FullName != "" {
-					fmt.Printf("Full Name: %s\n", accountDetails.FullName)
-				}
-				if accountDetails.Email != "" {
-					fmt.Printf("Email: %s\n", accountDetails.Email)
-				}
-				if accountDetails.PhoneNumber != "" {
-					fmt.Printf("Phone: %s\n", accountDetails.PhoneNumber)
-				}
-
-				// Save detailed account to file
-				saveResponseToFile(accountDetails, filepath.Join(testDir, fmt.Sprintf("account_details_%d_%s.json", accountDetails.ID, timestamp)))
-			} else {
-				fmt.Printf("Error getting details for account %d: %v\n", accounts[0].ID, err)
-			}
-		}
-	}
-
-	// Save routes response
-	routes, err := apiClient.GetRoutes()
-	if err == nil {
-		saveResponseToFile(routes, filepath.Join(testDir, fmt.Sprintf("routes_%s.json", timestamp)))
-	}
-
-	// Save checkins response
-	checkins, err := apiClient.GetCheckins()
-	if err == nil {
-		saveResponseToFile(checkins, filepath.Join(testDir, fmt.Sprintf("checkins_%s.json", timestamp)))
-	}
-
-	// Save profile response
-	profile, err := apiClient.GetUserProfile()
-	if err == nil {
-		saveResponseToFile(profile, filepath.Join(testDir, fmt.Sprintf("profile_%s.json", timestamp)))
-	}
-
-	fmt.Println(color.GreenString("API responses saved to %s directory", testDir))
 }
 
 // saveResponseToFile saves a response to a file as properly formatted JSON
@@ -314,8 +142,37 @@ func makeDirectRequest(url string, apiKey string) ([]byte, error) {
 	return body, nil
 }
 
+// makeDirectPostForm makes a direct POST request with application/x-www-form-urlencoded body
+func makeDirectPostForm(endpoint string, apiKey string, form map[string]string) ([]byte, int, error) {
+	values := url.Values{}
+	for k, v := range form {
+		values.Set(k, v)
+	}
+
+	req, err := http.NewRequest("POST", endpoint, strings.NewReader(values.Encode()))
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create POST request: %w", err)
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", apiKey))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to connect to %s: %w", endpoint, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	return body, resp.StatusCode, nil
+}
+
 // testEndpointsCmd creates a command to test API endpoints directly
-func testEndpointsCmd() *cobra.Command {
+func testEndpointsCmd(app *app.State) *cobra.Command {
 	var (
 		saveResponses bool
 		apiKey        string
@@ -370,9 +227,84 @@ func testEndpoints(apiKey string, saveResponses bool) {
 
 	endpoints := api.DefaultEndpoints()
 	// Test profile
-	results = append(results, testEndpoint("Profile", endpoints.Profiles(), apiKey, saveResponses))
-	results = append(results, testEndpoint("Accounts", endpoints.Customers(), apiKey, saveResponses))
-	results = append(results, testEndpoint("Routes", endpoints.Routes(), apiKey, saveResponses))
+	results = append(results, testGetEndpoint("Profile", endpoints.Profiles(), apiKey, saveResponses))
+	results = append(results, testGetEndpoint("Accounts", endpoints.Customers(), apiKey, saveResponses))
+	results = append(results, testGetEndpoint("Routes", endpoints.Routes(), apiKey, saveResponses))
+
+	// If profile fetch succeeded, attempt to create a new account via POST
+	if results[0].Error == nil {
+		var profile map[string]interface{}
+		if err := json.Unmarshal(*results[0].Response, &profile); err == nil {
+			// Expect profile has an "id" we can use as account_owner
+			ownerID := 0
+			if v, ok := profile["id"]; ok {
+				if f, ok2 := v.(float64); ok2 {
+					ownerID = int(f)
+				}
+			}
+			if ownerID > 0 {
+				form := map[string]string{
+					"last_name":     fmt.Sprintf("CLI Test %s", time.Now().Format("20060102_150405")),
+					"address":       "1 Test Street, Test City, FL",
+					"account_owner": fmt.Sprintf("%d", ownerID),
+					"email":         "example@example.com",
+					"phone_number":  "555-555-5555",
+				}
+				res := testPostEndpoint("CreateAccount", endpoints.Customers(), apiKey, form, http.StatusCreated, saveResponses)
+				results = append(results, res)
+
+				// After creating the account, update the phone number via PATCH
+				if res.Error == nil && res.Response != nil {
+					var created map[string]interface{}
+					if err := json.Unmarshal(*res.Response, &created); err == nil {
+						newID := 0
+						// Response may be {"customer": {...}} or directly the account object
+						if v, ok := created["customer"]; ok {
+							if m, ok2 := v.(map[string]interface{}); ok2 {
+								if idv, ok3 := m["id"]; ok3 {
+									if f, ok4 := idv.(float64); ok4 {
+										newID = int(f)
+									}
+								}
+							}
+						} else if idv, ok := created["id"]; ok {
+							if f, ok2 := idv.(float64); ok2 {
+								newID = int(f)
+							}
+						}
+						if newID > 0 {
+							// 1) Update phone number via PATCH
+							newPhone := fmt.Sprintf("555-000-%04d", time.Now().Unix()%10000)
+							patchForm := map[string]string{"phone_number": newPhone}
+							updName := fmt.Sprintf("UpdateAccountPhone_%d", newID)
+							resPatch := testPatchEndpoint(updName, endpoints.Customer(newID), apiKey, patchForm, http.StatusOK, saveResponses)
+							results = append(results, resPatch)
+
+							// Only proceed if PATCH succeeded
+							if resPatch.Error == nil {
+								// 2) Create a check-in for this account via POST /appointments/
+								checkinForm := map[string]string{
+									"customer": fmt.Sprintf("%d", newID),
+									"comments": fmt.Sprintf("CLI test check-in at %s", time.Now().Format(time.RFC3339)),
+									"type":     "Drop-in",
+								}
+								resChk := testPostEndpoint(fmt.Sprintf("CreateCheckin_%d", newID), endpoints.Appointments(), apiKey, checkinForm, http.StatusCreated, saveResponses)
+								results = append(results, resChk)
+
+								// 3) Delete the test account
+								resDel := testDeleteEndpoint(fmt.Sprintf("DeleteAccount_%d", newID), endpoints.Customer(newID), apiKey, http.StatusOK, saveResponses)
+								results = append(results, resDel)
+
+								// 4) Validate deletion: GET the account expecting 404
+								resVal := testGetExpectStatus(fmt.Sprintf("ValidateDeletedAccount_%d", newID), endpoints.Customer(newID), apiKey, http.StatusNotFound, saveResponses)
+								results = append(results, resVal)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 
 	if results[1].Error == nil {
 
@@ -385,13 +317,13 @@ func testEndpoints(apiKey string, saveResponses bool) {
 		} else {
 			if len(accounts_json) > 0 {
 				customerID := int(accounts_json[1]["id"].(float64))
-				results = append(results, testEndpoint(
+				results = append(results, testGetEndpoint(
 					fmt.Sprintf("AccountDetails_%d", customerID),
 					endpoints.Customer(customerID),
 					apiKey,
 					saveResponses,
 				))
-				results = append(results, testEndpoint(
+				results = append(results, testGetEndpoint(
 					fmt.Sprintf("Checkins_%d", customerID),
 					endpoints.AppointmentsForCustomer(customerID),
 					apiKey,
@@ -409,7 +341,7 @@ func testEndpoints(apiKey string, saveResponses bool) {
 		} else {
 			if len(routes) > 0 {
 				routeID := int(routes[0]["id"].(float64))
-				results = append(results, testEndpoint(
+				results = append(results, testGetEndpoint(
 					"Route Detail",
 					endpoints.Route(routeID),
 					apiKey,
@@ -438,8 +370,8 @@ func testEndpoints(apiKey string, saveResponses bool) {
 	}
 }
 
-// testEndpoint tests a single API endpoint directly
-func testEndpoint(endpoint string, url string, apiKey string, saveResponses bool) EndpointResult {
+// testGetEndpoint tests a single API endpoint directly (GET)
+func testGetEndpoint(endpoint string, url string, apiKey string, saveResponses bool) EndpointResult {
 
 	// Create test directory if it doesn't exist
 	testDir := "badgermaps__test"
@@ -472,9 +404,213 @@ func testEndpoint(endpoint string, url string, apiKey string, saveResponses bool
 	}
 }
 
+// testPostEndpoint tests a POST request to an API endpoint
+func testPostEndpoint(endpoint string, url string, apiKey string, form map[string]string, expectedStatus int, saveResponses bool) EndpointResult {
+	// Ensure test directory
+	testDir := "badgermaps__test"
+	if _, err := os.Stat(testDir); os.IsNotExist(err) {
+		os.Mkdir(testDir, 0755)
+	}
+
+	// Timestamp for filenames
+	timestamp := time.Now().Format("20060102_150405")
+
+	start := time.Now()
+	body, status, err := makeDirectPostForm(url, apiKey, form)
+	duration := time.Since(start)
+
+	statusText := "PASSED"
+	if err != nil || status != expectedStatus {
+		if err == nil {
+			err = fmt.Errorf("unexpected status %d (expected %d)", status, expectedStatus)
+		}
+		statusText = fmt.Sprintf("FAILED: %v", err)
+	} else if saveResponses && body != nil {
+		filename := filepath.Join(testDir, fmt.Sprintf("direct_%s_%s.json", endpoint, timestamp))
+		saveRawResponseToFile(body, filename)
+	}
+
+	return EndpointResult{
+		Name:     endpoint,
+		Status:   statusText,
+		Error:    err,
+		Response: &body,
+		Duration: duration,
+	}
+}
+
+// testPatchEndpoint tests a PATCH request to an API endpoint
+func testPatchEndpoint(endpoint string, urlStr string, apiKey string, form map[string]string, expectedStatus int, saveResponses bool) EndpointResult {
+	// Ensure test directory
+	testDir := "badgermaps__test"
+	if _, err := os.Stat(testDir); os.IsNotExist(err) {
+		os.Mkdir(testDir, 0755)
+	}
+	// Timestamp
+	timestamp := time.Now().Format("20060102_150405")
+
+	// Build form body
+	values := url.Values{}
+	for k, v := range form {
+		values.Set(k, v)
+	}
+
+	req, err := http.NewRequest("PATCH", urlStr, strings.NewReader(values.Encode()))
+	if err != nil {
+		return EndpointResult{Name: endpoint, Status: fmt.Sprintf("FAILED: %v", err), Error: err}
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", apiKey))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	start := time.Now()
+	resp, err := client.Do(req)
+	duration := time.Since(start)
+	if err != nil {
+		return EndpointResult{Name: endpoint, Status: fmt.Sprintf("FAILED: %v", err), Error: err, Duration: duration}
+	}
+	defer resp.Body.Close()
+
+	body, readErr := ioutil.ReadAll(resp.Body)
+	if readErr != nil {
+		return EndpointResult{Name: endpoint, Status: fmt.Sprintf("FAILED: %v", readErr), Error: readErr, Duration: duration}
+	}
+
+	statusText := "PASSED"
+	var finalErr error
+	if resp.StatusCode != expectedStatus {
+		finalErr = fmt.Errorf("unexpected status %d (expected %d)", resp.StatusCode, expectedStatus)
+		statusText = fmt.Sprintf("FAILED: %v", finalErr)
+	} else if saveResponses && body != nil {
+		filename := filepath.Join(testDir, fmt.Sprintf("direct_%s_%s.json", endpoint, timestamp))
+		saveRawResponseToFile(body, filename)
+	}
+
+	return EndpointResult{
+		Name:     endpoint,
+		Status:   statusText,
+		Error:    finalErr,
+		Response: &body,
+		Duration: duration,
+	}
+}
+
+// testDeleteEndpoint tests a DELETE request to an API endpoint
+func testDeleteEndpoint(endpoint string, urlStr string, apiKey string, expectedStatus int, saveResponses bool) EndpointResult {
+	// Ensure test directory
+	testDir := "badgermaps__test"
+	if _, err := os.Stat(testDir); os.IsNotExist(err) {
+		os.Mkdir(testDir, 0755)
+	}
+	// Timestamp
+	timestamp := time.Now().Format("20060102_150405")
+
+	req, err := http.NewRequest("DELETE", urlStr, nil)
+	if err != nil {
+		return EndpointResult{Name: endpoint, Status: fmt.Sprintf("FAILED: %v", err), Error: err}
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", apiKey))
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	start := time.Now()
+	resp, err := client.Do(req)
+	duration := time.Since(start)
+	if err != nil {
+		return EndpointResult{Name: endpoint, Status: fmt.Sprintf("FAILED: %v", err), Error: err, Duration: duration}
+	}
+	defer resp.Body.Close()
+
+	body, readErr := ioutil.ReadAll(resp.Body)
+	if readErr != nil {
+		return EndpointResult{Name: endpoint, Status: fmt.Sprintf("FAILED: %v", readErr), Error: readErr, Duration: duration}
+	}
+
+	statusText := "PASSED"
+	var finalErr error
+	if resp.StatusCode != expectedStatus {
+		finalErr = fmt.Errorf("unexpected status %d (expected %d)", resp.StatusCode, expectedStatus)
+		statusText = fmt.Sprintf("FAILED: %v", finalErr)
+	} else if saveResponses && len(body) > 0 {
+		filename := filepath.Join(testDir, fmt.Sprintf("direct_%s_%s.json", endpoint, timestamp))
+		saveRawResponseToFile(body, filename)
+	}
+
+	return EndpointResult{
+		Name:     endpoint,
+		Status:   statusText,
+		Error:    finalErr,
+		Response: &body,
+		Duration: duration,
+	}
+}
+
+// testGetExpectStatus performs a GET expecting a specific HTTP status code
+func testGetExpectStatus(endpoint string, urlStr string, apiKey string, expectedStatus int, saveResponses bool) EndpointResult {
+	// Ensure test directory
+	testDir := "badgermaps__test"
+	if _, err := os.Stat(testDir); os.IsNotExist(err) {
+		os.Mkdir(testDir, 0755)
+	}
+	// Timestamp
+	timestamp := time.Now().Format("20060102_150405")
+
+	req, err := http.NewRequest("GET", urlStr, nil)
+	if err != nil {
+		return EndpointResult{Name: endpoint, Status: fmt.Sprintf("FAILED: %v", err), Error: err}
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", apiKey))
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	start := time.Now()
+	resp, err := client.Do(req)
+	duration := time.Since(start)
+	if err != nil {
+		return EndpointResult{Name: endpoint, Status: fmt.Sprintf("FAILED: %v", err), Error: err, Duration: duration}
+	}
+	defer resp.Body.Close()
+
+	body, readErr := ioutil.ReadAll(resp.Body)
+	if readErr != nil {
+		return EndpointResult{Name: endpoint, Status: fmt.Sprintf("FAILED: %v", readErr), Error: readErr, Duration: duration}
+	}
+
+	statusText := "PASSED"
+	var finalErr error
+	if resp.StatusCode != expectedStatus {
+		finalErr = fmt.Errorf("unexpected status %d (expected %d)", resp.StatusCode, expectedStatus)
+		statusText = fmt.Sprintf("FAILED: %v", finalErr)
+	} else if saveResponses && len(body) > 0 {
+		filename := filepath.Join(testDir, fmt.Sprintf("direct_%s_%s.json", endpoint, timestamp))
+		saveRawResponseToFile(body, filename)
+	}
+
+	return EndpointResult{
+		Name:     endpoint,
+		Status:   statusText,
+		Error:    finalErr,
+		Response: &body,
+		Duration: duration,
+	}
+}
+
+// testDatabaseCmd creates a command to test database functionality
+func testDatabaseCmd(app *app.State) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "database",
+		Short: "Test database functionality",
+		Long:  `Test database connectivity and verify that all required tables exist with the correct schema.`,
+		Run: func(cmd *cobra.Command, args []string) {
+			testDatabase(app)
+		},
+	}
+
+	return cmd
+}
+
 // testDatabase tests database functionality
-func testDatabase() {
-	fmt.Println(color.CyanString("Testing database functionality..."))
+func testDatabase(app *app.State) {
+	fmt.Println(color.CyanString("Testing database..."))
 
 	// Create test directory if it doesn't exist
 	testDir := "badgermaps__test"
@@ -482,74 +618,82 @@ func testDatabase() {
 		os.Mkdir(testDir, 0755)
 	}
 
-	// Get database configuration from viper
+	// Determine database type
 	dbType := viper.GetString("DATABASE_TYPE")
 	if dbType == "" {
-		dbType = "sqlite3" // Default to SQLite
+		dbType = "sqlite3"
 	}
 
-	// Create database config
-	dbConfig := &database.Config{
-		DatabaseType: dbType,
-		Host:         viper.GetString("DATABASE_HOST"),
-		Port:         viper.GetString("DATABASE_PORT"),
-		Database:     viper.GetString("DATABASE_NAME"),
-		Username:     viper.GetString("DATABASE_USER"),
-		Password:     viper.GetString("DATABASE_PASSWORD"),
-	}
-
-	// For SQLite, use a test database if no path is specified
-	if dbType == "sqlite3" && dbConfig.Database == "" {
-		dbConfig.Database = "test.db"
+	// Load database settings using the new interface
+	db, err := database.LoadDatabaseSettings(dbType)
+	if err != nil {
+		fmt.Println(color.RedString("FAILED: Could not load database settings"))
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Test database connection
-	fmt.Println(color.CyanString("Connecting to %s database...", dbType))
-	client, err := database.NewClient(dbConfig, true)
-	if err != nil {
+	fmt.Println(color.CyanString("Connecting to %s database...", db.GetType()))
+	if err := db.TestConnection(); err != nil {
 		fmt.Println(color.RedString("FAILED: Could not connect to database"))
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
-	defer client.Close()
-
 	fmt.Println(color.GreenString("PASSED: Database connection successful"))
 
-	// Validate database schema
-	fmt.Println(color.CyanString("\nValidating database tables:"))
+	// Validate database schema first
+	fmt.Println(color.CyanString("\nValidating database schema..."))
+	if err := db.ValidateSchema(); err != nil {
+		fmt.Println(color.RedString("FAILED: Schema validation failed"))
+		fmt.Printf("Error: %v\n", err)
 
-	// Get required tables
-	requiredTables := client.GetRequiredTables()
+		// Prompt user whether to enforce schema in test mode
+		reader := bufio.NewReader(os.Stdin)
+		shouldEnforce := utils.PromptBool(reader, "One or more required tables are missing. Enforce schema now? (y/n)", false)
+		if shouldEnforce {
+			fmt.Println(color.CyanString("\nEnforcing database schema (creating missing tables/indexes)..."))
+			if err := db.EnforceSchema(); err != nil {
+				fmt.Println(color.RedString("FAILED: Could not enforce schema"))
+				fmt.Printf("Error: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println(color.GreenString("PASSED: Schema enforcement completed"))
 
-	// Calculate the longest table name for alignment
+			// Re-validate after enforcement
+			fmt.Println(color.CyanString("\nRe-validating database schema..."))
+			if err := db.ValidateSchema(); err != nil {
+				fmt.Println(color.RedString("FAILED: Schema validation still failing after enforcement"))
+				fmt.Printf("Error: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println(color.GreenString("PASSED: All required tables exist"))
+		} else {
+			fmt.Println(color.YellowString("User chose not to enforce schema. Exiting test."))
+			os.Exit(1)
+		}
+	} else {
+		fmt.Println(color.GreenString("PASSED: All required tables exist"))
+	}
+
+	// Show per-table existence for visibility
 	maxNameLen := 0
-	for tableName := range requiredTables {
+	for _, tableName := range database.RequiredTables() {
 		if len(tableName) > maxNameLen {
 			maxNameLen = len(tableName)
 		}
 	}
-
-	// Check each table individually
-	allTablesValid := true
-
-	for tableName := range requiredTables {
+	for _, tableName := range database.RequiredTables() {
+		exists, err := db.TableExists(tableName)
 		spacer := strings.Repeat(" ", maxNameLen-len(tableName))
-
-		// Try to query the table to see if it exists and is accessible
-		_, err := client.GetDB().Query(fmt.Sprintf("SELECT 1 FROM %s LIMIT 1", tableName))
 		if err != nil {
-			fmt.Printf("%s:%s %s\n", tableName, spacer, color.RedString("FAILED"))
+			fmt.Printf("%s:%s %s\n", tableName, spacer, color.RedString("ERROR"))
 			fmt.Printf("  Error: %v\n", err)
-			allTablesValid = false
-		} else {
-			fmt.Printf("%s:%s %s\n", tableName, spacer, color.GreenString("PASSED"))
+			continue
 		}
-	}
-
-	if allTablesValid {
-		fmt.Println(color.GreenString("\nAll database tables validated successfully"))
-	} else {
-		fmt.Println(color.RedString("\nSome database tables failed validation"))
-		fmt.Println("Run 'badgermaps utils create-tables' to create missing tables")
+		if exists {
+			fmt.Printf("%s:%s %s\n", tableName, spacer, color.GreenString("EXISTS"))
+		} else {
+			fmt.Printf("%s:%s %s\n", tableName, spacer, color.RedString("MISSING"))
+		}
 	}
 }

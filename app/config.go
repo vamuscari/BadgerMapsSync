@@ -15,14 +15,13 @@ import (
 
 // Config represents the global configuration for the application
 type Config struct {
-	App *Application
+	App *State
 	// API settings
 	APIKey string
 	APIURL string
 
 	// Database settings
-	DBType   string
-	Database database.DB
+	DBType string
 
 	// Rate limiting
 	RateLimitRequests int
@@ -37,7 +36,7 @@ type Config struct {
 	ServerTLSEnable bool
 }
 
-func defaultConfig(application *Application) *Config {
+func defaultConfig(application *State) *Config {
 
 	config := &Config{
 		App:                  application,
@@ -52,7 +51,7 @@ func defaultConfig(application *Application) *Config {
 		ServerTLSEnable:      false,
 	}
 
-	config.Database = &database.SQLiteConfig{
+	config.App.DB = &database.SQLiteConfig{
 		utils.GetConfigDirFile("badgermaps.db"),
 	}
 
@@ -60,7 +59,7 @@ func defaultConfig(application *Application) *Config {
 }
 
 // LoadConfig creates a new Config instance with values from viper
-func LoadConfig(application *Application) *Config {
+func LoadConfig(application *State) *Config {
 
 	path, ok := GetConfigFilePath()
 	if ok {
@@ -95,7 +94,7 @@ func LoadConfig(application *Application) *Config {
 	}
 
 	var err error
-	config.Database, err = database.LoadDatabaseSettings(config.DBType)
+	config.App.DB, err = database.LoadDatabaseSettings(config.DBType)
 	if err != nil {
 		fmt.Println(err)
 		return config
