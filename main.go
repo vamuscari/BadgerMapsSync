@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"badgermapscli/app"
+	"badgermapscli/cmd/config"
 	"badgermapscli/cmd/pull"
 	"badgermapscli/cmd/push"
 	"badgermapscli/cmd/server"
@@ -29,6 +30,7 @@ It allows you to push and pull data, run in server mode, and perform various uti
 
 func bind() {
 	// Create commands with the configuration
+	configCmd := config.ConfigCmd(App)
 	pullCmd := pull.PullCmd(App)
 	pushCmd := push.PushCmd(App)
 	serverCmd := server.ServerCmd(App)
@@ -38,6 +40,7 @@ func bind() {
 	cobra.EnableCommandSorting = false
 
 	// Add commands to root
+	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(pushCmd)
 	rootCmd.AddCommand(pullCmd)
 	rootCmd.AddCommand(serverCmd)

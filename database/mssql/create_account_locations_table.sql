@@ -1,6 +1,7 @@
 IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='account_locations' AND xtype='U')
 CREATE TABLE account_locations (
-    id INT IDENTITY(1,1) PRIMARY KEY,
+    LocationId INT IDENTITY(1,1) PRIMARY KEY,
+    Id INT,
     account_id INT,
     city NVARCHAR(255),
     name NVARCHAR(255),
@@ -12,5 +13,6 @@ CREATE TABLE account_locations (
     location NTEXT,
     is_approximate BIT DEFAULT 0,
     created_at DATETIME2 DEFAULT GETDATE(),
-    updated_at DATETIME2 DEFAULT GETDATE()
+    updated_at DATETIME2 DEFAULT GETDATE(),
+    UNIQUE (Id, account_id)
 ); 

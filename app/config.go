@@ -31,9 +31,12 @@ type Config struct {
 	MaxParallelProcesses int
 
 	// Server settings
-	ServerHost      string
-	ServerPort      int
-	ServerTLSEnable bool
+	ServerHost       string
+	ServerPort       int
+	ServerTLSEnable  bool
+	ServerTLSCert    string
+	ServerTLSKey     string
+	WebhookSecret    string
 }
 
 func defaultConfig(application *State) *Config {
@@ -49,6 +52,9 @@ func defaultConfig(application *State) *Config {
 		ServerHost:           "localhost",
 		ServerPort:           8080,
 		ServerTLSEnable:      false,
+		ServerTLSCert:        "",
+		ServerTLSKey:         "",
+		WebhookSecret:        "",
 	}
 
 	config.App.DB = &database.SQLiteConfig{
@@ -91,6 +97,9 @@ func LoadConfig(application *State) *Config {
 		ServerHost:      viper.GetString("SERVER_HOST"),
 		ServerPort:      viper.GetInt("SERVER_PORT"),
 		ServerTLSEnable: viper.GetBool("SERVER_TLS_ENABLED"),
+		ServerTLSCert:   viper.GetString("SERVER_TLS_CERT"),
+		ServerTLSKey:    viper.GetString("SERVER_TLS_KEY"),
+		WebhookSecret:   viper.GetString("WEBHOOK_SECRET"),
 	}
 
 	var err error

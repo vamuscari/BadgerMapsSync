@@ -1,9 +1,13 @@
 package server
 
 import (
+	"badgermapscli/api"
 	"badgermapscli/app"
+	"badgermapscli/cmd/pull"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -12,6 +16,7 @@ import (
 	"time"
 
 	"github.com/fatih/color"
+	"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -35,12 +40,21 @@ func ServerCmd(config *app.State) *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			// If schedule is provided, set up scheduled execution
 			if schedule != "" {
-				fmt.Printf("Server will run on schedule: %s\n", schedule)
-				// In a real implementation, we would set up a cron job here
-				// For now, just run the server normally
+				c := cron.New()
+				_, err := c.AddFunc(schedule, func() {
+					fmt.Println("Running scheduled job: pull all")
+					pull.PullAllAccounts(config, 0)
+					// pull.PullAllCheckins(config)
+					pull.PullAllRoutes(config)
+				})
+				if err != nil {
+					log.Fatalf("Error scheduling job: %v", err)
+				}
+				go c.Start()
+				fmt.Printf("Scheduled job added: pull all on schedule: %s\n", schedule)
 			}
 
-			runServer(host, port, tlsEnabled)
+			runServer(config, host, port, tlsEnabled)
 		},
 	}
 
@@ -55,11 +69,13 @@ func ServerCmd(config *app.State) *cobra.Command {
 	viper.BindPFlag("SERVER_PORT", serverCmd.Flags().Lookup("port"))
 	viper.BindPFlag("SERVER_TLS_ENABLED", serverCmd.Flags().Lookup("tls"))
 
+	// serverCmd.AddCommand(newServerSetupCmd(config))
+
 	return serverCmd
 }
 
 // runServer starts the HTTP server
-func runServer(host string, port int, tlsEnabled bool) {
+func runServer(App *app.State, host string, port int, tlsEnabled bool) {
 	// Get configuration from viper if not provided via flags
 	if host == "" {
 		host = viper.GetString("SERVER_HOST")
@@ -79,14 +95,16 @@ func runServer(host string, port int, tlsEnabled bool) {
 		tlsEnabled = viper.GetBool("SERVER_TLS_ENABLED")
 	}
 
+	s := &server{App: App}
+
 	// Set up HTTP server
 	mux := http.NewServeMux()
 
 	// Register webhook handlers
-	mux.HandleFunc("/webhook/account", handleAccountWebhook)
-	mux.HandleFunc("/webhook/checkin", handleCheckinWebhook)
-	mux.HandleFunc("/webhook/route", handleRouteWebhook)
-	mux.HandleFunc("/webhook/profile", handleProfileWebhook)
+	mux.HandleFunc("/webhook/account", s.handleAccountWebhook)
+	mux.HandleFunc("/webhook/checkin", s.handleCheckinWebhook)
+	mux.HandleFunc("/webhook/route", s.handleRouteWebhook)
+	mux.HandleFunc("/webhook/profile", s.handleProfileWebhook)
 
 	// Add health check endpoint
 	mux.HandleFunc("/health", handleHealthCheck)
@@ -107,10 +125,12 @@ func runServer(host string, port int, tlsEnabled bool) {
 		fmt.Printf("Starting server on %s (TLS: %v)\n", addr, tlsEnabled)
 		var err error
 		if tlsEnabled {
-			// In a real implementation, we would load TLS certificates
-			// For now, just print a message
-			fmt.Println("TLS is enabled but not implemented in this version")
-			err = server.ListenAndServe() // Fallback to HTTP
+			certFile := viper.GetString("SERVER_TLS_CERT")
+			keyFile := viper.GetString("SERVER_TLS_KEY")
+			if certFile == "" || keyFile == "" {
+				log.Fatal("TLS is enabled, but certificate and key files are not specified. Please use the 'server setup' command to configure them.")
+			}
+			err = server.ListenAndServeTLS(certFile, keyFile)
 		} else {
 			err = server.ListenAndServe()
 		}
@@ -134,56 +154,122 @@ func runServer(host string, port int, tlsEnabled bool) {
 	fmt.Println("Server stopped")
 }
 
+type server struct {
+	App *app.State
+}
+
 // handleAccountWebhook handles account update webhooks
-func handleAccountWebhook(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleAccountWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// In a real implementation, we would:
-	// 1. Validate the webhook signature
-	// 2. Parse the JSON payload
-	// 3. Process the account update
-	// 4. Store it in the database
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "can't read body", http.StatusInternalServerError)
+		return
+	}
 
-	fmt.Println(color.CyanString("Received account webhook"))
+	var acc api.Account
+	if err := json.Unmarshal(body, &acc); err != nil {
+		http.Error(w, "invalid JSON payload", http.StatusBadRequest)
+		return
+	}
+
+	if err := pull.StoreAccountDetailed(s.App, &acc); err != nil {
+		http.Error(w, "failed to store account", http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Println(color.CyanString("Received and processed account webhook for account: %s", acc.FullName))
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "Account webhook processed")
 }
 
 // handleCheckinWebhook handles checkin update webhooks
-func handleCheckinWebhook(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleCheckinWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	fmt.Println(color.CyanString("Received checkin webhook"))
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "can't read body", http.StatusInternalServerError)
+		return
+	}
+
+	var checkin api.Checkin
+	if err := json.Unmarshal(body, &checkin); err != nil {
+		http.Error(w, "invalid JSON payload", http.StatusBadRequest)
+		return
+	}
+
+	if err := pull.StoreCheckin(s.App, checkin); err != nil {
+		http.Error(w, "failed to store checkin", http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Println(color.CyanString("Received and processed checkin webhook for checkin ID: %d", checkin.ID))
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "Checkin webhook processed")
 }
 
 // handleRouteWebhook handles route update webhooks
-func handleRouteWebhook(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleRouteWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	fmt.Println(color.CyanString("Received route webhook"))
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "can't read body", http.StatusInternalServerError)
+		return
+	}
+
+	var route api.Route
+	if err := json.Unmarshal(body, &route); err != nil {
+		http.Error(w, "invalid JSON payload", http.StatusBadRequest)
+		return
+	}
+
+	if err := pull.StoreRoute(s.App, route); err != nil {
+		http.Error(w, "failed to store route", http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Println(color.CyanString("Received and processed route webhook for route ID: %d", route.ID))
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "Route webhook processed")
 }
 
 // handleProfileWebhook handles profile update webhooks
-func handleProfileWebhook(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleProfileWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	fmt.Println(color.CyanString("Received profile webhook"))
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "can't read body", http.StatusInternalServerError)
+		return
+	}
+
+	var profile api.UserProfile
+	if err := json.Unmarshal(body, &profile); err != nil {
+		http.Error(w, "invalid JSON payload", http.StatusBadRequest)
+		return
+	}
+
+	if err := pull.StoreProfile(s.App, &profile); err != nil {
+		http.Error(w, "failed to store profile", http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Println(color.CyanString("Received and processed profile webhook for profile ID: %d", profile.ID))
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "Profile webhook processed")
 }

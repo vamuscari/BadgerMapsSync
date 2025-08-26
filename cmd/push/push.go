@@ -1,219 +1,258 @@
 package push
 
 import (
+	"badgermapscli/api"
+	"badgermapscli/app"
+	"badgermapscli/database"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 
-	"badgermapscli/app"
+	_ "github.com/lib/pq"
+	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/microsoft/go-mssqldb"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
 // PushCmd creates a new push command
-func PushCmd(config *app.State) *cobra.Command {
-	config.VerifySetupOrExit()
+func PushCmd(App *app.State) *cobra.Command {
+	App.VerifySetupOrExit()
 
 	pushCmd := &cobra.Command{
 		Use:   "push",
 		Short: "Send data to BadgerMaps API",
 		Long:  `Push data from your local database to the BadgerMaps API.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("Please specify a data type to push (account, checkin, route, profile)")
+			fmt.Println("Please specify a data type to push (account, accounts)")
 			os.Exit(1)
 		},
 	}
 
 	// Add subcommands
-	pushCmd.AddCommand(newPushAccountCmd(config))
-	pushCmd.AddCommand(newPushAccountsCmd(config))
-	pushCmd.AddCommand(newPushCheckinCmd(config))
-	pushCmd.AddCommand(newPushCheckinsCmd(config))
-	pushCmd.AddCommand(newPushRouteCmd(config))
-	pushCmd.AddCommand(newPushRoutesCmd(config))
-	pushCmd.AddCommand(newPushProfileCmd(config))
+	pushCmd.AddCommand(pushAccountCmd(App))
+	pushCmd.AddCommand(pushAccountsCmd(App))
 
 	return pushCmd
 }
 
-// newPushAccountCmd creates a command to push a single account
-func newPushAccountCmd(appState *app.State) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "account [id]",
-		Short: "Push a single account to BadgerMaps",
-		Long:  `Push a single account from your local database to the BadgerMaps API.`,
-		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
-			// Implementation will go here
-			fmt.Printf("Pushing account with ID: %s\n", args[0])
-		},
-	}
-	return cmd
+// openSQL opens a database/sql connection using the application's DB config.
+func openSQL(App *app.State) (*sql.DB, error) {
+	driver := App.DB.GetType()
+	conn := App.DB.DatabaseConnection()
+	return sql.Open(driver, conn)
 }
 
-// newPushAccountsCmd creates a command to push multiple accounts
-func newPushAccountsCmd(appState *app.State) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "accounts [id...]",
-		Short: "Push multiple accounts to BadgerMaps",
-		Long:  `Push multiple accounts from your local database to the BadgerMaps API.`,
-		Run: func(cmd *cobra.Command, args []string) {
-			if len(args) == 0 {
-				fmt.Println("Pushing all accounts")
-				pushAllAccounts(appState)
-			} else {
-				fmt.Printf("Pushing accounts with IDs: %v\n", args)
-				// Implementation for specific accounts will go here
-			}
-		},
+// ensureAccountsTables ensures the Accounts and AccountsPendingChanges tables exist.
+func ensureAccountsTables(App *app.State) error {
+	if err := App.DB.EnforceSchema(); err != nil {
+		return err
 	}
-	return cmd
-}
-
-// pushAllAccounts pushes all accounts to the API
-func pushAllAccounts(appState *app.State) {
-	// This is a placeholder for the actual implementation
-	// In a real implementation, we would:
-	// 1. Get all accounts from the database
-	// 2. Push them to the API in parallel using goroutines
-	// 3. Handle rate limiting and errors
-
-	// Create a slice to collect errors
-	var errors []string
-	var errorsMutex sync.Mutex
-
-	// Example of how this might look:
-	fmt.Println("Retrieving all accounts from database...")
-
-	// Simulate getting accounts from database
-	accountIDs := []int{1, 2, 3, 4, 5}
-
-	fmt.Printf("Found %d accounts to push\n", len(accountIDs))
-
-	// Get max parallel processes from config
-	maxParallel := appState.Config.MaxParallelProcesses
-	if maxParallel <= 0 {
-		maxParallel = 5 // Default value
+	if err := App.DB.ValidateSchema(); err != nil {
+		return err
 	}
-
-	// Create a semaphore to limit concurrent operations
-	sem := make(chan bool, maxParallel)
-	var wg sync.WaitGroup
-
-	// Process accounts in parallel
-	for _, id := range accountIDs {
-		wg.Add(1)
-		go func(accountID int) {
-			defer wg.Done()
-
-			// Acquire semaphore
-			sem <- true
-			defer func() { <-sem }()
-
-			// Simulate pushing account to API
-			fmt.Printf("Pushing account %d to API...\n", accountID)
-			// In a real implementation, we would call the API client here
-
-			// Simulate an error for demonstration purposes (for account ID 3)
-			if accountID == 3 {
-				errorMsg := fmt.Sprintf("Error pushing account %d: simulated error", accountID)
-				errorsMutex.Lock()
-				errors = append(errors, errorMsg)
-				errorsMutex.Unlock()
-			}
-		}(id)
-	}
-
-	// Wait for all goroutines to finish
-	wg.Wait()
-
-	// Print all collected errors
-	if len(errors) > 0 {
-		fmt.Println(color.RedString("\nErrors encountered during account push:"))
-		for _, err := range errors {
-			fmt.Println(color.RedString("- %s", err))
+	// Also ensure the pending changes table exists.
+	if err := database.RunCommand(App.DB, "create_accounts_pending_changes_table"); err != nil {
+		// This might fail if the file doesn't exist for other DBs, so we don't fail hard.
+		if App.Verbose {
+			fmt.Println(color.YellowString("Could not ensure AccountsPendingChanges table exists: %v", err))
 		}
 	}
-
-	fmt.Println(color.GreenString("Successfully pushed all accounts to BadgerMaps"))
+	return nil
 }
 
-// newPushCheckinCmd creates a command to push a single checkin
-func newPushCheckinCmd(appState *app.State) *cobra.Command {
+// processAccountChange processes a single account change.
+func processAccountChange(App *app.State, apiClient *api.APIClient, change map[string]any) error {
+	changeID, _ := change["ChangeId"].(int64)
+	accountID, _ := change["AccountId"].(int64)
+	changeType, _ := change["ChangeType"].(string)
+	changesJSON, _ := change["Changes"].(string)
+
+	var err error
+	switch strings.ToLower(changeType) {
+	case "create":
+		var data map[string]string
+		if err = json.Unmarshal([]byte(changesJSON), &data); err == nil {
+			_, err = apiClient.CreateAccount(data)
+		}
+	case "update":
+		var data map[string]string
+		if err = json.Unmarshal([]byte(changesJSON), &data); err == nil {
+			_, err = apiClient.UpdateAccount(int(accountID), data)
+		}
+	case "delete":
+		err = apiClient.DeleteAccount(int(accountID))
+	default:
+		err = fmt.Errorf("unknown change type: %s", changeType)
+	}
+
+	dbx, openErr := openSQL(App)
+	if openErr != nil {
+		return fmt.Errorf("failed to open database to update change status: %w", openErr)
+	}
+	defer dbx.Close()
+
+	status := "completed"
+	if err != nil {
+		status = "failed"
+	}
+
+	_, updateErr := dbx.Exec("UPDATE AccountsPendingChanges SET Status = ?, ProcessedAt = CURRENT_TIMESTAMP WHERE ChangeId = ?", status, changeID)
+	if updateErr != nil {
+		return fmt.Errorf("failed to update change status for ChangeId %d: %w", changeID, updateErr)
+	}
+
+	if err != nil {
+		return fmt.Errorf("error processing change %d: %w", changeID, err)
+	}
+
+	if App.Verbose {
+		fmt.Println(color.GreenString("Successfully processed change %d for account %d", changeID, accountID))
+	}
+
+	return nil
+}
+
+// fetchPendingAccountChanges fetches pending account changes from the database.
+func fetchPendingAccountChanges(App *app.State, changeID int) ([]map[string]any, error) {
+	if err := ensureAccountsTables(App); err != nil {
+		return nil, err
+	}
+	dbx, err := openSQL(App)
+	if err != nil {
+		return nil, err
+	}
+	defer dbx.Close()
+
+	query := "SELECT ChangeId, AccountId, ChangeType, Changes FROM AccountsPendingChanges WHERE Status = 'pending'"
+	if changeID > 0 {
+		query += " AND ChangeId = ?"
+	}
+
+	var rows *sql.Rows
+	if changeID > 0 {
+		rows, err = dbx.Query(query, changeID)
+	} else {
+		rows, err = dbx.Query(query)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+
+	var result []map[string]any
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		scans := make([]any, len(cols))
+		for i := range vals {
+			scans[i] = &vals[i]
+		}
+		if err := rows.Scan(scans...); err != nil {
+			return nil, err
+		}
+		rowMap := make(map[string]any)
+		for i, c := range cols {
+			rowMap[c] = vals[i]
+		}
+		result = append(result, rowMap)
+	}
+	return result, nil
+}
+
+// pushAccountCmd pushes a single pending account change.
+func pushAccountCmd(App *app.State) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "checkin [id]",
-		Short: "Push a single checkin to BadgerMaps",
-		Long:  `Push a single checkin from your local database to the BadgerMaps API.`,
+		Use:   "account [changeId]",
+		Short: "Push a single pending account change",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("Pushing checkin with ID: %s\n", args[0])
-		},
-	}
-	return cmd
-}
+			changeID, err := strconv.Atoi(args[0])
+			if err != nil {
+				fmt.Println(color.RedString("Invalid ChangeId: %s", args[0]))
+				os.Exit(1)
+			}
 
-// newPushCheckinsCmd creates a command to push multiple checkins
-func newPushCheckinsCmd(appState *app.State) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "checkins [id...]",
-		Short: "Push multiple checkins to BadgerMaps",
-		Long:  `Push multiple checkins from your local database to the BadgerMaps API.`,
-		Run: func(cmd *cobra.Command, args []string) {
-			if len(args) == 0 {
-				fmt.Println("Pushing all checkins")
-				// Implementation for all checkins will go here
-			} else {
-				fmt.Printf("Pushing checkins with IDs: %v\n", args)
-				// Implementation for specific checkins will go here
+			apiKey := App.Config.APIKey
+			if apiKey == "" {
+				fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
+				os.Exit(1)
+			}
+			apiClient := api.NewAPIClient(apiKey)
+
+			changes, err := fetchPendingAccountChanges(App, changeID)
+			if err != nil {
+				fmt.Println(color.RedString("Error fetching pending change: %v", err))
+				os.Exit(1)
+			}
+
+			if len(changes) == 0 {
+				fmt.Println(color.YellowString("No pending change found with ChangeId: %d", changeID))
+				return
+			}
+
+			if err := processAccountChange(App, apiClient, changes[0]); err != nil {
+				fmt.Println(color.RedString("Error pushing account change: %v", err))
+				os.Exit(1)
 			}
 		},
 	}
 	return cmd
 }
 
-// newPushRouteCmd creates a command to push a single route
-func newPushRouteCmd(appState *app.State) *cobra.Command {
+// pushAccountsCmd pushes all pending account changes.
+func pushAccountsCmd(App *app.State) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "route [id]",
-		Short: "Push a single route to BadgerMaps",
-		Long:  `Push a single route from your local database to the BadgerMaps API.`,
-		Args:  cobra.ExactArgs(1),
+		Use:   "accounts",
+		Short: "Push all pending account changes",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("Pushing route with ID: %s\n", args[0])
-		},
-	}
-	return cmd
-}
-
-// newPushRoutesCmd creates a command to push multiple routes
-func newPushRoutesCmd(appState *app.State) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "routes [id...]",
-		Short: "Push multiple routes to BadgerMaps",
-		Long:  `Push multiple routes from your local database to the BadgerMaps API.`,
-		Run: func(cmd *cobra.Command, args []string) {
-			if len(args) == 0 {
-				fmt.Println("Pushing all routes")
-				// Implementation for all routes will go here
-			} else {
-				fmt.Printf("Pushing routes with IDs: %v\n", args)
-				// Implementation for specific routes will go here
+			apiKey := App.Config.APIKey
+			if apiKey == "" {
+				fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
+				os.Exit(1)
 			}
-		},
-	}
-	return cmd
-}
+			apiClient := api.NewAPIClient(apiKey)
 
-// newPushProfileCmd creates a command to push the user profile
-func newPushProfileCmd(appState *app.State) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "profile",
-		Short: "Push user profile to BadgerMaps",
-		Long:  `Push your user profile from your local database to the BadgerMaps API.`,
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("Pushing user profile")
-			// Implementation for profile will go here
+			changes, err := fetchPendingAccountChanges(App, 0)
+			if err != nil {
+				fmt.Println(color.RedString("Error fetching pending changes: %v", err))
+				os.Exit(1)
+			}
+
+			if len(changes) == 0 {
+				fmt.Println(color.YellowString("No pending account changes found"))
+				return
+			}
+
+			maxParallel := App.Config.MaxParallelProcesses
+			if maxParallel <= 0 {
+				maxParallel = 5
+			}
+			sem := make(chan struct{}, maxParallel)
+			var wg sync.WaitGroup
+
+			for _, change := range changes {
+				wg.Add(1)
+				sem <- struct{}{}
+				go func(c map[string]any) {
+					defer func() { <-sem; wg.Done() }()
+					if err := processAccountChange(App, apiClient, c); err != nil {
+						fmt.Println(color.RedString("Error pushing account change: %v", err))
+					}
+				}(change)
+			}
+			wg.Wait()
+			fmt.Println(color.GreenString("Finished pushing pending account changes"))
 		},
 	}
 	return cmd

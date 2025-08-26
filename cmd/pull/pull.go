@@ -15,7 +15,7 @@ import (
 )
 
 // helper functions to store records using App.DB and database.RunCommand
-func storeAccountBasic(App *app.State, acc api.Account) error {
+func StoreAccountBasic(App *app.State, acc api.Account) error {
 	// merge basic account fields
 	first := ""
 	if acc.FirstName != nil {
@@ -52,7 +52,7 @@ func storeAccountBasic(App *app.State, acc api.Account) error {
 }
 
 // storeAccountDetailed stores the full account information, including all standard and custom fields, and refreshes locations.
-func storeAccountDetailed(App *app.State, acc *api.Account) error {
+func StoreAccountDetailed(App *app.State, acc *api.Account) error {
 	valStr := func(p *string) any {
 		if p == nil {
 			return nil
@@ -175,7 +175,7 @@ func storeAccountDetailed(App *app.State, acc *api.Account) error {
 	return nil
 }
 
-func storeCheckin(App *app.State, c api.Checkin) error {
+func StoreCheckin(App *app.State, c api.Checkin) error {
 	// SQLite expects Type TEXT; other DBs have corresponding SQL. Pass as-is.
 	crm := ""
 	if c.CRMID != nil {
@@ -197,7 +197,7 @@ func storeCheckin(App *app.State, c api.Checkin) error {
 	)
 }
 
-func storeRoute(App *app.State, r api.Route) error {
+func StoreRoute(App *app.State, r api.Route) error {
 	// upsert route
 	if err := database.RunCommand(App.DB, "merge_routes",
 		r.ID,
@@ -270,7 +270,7 @@ func storeRoute(App *app.State, r api.Route) error {
 	return nil
 }
 
-func storeProfile(App *app.State, p *api.UserProfile) error {
+func StoreProfile(App *app.State, p *api.UserProfile) error {
 	manager := ""
 	if p.Manager != nil {
 		manager = *p.Manager
@@ -314,7 +314,7 @@ func PullCmd(App *app.State) *cobra.Command {
 	pullCmd.AddCommand(pullRouteCmd(App))
 	pullCmd.AddCommand(pullRoutesCmd(App))
 	pullCmd.AddCommand(pullProfileCmd(App))
-	pullCmd.AddCommand(pullAllCmd(App))
+	pullCmd.AddCommand(PullAllCmd(App))
 
 	return pullCmd
 }
@@ -365,7 +365,7 @@ func pullAccountCmd(App *app.State) *cobra.Command {
 				os.Exit(1)
 			}
 
-			if err := storeAccountDetailed(App, account); err != nil {
+			if err := StoreAccountDetailed(App, account); err != nil {
 				fmt.Println(color.RedString("Error storing account: %v", err))
 				os.Exit(1)
 			}
@@ -458,7 +458,7 @@ func PullAllAccounts(App *app.State, top int) {
 				return
 			}
 
-			if err := storeAccountDetailed(App, detailedAcc); err != nil {
+			if err := StoreAccountDetailed(App, detailedAcc); err != nil {
 				fmt.Println(color.RedString("Error storing account %d: %v", acc, err))
 			}
 
@@ -529,7 +529,7 @@ func pullCheckinCmd(App *app.State) *cobra.Command {
 			}
 
 			// Store checkin in database
-			if err := storeCheckin(App, *checkin); err != nil {
+			if err := StoreCheckin(App, *checkin); err != nil {
 				fmt.Println(color.RedString("Error storing checkin: %v", err))
 				os.Exit(1)
 			}
@@ -600,7 +600,7 @@ func pullCheckinsCmd(App *app.State) *cobra.Command {
 					continue
 				}
 
-				if err := storeCheckin(App, *checkin); err != nil {
+				if err := StoreCheckin(App, *checkin); err != nil {
 					fmt.Println(color.RedString("Error storing checkin %d: %v", checkinID, err))
 					continue
 				}
@@ -684,7 +684,7 @@ func pullAllCheckins(App *app.State) {
 
 			stored := 0
 			for _, c := range checkins {
-				if err := storeCheckin(App, c); err != nil {
+				if err := StoreCheckin(App, c); err != nil {
 					errorsMutex.Lock()
 					errors = append(errors, fmt.Sprintf("Error storing checkin %d for account %d: %v", c.ID, a.ID, err))
 					errorsMutex.Unlock()
@@ -873,7 +873,7 @@ func PullRoute(routeID int, App *app.State) error {
 	}
 
 	// Store route and its waypoints
-	if err := storeRoute(App, *route); err != nil {
+	if err := StoreRoute(App, *route); err != nil {
 		return fmt.Errorf("error storing route: %w", err)
 	}
 
@@ -915,7 +915,7 @@ func PullAllRoutes(App *app.State) {
 
 	// Store routes one by one (with waypoints)
 	for _, r := range routes {
-		if err := storeRoute(App, r); err != nil {
+		if err := StoreRoute(App, r); err != nil {
 			fmt.Println(color.RedString("Error storing route %d: %v", r.ID, err))
 		}
 	}
@@ -977,7 +977,7 @@ func pullProfileCmd(App *app.State) *cobra.Command {
 			}
 
 			// Store profile in database
-			if err := storeProfile(App, profile); err != nil {
+			if err := StoreProfile(App, profile); err != nil {
 				errorMsg := fmt.Sprintf("Error storing user profile: %v", err)
 				errors = append(errors, errorMsg)
 				fmt.Println(color.RedString(errorMsg))
@@ -1008,7 +1008,7 @@ func pullProfileCmd(App *app.State) *cobra.Command {
 }
 
 // pullAllCmd creates a command to pull all data types in order
-func pullAllCmd(App *app.State) *cobra.Command {
+func PullAllCmd(App *app.State) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "all",
 		Short: "Pull all data from BadgerMaps",
@@ -1040,14 +1040,12 @@ func pullAllCmd(App *app.State) *cobra.Command {
 				fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
 			}
 
-			profile, err := apiClient.GetUserProfile()
+						profile, err := apiClient.GetUserProfile()
 			if err != nil {
 				errors = append(errors, fmt.Sprintf("Error retrieving user profile: %v", err))
 			} else {
-				if err := storeProfile(App, profile); err != nil {
+				if err := StoreProfile(App, profile); err != nil {
 					errors = append(errors, fmt.Sprintf("Error storing user profile: %v", err))
-				} else if App.Verbose {
-					fmt.Println(color.GreenString("Successfully pulled and stored user profile"))
 				}
 			}
 

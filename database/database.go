@@ -642,8 +642,9 @@ func RequiredTables() []string {
 
 	return []string{
 		"Accounts",
-		"Routes",
 		"AccountCheckins",
+		"AccountsPendingChanges",
+		"Routes",
 		"UserProfiles",
 		"AccountLocations",
 		"RouteWaypoints",
@@ -703,10 +704,12 @@ func createCommandForTable(tableName string) string {
 	switch tableName {
 	case "Accounts":
 		return "create_accounts_table"
-	case "Routes":
-		return "create_routes_table"
 	case "AccountCheckins":
 		return "create_account_checkins_table"
+	case "AccountsPendingChanges":
+		return "create_accounts_pending_changes_table"
+	case "Routes":
+		return "create_routes_table"
 	case "UserProfiles":
 		return "create_user_profiles_table"
 	case "AccountLocations":

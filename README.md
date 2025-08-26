@@ -23,11 +23,6 @@ go build -o badgermaps
 - `pull`: Retrieve data from BadgerMaps API
 - `server`: Run in server mode
 - `test`: Run tests and diagnostics
-- `utils`: Utility commands for maintenance
-- `auth`: Authenticate with the API
-- `search`: Find items by name
-- `autocomplete`: Generate shell autocompletion scripts
-- `help`: Display help information
 - `version`: Display version information
 
 ## Getting Started
