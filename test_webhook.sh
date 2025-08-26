@@ -6,7 +6,7 @@
 echo "Sending test webhook to http://localhost:8080/webhook/account"
 
 curl -X POST \
-  http://localhost:8080/webhook/account \
+  http://localhost:8080/webhook/account/update\
   -H 'Content-Type: application/json' \
   -d '{ 
     "id": 98765, 

@@ -30,12 +30,17 @@ func NewAPIClient(apiKey string) *APIClient {
 
 // NewAPIClientWithURL creates a new BadgerMaps API client with custom URL
 func NewAPIClientWithURL(apiKey, baseURL string) *APIClient {
+	return NewAPIClientWithClient(apiKey, baseURL, &http.Client{
+		Timeout: 30 * time.Second,
+	})
+}
+
+// NewAPIClientWithClient creates a new BadgerMaps API client with a custom http.Client
+func NewAPIClientWithClient(apiKey, baseURL string, client *http.Client) *APIClient {
 	return &APIClient{
-		baseURL: baseURL,
-		apiKey:  apiKey,
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		baseURL:   baseURL,
+		apiKey:    apiKey,
+		client:    client,
 		endpoints: NewEndpoints(baseURL),
 	}
 }
@@ -266,6 +271,45 @@ func (api *APIClient) GetAccounts() ([]Account, error) {
 	}
 
 	return accounts, nil
+}
+
+// GetAccountIDs retrieves all account IDs from the BadgerMaps API
+func (api *APIClient) GetAccountIDs() ([]int, error) {
+	url := api.endpoints.Customers()
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := api.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to customers: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("endpoint customers test failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Use a temporary struct to decode only the ID
+	var accounts []struct {
+		ID int `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&accounts); err != nil {
+		return nil, fmt.Errorf("failed to decode customers response: %w", err)
+	}
+
+	// Extract IDs into a slice of ints
+	ids := make([]int, len(accounts))
+	for i, acc := range accounts {
+		ids[i] = acc.ID
+	}
+
+	return ids, nil
 }
 
 // GetRoutes retrieves all routes from the BadgerMaps API

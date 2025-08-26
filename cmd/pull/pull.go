@@ -284,6 +284,8 @@ func StoreProfile(App *app.State, p *api.UserProfile) error {
 func PullCmd(App *app.State) *cobra.Command {
 	App.VerifySetupOrExit()
 
+	apiClient := api.NewAPIClient(App.Config.APIKey)
+
 	pullCmd := &cobra.Command{
 		Use:   "pull",
 		Short: "Retrieve data from BadgerMaps API",
@@ -295,20 +297,20 @@ func PullCmd(App *app.State) *cobra.Command {
 	}
 
 	// Add subcommands
-	pullCmd.AddCommand(pullAccountCmd(App))
-	pullCmd.AddCommand(pullAccountsCmd(App))
-	pullCmd.AddCommand(pullCheckinCmd(App))
-	pullCmd.AddCommand(pullCheckinsCmd(App))
-	pullCmd.AddCommand(pullRouteCmd(App))
-	pullCmd.AddCommand(pullRoutesCmd(App))
-	pullCmd.AddCommand(pullProfileCmd(App))
-	pullCmd.AddCommand(PullAllCmd(App))
+	pullCmd.AddCommand(pullAccountCmd(App, apiClient))
+	pullCmd.AddCommand(pullAccountsCmd(App, apiClient))
+	pullCmd.AddCommand(pullCheckinCmd(App, apiClient))
+	pullCmd.AddCommand(pullCheckinsCmd(App, apiClient))
+	pullCmd.AddCommand(pullRouteCmd(App, apiClient))
+	pullCmd.AddCommand(pullRoutesCmd(App, apiClient))
+	pullCmd.AddCommand(pullProfileCmd(App, apiClient))
+	pullCmd.AddCommand(PullAllCmd(App, apiClient))
 
 	return pullCmd
 }
 
 // pullAccountCmd creates a command to pull a single account
-func pullAccountCmd(App *app.State) *cobra.Command {
+func pullAccountCmd(App *app.State, apiClient *api.APIClient) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "account [id]",
 		Short: "Pull a single account from BadgerMaps",
@@ -332,9 +334,6 @@ func pullAccountCmd(App *app.State) *cobra.Command {
 				fmt.Println(color.RedString("Invalid account ID: %s", args[0]))
 				os.Exit(1)
 			}
-
-			// Create API client
-			apiClient := api.NewAPIClient(apiKey)
 
 			// Get account from API
 			account, err := apiClient.GetAccountDetailed(accountID)
@@ -365,7 +364,7 @@ func pullAccountCmd(App *app.State) *cobra.Command {
 }
 
 // pullAccountsCmd creates a command to pull multiple accounts
-func pullAccountsCmd(App *app.State) *cobra.Command {
+func pullAccountsCmd(App *app.State, apiClient *api.APIClient) *cobra.Command {
 	var top int
 
 	cmd := &cobra.Command{
@@ -378,9 +377,105 @@ func pullAccountsCmd(App *app.State) *cobra.Command {
 				if App.Verbose {
 					fmt.Println(color.CyanString("Pulling all accounts"))
 				}
-				PullAllAccounts(App, top)
+				PullAllAccounts(App, apiClient, top)
 				return
 			}
+
+			// Pull specific accounts
+			if App.Verbose {
+				fmt.Println(color.CyanString("Pulling accounts with IDs: %v", args))
+			}
+
+			// Get API key from App
+			apiKey := App.Config.APIKey
+			if apiKey == "" {
+				fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
+				os.Exit(1)
+			}
+
+			// Ensure schema
+			if err := App.DB.EnforceSchema(); err != nil {
+				fmt.Println(color.RedString("Error ensuring database schema: %v", err))
+				os.Exit(1)
+			}
+			if err := App.DB.ValidateSchema(); err != nil {
+				fmt.Println(color.RedString("Database schema validation failed: %v", err))
+				fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
+				os.Exit(1)
+			}
+
+			// Get max parallel processes from config
+			maxParallel := App.Config.MaxParallelProcesses
+			if maxParallel <= 0 {
+				maxParallel = 5 // Default value
+			}
+
+			// Create a semaphore to limit concurrent operations
+			sem := make(chan bool, maxParallel)
+			var wg sync.WaitGroup
+
+			// Create a slice to collect errors
+			var errors []string
+			var successCount int
+			var accountsMutex sync.Mutex
+
+			bar := progressbar.Default(int64(len(args)))
+
+			// Process accounts in parallel
+			for _, arg := range args {
+				wg.Add(1)
+				go func(idStr string) {
+					defer wg.Done()
+
+					// Acquire semaphore
+					sem <- true
+					defer func() { <-sem }()
+
+					accountID, err := strconv.Atoi(idStr)
+					if err != nil {
+						accountsMutex.Lock()
+						errors = append(errors, fmt.Sprintf("Invalid account ID: %s", idStr))
+						accountsMutex.Unlock()
+						bar.Add(1)
+						return
+					}
+
+					detailedAcc, err := apiClient.GetAccountDetailed(accountID)
+					if err != nil {
+						accountsMutex.Lock()
+						errors = append(errors, fmt.Sprintf("Error retrieving account %d: %v", accountID, err))
+						accountsMutex.Unlock()
+						bar.Add(1)
+						return
+					}
+
+					if err := StoreAccountDetailed(App, detailedAcc); err != nil {
+						accountsMutex.Lock()
+						errors = append(errors, fmt.Sprintf("Error storing account %d: %v", accountID, err))
+						accountsMutex.Unlock()
+					} else {
+						accountsMutex.Lock()
+						successCount++
+						accountsMutex.Unlock()
+					}
+
+					// Update progress bar
+					bar.Add(1)
+				}(arg)
+			}
+
+			// Wait for all goroutines to finish
+			wg.Wait()
+
+			// Print all collected errors
+			if len(errors) > 0 {
+				fmt.Println(color.RedString("\nErrors encountered during account pull:"))
+				for _, err := range errors {
+					fmt.Println(color.RedString("- %s", err))
+				}
+			}
+
+			fmt.Printf(color.GreenString("\nSuccessfully pulled %d/%d accounts\n"), successCount, len(args))
 		},
 	}
 
@@ -391,27 +486,24 @@ func pullAccountsCmd(App *app.State) *cobra.Command {
 }
 
 // PullAllAccounts pulls all accounts from the API
-func PullAllAccounts(App *app.State, top int) {
-	// Create API client
-	apiClient := api.NewAPIClient(App.Config.APIKey)
-
-	// Get all accounts from API
-	fmt.Println(color.CyanString("Retrieving accounts from BadgerMaps API..."))
-	accounts, err := apiClient.GetAccounts()
+func PullAllAccounts(App *app.State, apiClient *api.APIClient, top int) {
+	// Get all account IDs from API
+	fmt.Println(color.CyanString("Retrieving account IDs from BadgerMaps API..."))
+	accountIDs, err := apiClient.GetAccountIDs()
 	if err != nil {
-		fmt.Println(color.RedString("Error retrieving accounts: %v", err))
+		fmt.Println(color.RedString("Error retrieving account IDs: %v", err))
 		os.Exit(1)
 	}
 
 	// Apply top limit if specified
-	if top > 0 && top < len(accounts) {
-		accounts = accounts[:top]
+	if top > 0 && top < len(accountIDs) {
+		accountIDs = accountIDs[:top]
 	}
 
-	fmt.Printf(color.CyanString("Found %d accounts\n"), len(accounts))
+	fmt.Printf(color.CyanString("Found %d accounts\n"), len(accountIDs))
 
 	// Create a progress bar
-	bar := progressbar.Default(int64(len(accounts)))
+	bar := progressbar.Default(int64(len(accountIDs)))
 
 	// Get max parallel processes from config
 	maxParallel := App.Config.MaxParallelProcesses
@@ -428,31 +520,35 @@ func PullAllAccounts(App *app.State, top int) {
 	var errorsMutex sync.Mutex
 
 	// Process accounts in parallel
-	for _, account := range accounts {
+	for _, accountID := range accountIDs {
 		wg.Add(1)
-		go func(acc api.Account) {
+		go func(id int) {
 			defer wg.Done()
 
 			// Acquire semaphore
 			sem <- true
 			defer func() { <-sem }()
 
-			detailedAcc, err := apiClient.GetAccountDetailed(int(acc.ID.Int64))
+			detailedAcc, err := apiClient.GetAccountDetailed(id)
 			if err != nil {
-				errorMsg := fmt.Sprintf("Error retrieving account %d (%s): %v", acc.ID.Int64, acc.FullName.String, err)
+				errorMsg := fmt.Sprintf("Error retrieving account %d: %v", id, err)
 				errorsMutex.Lock()
 				errors = append(errors, errorMsg)
 				errorsMutex.Unlock()
+				bar.Add(1) // Still advance the bar on error
 				return
 			}
 
 			if err := StoreAccountDetailed(App, detailedAcc); err != nil {
-				fmt.Println(color.RedString("Error storing account %d: %v", acc, err))
+				errorMsg := fmt.Sprintf("Error storing account %d: %v", id, err)
+				errorsMutex.Lock()
+				errors = append(errors, errorMsg)
+				errorsMutex.Unlock()
 			}
 
 			// Update progress bar
 			bar.Add(1)
-		}(account)
+		}(accountID)
 	}
 
 	// Wait for all goroutines to finish
@@ -466,11 +562,11 @@ func PullAllAccounts(App *app.State, top int) {
 		}
 	}
 
-	fmt.Println(color.GreenString("\nSuccessfully pulled %d accounts", len(accounts)-len(errors)))
+	fmt.Println(color.GreenString("\nSuccessfully pulled %d accounts", len(accountIDs)-len(errors)))
 }
 
 // pullCheckinCmd creates a command to pull a single checkin
-func pullCheckinCmd(App *app.State) *cobra.Command {
+func pullCheckinCmd(App *app.State, apiClient *api.APIClient) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "checkin [id]",
 		Short: "Pull a single checkin from BadgerMaps",
@@ -494,9 +590,6 @@ func pullCheckinCmd(App *app.State) *cobra.Command {
 				fmt.Println(color.RedString("Invalid checkin ID: %s", args[0]))
 				os.Exit(1)
 			}
-
-			// Create API client
-			apiClient := api.NewAPIClient(apiKey)
 
 			// Get checkin from API
 			checkin, err := apiClient.GetCheckin(checkinID)
@@ -535,7 +628,7 @@ func pullCheckinCmd(App *app.State) *cobra.Command {
 }
 
 // pullCheckinsCmd creates a command to pull multiple checkins
-func pullCheckinsCmd(App *app.State) *cobra.Command {
+func pullCheckinsCmd(App *app.State, apiClient *api.APIClient) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "checkins [id...]",
 		Short: "Pull multiple checkins from BadgerMaps",
@@ -545,7 +638,7 @@ func pullCheckinsCmd(App *app.State) *cobra.Command {
 				if App.Verbose {
 					fmt.Println(color.CyanString("Pulling all checkins"))
 				}
-				pullAllCheckins(App)
+				pullAllCheckins(App, apiClient)
 				return
 			}
 
@@ -570,9 +663,6 @@ func pullCheckinsCmd(App *app.State) *cobra.Command {
 				fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
 				os.Exit(1)
 			}
-
-			// Create API client
-			apiClient := api.NewAPIClient(apiKey)
 
 			// Pull each checkin
 			for _, arg := range args {
@@ -603,7 +693,7 @@ func pullCheckinsCmd(App *app.State) *cobra.Command {
 }
 
 // pullAllCheckins pulls all checkins by first retrieving accounts, then per-account checkins
-func pullAllCheckins(App *app.State) {
+func pullAllCheckins(App *app.State, apiClient *api.APIClient) {
 	// Get API key from App
 	apiKey := App.Config.APIKey
 	if apiKey == "" {
@@ -622,17 +712,14 @@ func pullAllCheckins(App *app.State) {
 		os.Exit(1)
 	}
 
-	// Create API client
-	apiClient := api.NewAPIClient(apiKey)
-
-	// Get all accounts first
-	fmt.Println(color.CyanString("Retrieving accounts from BadgerMaps API..."))
-	accounts, err := apiClient.GetAccounts()
+	// Get all account IDs first
+	fmt.Println(color.CyanString("Retrieving account IDs from BadgerMaps API..."))
+	accountIDs, err := apiClient.GetAccountIDs()
 	if err != nil {
-		fmt.Println(color.RedString("Error retrieving accounts: %v", err))
+		fmt.Println(color.RedString("Error retrieving account IDs: %v", err))
 		os.Exit(1)
 	}
-	fmt.Printf(color.CyanString("Found %d accounts\n"), len(accounts))
+	fmt.Printf(color.CyanString("Found %d accounts\n"), len(accountIDs))
 
 	// Set up concurrency control
 	maxParallel := App.Config.MaxParallelProcesses
@@ -643,7 +730,7 @@ func pullAllCheckins(App *app.State) {
 	var wg sync.WaitGroup
 
 	// Progress bar per account processed
-	bar := progressbar.Default(int64(len(accounts)))
+	bar := progressbar.Default(int64(len(accountIDs)))
 
 	// Track totals and errors
 	var totalStored int
@@ -651,20 +738,20 @@ func pullAllCheckins(App *app.State) {
 	var errors []string
 	var errorsMutex sync.Mutex
 
-	for _, acc := range accounts {
+	for _, accID := range accountIDs {
 		wg.Add(1)
 		sem <- true
-		go func(a api.Account) {
+		go func(accountID int) {
 			defer func() {
 				<-sem
 				wg.Done()
 			}()
 
 			// Fetch checkins for this account
-			checkins, err := apiClient.GetCheckinsForAccount(int(a.ID.Int64))
+			checkins, err := apiClient.GetCheckinsForAccount(accountID)
 			if err != nil {
 				errorsMutex.Lock()
-				errors = append(errors, fmt.Sprintf("Error retrieving checkins for account %d (%s): %v", a.ID.Int64, a.FullName.String, err))
+				errors = append(errors, fmt.Sprintf("Error retrieving checkins for account %d: %v", accountID, err))
 				errorsMutex.Unlock()
 				bar.Add(1)
 				return
@@ -674,7 +761,7 @@ func pullAllCheckins(App *app.State) {
 			for _, c := range checkins {
 				if err := StoreCheckin(App, c); err != nil {
 					errorsMutex.Lock()
-					errors = append(errors, fmt.Sprintf("Error storing checkin %d for account %d: %v", c.ID.Int64, a.ID.Int64, err))
+					errors = append(errors, fmt.Sprintf("Error storing checkin %d for account %d: %v", c.ID.Int64, accountID, err))
 					errorsMutex.Unlock()
 					continue
 				}
@@ -685,7 +772,7 @@ func pullAllCheckins(App *app.State) {
 			totalStoredMutex.Unlock()
 
 			bar.Add(1)
-		}(acc)
+		}(accID)
 	}
 
 	wg.Wait()
@@ -697,11 +784,11 @@ func pullAllCheckins(App *app.State) {
 		}
 	}
 
-	fmt.Println(color.GreenString("\nSuccessfully pulled and stored %d checkins across %d accounts", totalStored, len(accounts)))
+	fmt.Println(color.GreenString("\nSuccessfully pulled and stored %d checkins across %d accounts", totalStored, len(accountIDs)))
 }
 
 // pullRouteCmd creates a command to pull a single route
-func pullRouteCmd(App *app.State) *cobra.Command {
+func pullRouteCmd(App *app.State, apiClient *api.APIClient) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "route [id]",
 		Short: "Pull a single route from BadgerMaps",
@@ -716,7 +803,7 @@ func pullRouteCmd(App *app.State) *cobra.Command {
 			}
 
 			// Call the PullRoute function
-			err = PullRoute(routeID, App)
+			err = PullRoute(routeID, App, apiClient)
 			if err != nil {
 				fmt.Println(color.RedString("Error: %v", err))
 				os.Exit(1)
@@ -731,7 +818,7 @@ func pullRouteCmd(App *app.State) *cobra.Command {
 }
 
 // pullRoutesCmd creates a command to pull multiple routes
-func pullRoutesCmd(App *app.State) *cobra.Command {
+func pullRoutesCmd(App *app.State, apiClient *api.APIClient) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "routes [id...]",
 		Short: "Pull multiple routes from BadgerMaps",
@@ -741,7 +828,7 @@ func pullRoutesCmd(App *app.State) *cobra.Command {
 				if App.Verbose {
 					fmt.Println(color.CyanString("Pulling all routes"))
 				}
-				PullAllRoutes(App)
+				PullAllRoutes(App, apiClient)
 			} else {
 				if App.Verbose {
 					fmt.Println(color.CyanString("Pulling routes with IDs: %v", args))
@@ -801,7 +888,7 @@ func pullRoutesCmd(App *app.State) *cobra.Command {
 							wg.Done()
 						}()
 
-						err := PullRoute(routeID, App)
+						err := PullRoute(routeID, App, apiClient)
 
 						routesMutex.Lock()
 						defer routesMutex.Unlock()
@@ -836,7 +923,7 @@ func pullRoutesCmd(App *app.State) *cobra.Command {
 }
 
 // PullRoute pulls a single route from the API
-func PullRoute(routeID int, App *app.State) error {
+func PullRoute(routeID int, App *app.State, apiClient *api.APIClient) error {
 	// Get API key from App
 	apiKey := App.Config.APIKey
 	if apiKey == "" {
@@ -850,9 +937,6 @@ func PullRoute(routeID int, App *app.State) error {
 	if err := App.DB.ValidateSchema(); err != nil {
 		return fmt.Errorf("database schema validation failed: %w", err)
 	}
-
-	// Create API client
-	apiClient := api.NewAPIClient(apiKey)
 
 	// Get route from API
 	route, err := apiClient.GetRoute(routeID)
@@ -869,7 +953,7 @@ func PullRoute(routeID int, App *app.State) error {
 }
 
 // PullAllRoutes pulls all routes from the API
-func PullAllRoutes(App *app.State) {
+func PullAllRoutes(App *app.State, apiClient *api.APIClient) {
 	// Get API key from App
 	apiKey := App.Config.APIKey
 	if apiKey == "" {
@@ -888,9 +972,6 @@ func PullAllRoutes(App *app.State) {
 		os.Exit(1)
 	}
 
-	// Create API client
-	apiClient := api.NewAPIClient(apiKey)
-
 	// Get all routes from API
 	fmt.Println(color.CyanString("Retrieving routes from BadgerMaps API..."))
 	routes, err := apiClient.GetRoutes()
@@ -901,22 +982,62 @@ func PullAllRoutes(App *app.State) {
 
 	fmt.Printf(color.CyanString("Found %d routes\n"), len(routes))
 
-	// Store routes one by one (with waypoints)
-	for _, r := range routes {
-		if err := StoreRoute(App, r); err != nil {
-			fmt.Println(color.RedString("Error storing route %d: %v", r.ID, err))
+	// Get max parallel processes from config
+	maxParallel := App.Config.MaxParallelProcesses
+	if maxParallel <= 0 {
+		maxParallel = 10 // Default value
+	}
+
+	// Create a semaphore to limit concurrent operations
+	sem := make(chan bool, maxParallel)
+	var wg sync.WaitGroup
+
+	// Create a progress bar
+	bar := progressbar.Default(int64(len(routes)))
+
+	// Create a slice to collect errors
+	var errors []string
+	var errorsMutex sync.Mutex
+
+	// Process routes in parallel
+	for _, route := range routes {
+		wg.Add(1)
+		go func(r api.Route) {
+			defer wg.Done()
+
+			// Acquire semaphore
+			sem <- true
+			defer func() { <-sem }()
+
+			// Store route and its waypoints
+			if err := StoreRoute(App, r); err != nil {
+				errorMsg := fmt.Sprintf("Error storing route %d: %v", r.ID.Int64, err)
+				errorsMutex.Lock()
+				errors = append(errors, errorMsg)
+				errorsMutex.Unlock()
+			}
+
+			// Update progress bar
+			bar.Add(1)
+		}(route)
+	}
+
+	// Wait for all goroutines to finish
+	wg.Wait()
+
+	// Print all collected errors
+	if len(errors) > 0 {
+		fmt.Println(color.RedString("\nErrors encountered during route pull:"))
+		for _, err := range errors {
+			fmt.Println(color.RedString("- %s", err))
 		}
 	}
 
-	if App.Verbose {
-		fmt.Printf("Pulled and stored %d routes\n", len(routes))
-	}
-
-	fmt.Println(color.GreenString("Successfully pulled and stored all routes"))
+	fmt.Println(color.GreenString("\nSuccessfully pulled %d routes", len(routes)-len(errors)))
 }
 
 // pullProfileCmd creates a command to pull the user profile
-func pullProfileCmd(App *app.State) *cobra.Command {
+func pullProfileCmd(App *app.State, apiClient *api.APIClient) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "profile",
 		Short: "Pull user profile from BadgerMaps",
@@ -935,9 +1056,6 @@ func pullProfileCmd(App *app.State) *cobra.Command {
 				fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
 				os.Exit(1)
 			}
-
-			// Create API client
-			apiClient := api.NewAPIClient(apiKey)
 
 			// Get user profile from API
 			profile, err := apiClient.GetUserProfile()
@@ -995,8 +1113,8 @@ func pullProfileCmd(App *app.State) *cobra.Command {
 	return cmd
 }
 
-// pullAllCmd creates a command to pull all data types in order
-func PullAllCmd(App *app.State) *cobra.Command {
+// PullAllCmd creates a command to pull all data types in order
+func PullAllCmd(App *app.State, apiClient *api.APIClient) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "all",
 		Short: "Pull all data from BadgerMaps",
@@ -1017,7 +1135,6 @@ func PullAllCmd(App *app.State) *cobra.Command {
 				fmt.Println(color.RedString("API key not found. Please authenticate first with 'badgermaps auth'"))
 				os.Exit(1)
 			}
-			apiClient := api.NewAPIClient(apiKey)
 
 			// Ensure schema
 			if err := App.DB.EnforceSchema(); err != nil {
@@ -1040,17 +1157,17 @@ func PullAllCmd(App *app.State) *cobra.Command {
 			if App.Verbose {
 				fmt.Println(color.CyanString("\n=== Pulling Accounts ==="))
 			}
-			PullAllAccounts(App, 0)
+			PullAllAccounts(App, apiClient, 0)
 
 			if App.Verbose {
 				fmt.Println(color.CyanString("\n=== Pulling Checkins ==="))
 			}
-			pullAllCheckins(App)
+			pullAllCheckins(App, apiClient)
 
 			if App.Verbose {
 				fmt.Println(color.CyanString("\n=== Pulling Routes ==="))
 			}
-			PullAllRoutes(App)
+			PullAllRoutes(App, apiClient)
 
 			if len(errors) > 0 {
 				fmt.Println(color.RedString("\nErrors encountered during data pull:"))

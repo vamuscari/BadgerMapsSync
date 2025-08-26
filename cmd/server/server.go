@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"syscall"
+	syscall "syscall"
 	"time"
 
 	"github.com/fatih/color"
@@ -36,7 +36,7 @@ func ServerCmd(config *app.State) *cobra.Command {
 	serverCmd := &cobra.Command{
 		Use:   "server",
 		Short: "Run in server mode",
-		Long:  `Run the BadgerMaps CLI in server mode, listening for incoming webhooks.`,
+		Long:  `Run the BadgerMaps CLI in server mode, listening for incoming webhooks.`, 
 		Run: func(cmd *cobra.Command, args []string) {
 			// Set verbose and debug from flags
 			if verbose, _ := cmd.Flags().GetBool("verbose"); verbose {
@@ -46,14 +46,16 @@ func ServerCmd(config *app.State) *cobra.Command {
 				config.Debug = true
 			}
 
+			apiClient := api.NewAPIClient(config.Config.APIKey)
+
 			// If schedule is provided, set up scheduled execution
 			if schedule != "" {
 				c := cron.New()
 				_, err := c.AddFunc(schedule, func() {
 					fmt.Println("Running scheduled job: pull all")
-					pull.PullAllAccounts(config, 0)
+					pull.PullAllAccounts(config, apiClient, 0)
 					// pull.PullAllCheckins(config)
-					pull.PullAllRoutes(config)
+				pull.PullAllRoutes(config, apiClient)
 				})
 				if err != nil {
 					log.Fatalf("Error scheduling job: %v", err)
@@ -111,10 +113,9 @@ func runServer(App *app.State, host string, port int, tlsEnabled bool) {
 	mux := http.NewServeMux()
 
 	// Register webhook handlers
-	mux.HandleFunc("/webhook/account", s.handleAccountWebhook)
+	mux.HandleFunc("/webhook/account/create", s.handleAccountCreateWebhook)
+	mux.HandleFunc("/webhook/account/update", s.handleAccountCreateWebhook)
 	mux.HandleFunc("/webhook/checkin", s.handleCheckinWebhook)
-	mux.HandleFunc("/webhook/route", s.handleRouteWebhook)
-	mux.HandleFunc("/webhook/profile", s.handleProfileWebhook)
 
 	// Add health check endpoint
 	mux.HandleFunc("/health", handleHealthCheck)
@@ -164,12 +165,47 @@ func runServer(App *app.State, host string, port int, tlsEnabled bool) {
 	fmt.Println("Server stopped")
 }
 
+// handleHealthCheck handles the health check endpoint
+func handleHealthCheck(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "OK")
+}
+
 type server struct {
 	App *app.State
 }
 
 // handleAccountWebhook handles account update webhooks
-func (s *server) handleAccountWebhook(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleAccountCreateWebhook(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "can't read body", http.StatusInternalServerError)
+		return
+	}
+
+	var acc api.Account
+	if err := json.Unmarshal(body, &acc); err != nil {
+		http.Error(w, "invalid JSON payload", http.StatusBadRequest)
+		return
+	}
+
+	if err := pull.StoreAccountDetailed(s.App, &acc); err != nil {
+		http.Error(w, "failed to store account", http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Println(color.CyanString("Received and processed account webhook for account: %s", acc.FullName))
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "Account webhook processed")
+}
+
+// handleAccountWebhook handles account update webhooks
+func (s *server) handleAccountUpdateWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -224,68 +260,4 @@ func (s *server) handleCheckinWebhook(w http.ResponseWriter, r *http.Request) {
 	fmt.Println(color.CyanString("Received and processed checkin webhook for checkin ID: %d", checkin.ID))
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "Checkin webhook processed")
-}
-
-// handleRouteWebhook handles route update webhooks
-func (s *server) handleRouteWebhook(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "can't read body", http.StatusInternalServerError)
-		return
-	}
-
-	var route api.Route
-	if err := json.Unmarshal(body, &route); err != nil {
-		http.Error(w, "invalid JSON payload", http.StatusBadRequest)
-		return
-	}
-
-	if err := pull.StoreRoute(s.App, route); err != nil {
-		http.Error(w, "failed to store route", http.StatusInternalServerError)
-		return
-	}
-
-	fmt.Println(color.CyanString("Received and processed route webhook for route ID: %d", route.ID))
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "Route webhook processed")
-}
-
-// handleProfileWebhook handles profile update webhooks
-func (s *server) handleProfileWebhook(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "can't read body", http.StatusInternalServerError)
-		return
-	}
-
-	var profile api.UserProfile
-	if err := json.Unmarshal(body, &profile); err != nil {
-		http.Error(w, "invalid JSON payload", http.StatusBadRequest)
-		return
-	}
-
-	if err := pull.StoreProfile(s.App, &profile); err != nil {
-		http.Error(w, "failed to store profile", http.StatusInternalServerError)
-		return
-	}
-
-	fmt.Println(color.CyanString("Received and processed profile webhook for profile ID: %d", profile.ID))
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "Profile webhook processed")
-}
-
-// handleHealthCheck handles health check requests
-func handleHealthCheck(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "OK")
 }
