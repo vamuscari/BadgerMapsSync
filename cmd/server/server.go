@@ -7,7 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -38,6 +38,14 @@ func ServerCmd(config *app.State) *cobra.Command {
 		Short: "Run in server mode",
 		Long:  `Run the BadgerMaps CLI in server mode, listening for incoming webhooks.`,
 		Run: func(cmd *cobra.Command, args []string) {
+			// Set verbose and debug from flags
+			if verbose, _ := cmd.Flags().GetBool("verbose"); verbose {
+				config.Verbose = true
+			}
+			if debug, _ := cmd.Flags().GetBool("debug"); debug {
+				config.Debug = true
+			}
+
 			// If schedule is provided, set up scheduled execution
 			if schedule != "" {
 				c := cron.New()
@@ -63,6 +71,8 @@ func ServerCmd(config *app.State) *cobra.Command {
 	serverCmd.Flags().IntVar(&port, "port", 0, "Port to listen on (default is from env or 8080)")
 	serverCmd.Flags().BoolVar(&tlsEnabled, "tls", false, "Enable TLS/HTTPS (default is from env or false)")
 	serverCmd.Flags().StringVar(&schedule, "schedule", "", "Run on schedule using cron syntax (e.g., \"0 */6 * * *\" for every 6 hours)")
+	serverCmd.Flags().BoolP("verbose", "v", false, "Enable verbose output")
+	serverCmd.Flags().Bool("debug", false, "Enable debug mode")
 
 	// Bind flags to viper
 	viper.BindPFlag("SERVER_HOST", serverCmd.Flags().Lookup("host"))
@@ -165,7 +175,7 @@ func (s *server) handleAccountWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "can't read body", http.StatusInternalServerError)
 		return
@@ -194,7 +204,7 @@ func (s *server) handleCheckinWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "can't read body", http.StatusInternalServerError)
 		return
@@ -223,7 +233,7 @@ func (s *server) handleRouteWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "can't read body", http.StatusInternalServerError)
 		return
@@ -252,7 +262,7 @@ func (s *server) handleProfileWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "can't read body", http.StatusInternalServerError)
 		return

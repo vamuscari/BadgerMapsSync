@@ -19,7 +19,7 @@ func StoreAccountBasic(App *app.State, acc api.Account) error {
 	// merge basic account fields
 	first := ""
 	if acc.FirstName != nil {
-		first = *acc.FirstName
+		first = acc.FirstName.String
 	}
 	if err := database.RunCommand(App.DB, "merge_accounts_basic", acc.ID, first, acc.LastName); err != nil {
 		return err
@@ -31,7 +31,7 @@ func StoreAccountBasic(App *app.State, acc api.Account) error {
 	for _, loc := range acc.Locations {
 		name := ""
 		if loc.Name != nil {
-			name = *loc.Name
+			name = loc.Name.String
 		}
 		if err := database.RunCommand(App.DB, "insert_account_locations",
 			loc.ID,
@@ -53,95 +53,83 @@ func StoreAccountBasic(App *app.State, acc api.Account) error {
 
 // storeAccountDetailed stores the full account information, including all standard and custom fields, and refreshes locations.
 func StoreAccountDetailed(App *app.State, acc *api.Account) error {
-	valStr := func(p *string) any {
-		if p == nil {
-			return nil
-		}
-		return *p
-	}
-	valF := func(p *float64) any {
-		if p == nil {
-			return nil
-		}
-		return *p
-	}
 
 	args := []any{
 		acc.ID,
-		valStr(acc.FirstName),
+		acc.FirstName,
 		acc.LastName,
 		acc.FullName,
 		acc.PhoneNumber,
 		acc.Email,
-		valStr(acc.AccountOwner),
-		valStr(acc.CustomerID),
-		valStr(acc.Notes),
+		acc.AccountOwner,
+		acc.CustomerID,
+		acc.Notes,
 		acc.OriginalAddress,
-		valStr(acc.CRMID),
+		acc.CRMID,
 		acc.DaysSinceLastCheckin,
-		valStr(acc.FollowUpDate),
-		valStr(acc.LastCheckinDate),
-		valStr(acc.LastModifiedDate),
-		valF(acc.CustomNumeric),
-		valStr(acc.CustomText),
-		valF(acc.CustomNumeric2),
-		valStr(acc.CustomText2),
-		valF(acc.CustomNumeric3),
-		valStr(acc.CustomText3),
-		valF(acc.CustomNumeric4),
-		valStr(acc.CustomText4),
-		valF(acc.CustomNumeric5),
-		valStr(acc.CustomText5),
-		valF(acc.CustomNumeric6),
-		valStr(acc.CustomText6),
-		valF(acc.CustomNumeric7),
-		valStr(acc.CustomText7),
-		valF(acc.CustomNumeric8),
-		valStr(acc.CustomText8),
-		valF(acc.CustomNumeric9),
-		valStr(acc.CustomText9),
-		valF(acc.CustomNumeric10),
-		valStr(acc.CustomText10),
-		valF(acc.CustomNumeric11),
-		valStr(acc.CustomText11),
-		valF(acc.CustomNumeric12),
-		valStr(acc.CustomText12),
-		valF(acc.CustomNumeric13),
-		valStr(acc.CustomText13),
-		valF(acc.CustomNumeric14),
-		valStr(acc.CustomText14),
-		valF(acc.CustomNumeric15),
-		valStr(acc.CustomText15),
-		valF(acc.CustomNumeric16),
-		valStr(acc.CustomText16),
-		valF(acc.CustomNumeric17),
-		valStr(acc.CustomText17),
-		valF(acc.CustomNumeric18),
-		valStr(acc.CustomText18),
-		valF(acc.CustomNumeric19),
-		valStr(acc.CustomText19),
-		valF(acc.CustomNumeric20),
-		valStr(acc.CustomText20),
-		valF(acc.CustomNumeric21),
-		valStr(acc.CustomText21),
-		valF(acc.CustomNumeric22),
-		valStr(acc.CustomText22),
-		valF(acc.CustomNumeric23),
-		valStr(acc.CustomText23),
-		valF(acc.CustomNumeric24),
-		valStr(acc.CustomText24),
-		valF(acc.CustomNumeric25),
-		valStr(acc.CustomText25),
-		valF(acc.CustomNumeric26),
-		valStr(acc.CustomText26),
-		valF(acc.CustomNumeric27),
-		valStr(acc.CustomText27),
-		valF(acc.CustomNumeric28),
-		valStr(acc.CustomText28),
-		valF(acc.CustomNumeric29),
-		valStr(acc.CustomText29),
-		valF(acc.CustomNumeric30),
-		valStr(acc.CustomText30),
+		acc.FollowUpDate,
+		acc.LastCheckinDate,
+		acc.LastModifiedDate,
+		acc.CustomNumeric,
+		acc.CustomText,
+		acc.CustomNumeric2,
+		acc.CustomText2,
+		acc.CustomNumeric3,
+		acc.CustomText3,
+		acc.CustomNumeric4,
+		acc.CustomText4,
+		acc.CustomNumeric5,
+		acc.CustomText5,
+		acc.CustomNumeric6,
+		acc.CustomText6,
+		acc.CustomNumeric7,
+		acc.CustomText7,
+		acc.CustomNumeric8,
+		acc.CustomText8,
+		acc.CustomNumeric9,
+		acc.CustomText9,
+		acc.CustomNumeric10,
+		acc.CustomText10,
+		acc.CustomNumeric11,
+		acc.CustomText11,
+		acc.CustomNumeric12,
+		acc.CustomText12,
+		acc.CustomNumeric13,
+		acc.CustomText13,
+		acc.CustomNumeric14,
+		acc.CustomText14,
+		acc.CustomNumeric15,
+		acc.CustomText15,
+		acc.CustomNumeric16,
+		acc.CustomText16,
+		acc.CustomNumeric17,
+		acc.CustomText17,
+		acc.CustomNumeric18,
+		acc.CustomText18,
+		acc.CustomNumeric19,
+		acc.CustomText19,
+		acc.CustomNumeric20,
+		acc.CustomText20,
+		acc.CustomNumeric21,
+		acc.CustomText21,
+		acc.CustomNumeric22,
+		acc.CustomText22,
+		acc.CustomNumeric23,
+		acc.CustomText23,
+		acc.CustomNumeric24,
+		acc.CustomText24,
+		acc.CustomNumeric25,
+		acc.CustomText25,
+		acc.CustomNumeric26,
+		acc.CustomText26,
+		acc.CustomNumeric27,
+		acc.CustomText27,
+		acc.CustomNumeric28,
+		acc.CustomText28,
+		acc.CustomNumeric29,
+		acc.CustomText29,
+		acc.CustomNumeric30,
+		acc.CustomText30,
 	}
 
 	if err := database.RunCommand(App.DB, "merge_accounts_detailed", args...); err != nil {
@@ -155,7 +143,7 @@ func StoreAccountDetailed(App *app.State, acc *api.Account) error {
 	for _, loc := range acc.Locations {
 		name := ""
 		if loc.Name != nil {
-			name = *loc.Name
+			name = loc.Name.String
 		}
 		if err := database.RunCommand(App.DB, "insert_account_locations",
 			loc.ID,
@@ -179,11 +167,11 @@ func StoreCheckin(App *app.State, c api.Checkin) error {
 	// SQLite expects Type TEXT; other DBs have corresponding SQL. Pass as-is.
 	crm := ""
 	if c.CRMID != nil {
-		crm = *c.CRMID
+		crm = c.CRMID.String
 	}
 	extra := ""
 	if c.ExtraFields != nil {
-		extra = *c.ExtraFields
+		extra = c.ExtraFields.String
 	}
 	return database.RunCommand(App.DB, "merge_account_checkins",
 		c.ID,
@@ -217,31 +205,31 @@ func StoreRoute(App *app.State, r api.Route) error {
 	for _, w := range r.Waypoints {
 		suite := ""
 		if w.Suite != nil {
-			suite = *w.Suite
+			suite = w.Suite.String
 		}
 		city := ""
 		if w.City != nil {
-			city = *w.City
+			city = w.City.String
 		}
 		state := ""
 		if w.State != nil {
-			state = *w.State
+			state = w.State.String
 		}
 		zip := ""
 		if w.Zipcode != nil {
-			zip = *w.Zipcode
+			zip = w.Zipcode.String
 		}
 		complete := ""
 		if w.CompleteAddress != nil {
-			complete = *w.CompleteAddress
+			complete = w.CompleteAddress.String
 		}
 		appt := ""
 		if w.ApptTime != nil {
-			appt = *w.ApptTime
+			appt = w.ApptTime.String
 		}
 		place := ""
 		if w.PlaceID != nil {
-			place = *w.PlaceID
+			place = w.PlaceID.String
 		}
 		if err := database.RunCommand(App.DB, "insert_route_waypoints",
 			w.ID,
@@ -273,7 +261,7 @@ func StoreRoute(App *app.State, r api.Route) error {
 func StoreProfile(App *app.State, p *api.UserProfile) error {
 	manager := ""
 	if p.Manager != nil {
-		manager = *p.Manager
+		manager = p.Manager.String
 	}
 	return database.RunCommand(App.DB, "merge_user_profiles",
 		p.ID,
@@ -449,9 +437,9 @@ func PullAllAccounts(App *app.State, top int) {
 			sem <- true
 			defer func() { <-sem }()
 
-			detailedAcc, err := apiClient.GetAccountDetailed(acc.ID)
+			detailedAcc, err := apiClient.GetAccountDetailed(int(acc.ID.Int64))
 			if err != nil {
-				errorMsg := fmt.Sprintf("Error retrieving account %d (%s): %v", acc.ID, acc.FullName, err)
+				errorMsg := fmt.Sprintf("Error retrieving account %d (%s): %v", acc.ID.Int64, acc.FullName.String, err)
 				errorsMutex.Lock()
 				errors = append(errors, errorMsg)
 				errorsMutex.Unlock()
@@ -536,10 +524,10 @@ func pullCheckinCmd(App *app.State) *cobra.Command {
 
 			if App.Verbose {
 				fmt.Println(color.GreenString("Successfully pulled and stored checkin"))
-				fmt.Printf("Checkin ID: %d\n", checkin.ID)
-				fmt.Printf("Customer: %d\n", checkin.Customer)
-				fmt.Printf("Type: %s\n", checkin.Type)
-				fmt.Printf("Date: %s\n", checkin.LogDatetime)
+				fmt.Printf("Checkin ID: %d\n", checkin.ID.Int64)
+				fmt.Printf("Customer: %d\n", checkin.Customer.Int64)
+				fmt.Printf("Type: %s\n", checkin.Type.String)
+				fmt.Printf("Date: %s\n", checkin.LogDatetime.String)
 			}
 		},
 	}
@@ -673,10 +661,10 @@ func pullAllCheckins(App *app.State) {
 			}()
 
 			// Fetch checkins for this account
-			checkins, err := apiClient.GetCheckinsForAccount(a.ID)
+			checkins, err := apiClient.GetCheckinsForAccount(int(a.ID.Int64))
 			if err != nil {
 				errorsMutex.Lock()
-				errors = append(errors, fmt.Sprintf("Error retrieving checkins for account %d (%s): %v", a.ID, a.FullName, err))
+				errors = append(errors, fmt.Sprintf("Error retrieving checkins for account %d (%s): %v", a.ID.Int64, a.FullName.String, err))
 				errorsMutex.Unlock()
 				bar.Add(1)
 				return
@@ -686,7 +674,7 @@ func pullAllCheckins(App *app.State) {
 			for _, c := range checkins {
 				if err := StoreCheckin(App, c); err != nil {
 					errorsMutex.Lock()
-					errors = append(errors, fmt.Sprintf("Error storing checkin %d for account %d: %v", c.ID, a.ID, err))
+					errors = append(errors, fmt.Sprintf("Error storing checkin %d for account %d: %v", c.ID.Int64, a.ID.Int64, err))
 					errorsMutex.Unlock()
 					continue
 				}
@@ -994,13 +982,13 @@ func pullProfileCmd(App *app.State) *cobra.Command {
 
 			if App.Verbose {
 				fmt.Println(color.GreenString("Successfully pulled and stored user profile"))
-				fmt.Printf("Profile ID: %d\n", profile.ID)
-				fmt.Printf("Name: %s %s\n", profile.FirstName, profile.LastName)
-				fmt.Printf("Email: %s\n", profile.Email)
-				fmt.Printf("Company: %s\n", profile.Company.Name)
+				fmt.Printf("Profile ID: %d\n", profile.ID.Int64)
+				fmt.Printf("Name: %s %s\n", profile.FirstName.String, profile.LastName.String)
+				fmt.Printf("Email: %s\n", profile.Email.String)
+				fmt.Printf("Company: %s\n", profile.Company.Name.String)
 			} else {
 				fmt.Println(color.GreenString("Successfully pulled and stored user profile"))
-				fmt.Printf("Profile ID: %d\n", profile.ID)
+				fmt.Printf("Profile ID: %d\n", profile.ID.Int64)
 			}
 		},
 	}
@@ -1040,7 +1028,7 @@ func PullAllCmd(App *app.State) *cobra.Command {
 				fmt.Println(color.YellowString("Try running 'badgermaps utils init-db' to initialize the database"))
 			}
 
-						profile, err := apiClient.GetUserProfile()
+			profile, err := apiClient.GetUserProfile()
 			if err != nil {
 				errors = append(errors, fmt.Sprintf("Error retrieving user profile: %v", err))
 			} else {

@@ -3,7 +3,8 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"github.com/guregu/null/v6"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -41,199 +42,199 @@ func NewAPIClientWithURL(apiKey, baseURL string) *APIClient {
 
 // Account represents a BadgerMaps account (customer)
 type Account struct {
-	ID                   int        `json:"id"`
-	FirstName            *string    `json:"first_name"`
-	LastName             string     `json:"last_name"`
-	FullName             string     `json:"full_name"`
-	PhoneNumber          string     `json:"phone_number"`
-	Email                string     `json:"email"`
-	CustomerID           *string    `json:"customer_id"`
-	Notes                *string    `json:"notes"`
-	OriginalAddress      string     `json:"original_address"`
-	CRMID                *string    `json:"crm_id"`
-	AccountOwner         *string    `json:"account_owner"`
-	DaysSinceLastCheckin int        `json:"days_since_last_checkin"`
-	LastCheckinDate      *string    `json:"last_checkin_date"`
-	LastModifiedDate     *string    `json:"last_modified_date"`
-	FollowUpDate         *string    `json:"follow_up_date"`
-	Locations            []Location `json:"locations"`
-	CustomNumeric        *float64   `json:"custom_numeric"`
-	CustomText           *string    `json:"custom_text"`
-	CustomNumeric2       *float64   `json:"custom_numeric2"`
-	CustomText2          *string    `json:"custom_text2"`
-	CustomNumeric3       *float64   `json:"custom_numeric3"`
-	CustomText3          *string    `json:"custom_text3"`
-	CustomNumeric4       *float64   `json:"custom_numeric4"`
-	CustomText4          *string    `json:"custom_text4"`
-	CustomNumeric5       *float64   `json:"custom_numeric5"`
-	CustomText5          *string    `json:"custom_text5"`
-	CustomNumeric6       *float64   `json:"custom_numeric6"`
-	CustomText6          *string    `json:"custom_text6"`
-	CustomNumeric7       *float64   `json:"custom_numeric7"`
-	CustomText7          *string    `json:"custom_text7"`
-	CustomNumeric8       *float64   `json:"custom_numeric8"`
-	CustomText8          *string    `json:"custom_text8"`
-	CustomNumeric9       *float64   `json:"custom_numeric9"`
-	CustomText9          *string    `json:"custom_text9"`
-	CustomNumeric10      *float64   `json:"custom_numeric10"`
-	CustomText10         *string    `json:"custom_text10"`
-	CustomNumeric11      *float64   `json:"custom_numeric11"`
-	CustomText11         *string    `json:"custom_text11"`
-	CustomNumeric12      *float64   `json:"custom_numeric12"`
-	CustomText12         *string    `json:"custom_text12"`
-	CustomNumeric13      *float64   `json:"custom_numeric13"`
-	CustomText13         *string    `json:"custom_text13"`
-	CustomNumeric14      *float64   `json:"custom_numeric14"`
-	CustomText14         *string    `json:"custom_text14"`
-	CustomNumeric15      *float64   `json:"custom_numeric15"`
-	CustomText15         *string    `json:"custom_text15"`
-	CustomNumeric16      *float64   `json:"custom_numeric16"`
-	CustomText16         *string    `json:"custom_text16"`
-	CustomNumeric17      *float64   `json:"custom_numeric17"`
-	CustomText17         *string    `json:"custom_text17"`
-	CustomNumeric18      *float64   `json:"custom_numeric18"`
-	CustomText18         *string    `json:"custom_text18"`
-	CustomNumeric19      *float64   `json:"custom_numeric19"`
-	CustomText19         *string    `json:"custom_text19"`
-	CustomNumeric20      *float64   `json:"custom_numeric20"`
-	CustomText20         *string    `json:"custom_text20"`
-	CustomNumeric21      *float64   `json:"custom_numeric21"`
-	CustomText21         *string    `json:"custom_text21"`
-	CustomNumeric22      *float64   `json:"custom_numeric22"`
-	CustomText22         *string    `json:"custom_text22"`
-	CustomNumeric23      *float64   `json:"custom_numeric23"`
-	CustomText23         *string    `json:"custom_text23"`
-	CustomNumeric24      *float64   `json:"custom_numeric24"`
-	CustomText24         *string    `json:"custom_text24"`
-	CustomNumeric25      *float64   `json:"custom_numeric25"`
-	CustomText25         *string    `json:"custom_text25"`
-	CustomNumeric26      *float64   `json:"custom_numeric26"`
-	CustomText26         *string    `json:"custom_text26"`
-	CustomNumeric27      *float64   `json:"custom_numeric27"`
-	CustomText27         *string    `json:"custom_text27"`
-	CustomNumeric28      *float64   `json:"custom_numeric28"`
-	CustomText28         *string    `json:"custom_text28"`
-	CustomNumeric29      *float64   `json:"custom_numeric29"`
-	CustomText29         *string    `json:"custom_text29"`
-	CustomNumeric30      *float64   `json:"custom_numeric30"`
-	CustomText30         *string    `json:"custom_text30"`
+	ID                   null.Int     `json:"id"`
+	FirstName            *null.String `json:"first_name"`
+	LastName             null.String  `json:"last_name"`
+	FullName             null.String  `json:"full_name"`
+	PhoneNumber          null.String  `json:"phone_number"`
+	Email                null.String  `json:"email"`
+	CustomerID           *null.String `json:"customer_id"`
+	Notes                *null.String `json:"notes"`
+	OriginalAddress      null.String  `json:"original_address"`
+	CRMID                *null.String `json:"crm_id"`
+	AccountOwner         *null.String `json:"account_owner"`
+	DaysSinceLastCheckin null.Int     `json:"days_since_last_checkin"`
+	LastCheckinDate      *null.String `json:"last_checkin_date"`
+	LastModifiedDate     *null.String `json:"last_modified_date"`
+	FollowUpDate         *null.String `json:"follow_up_date"`
+	Locations            []Location   `json:"locations"`
+	CustomNumeric        *null.Float  `json:"custom_numeric"`
+	CustomText           *null.String `json:"custom_text"`
+	CustomNumeric2       *null.Float  `json:"custom_numeric2"`
+	CustomText2          *null.String `json:"custom_text2"`
+	CustomNumeric3       *null.Float  `json:"custom_numeric3"`
+	CustomText3          *null.String `json:"custom_text3"`
+	CustomNumeric4       *null.Float  `json:"custom_numeric4"`
+	CustomText4          *null.String `json:"custom_text4"`
+	CustomNumeric5       *null.Float  `json:"custom_numeric5"`
+	CustomText5          *null.String `json:"custom_text5"`
+	CustomNumeric6       *null.Float  `json:"custom_numeric6"`
+	CustomText6          *null.String `json:"custom_text6"`
+	CustomNumeric7       *null.Float  `json:"custom_numeric7"`
+	CustomText7          *null.String `json:"custom_text7"`
+	CustomNumeric8       *null.Float  `json:"custom_numeric8"`
+	CustomText8          *null.String `json:"custom_text8"`
+	CustomNumeric9       *null.Float  `json:"custom_numeric9"`
+	CustomText9          *null.String `json:"custom_text9"`
+	CustomNumeric10      *null.Float  `json:"custom_numeric10"`
+	CustomText10         *null.String `json:"custom_text10"`
+	CustomNumeric11      *null.Float  `json:"custom_numeric11"`
+	CustomText11         *null.String `json:"custom_text11"`
+	CustomNumeric12      *null.Float  `json:"custom_numeric12"`
+	CustomText12         *null.String `json:"custom_text12"`
+	CustomNumeric13      *null.Float  `json:"custom_numeric13"`
+	CustomText13         *null.String `json:"custom_text13"`
+	CustomNumeric14      *null.Float  `json:"custom_numeric14"`
+	CustomText14         *null.String `json:"custom_text14"`
+	CustomNumeric15      *null.Float  `json:"custom_numeric15"`
+	CustomText15         *null.String `json:"custom_text15"`
+	CustomNumeric16      *null.Float  `json:"custom_numeric16"`
+	CustomText16         *null.String `json:"custom_text16"`
+	CustomNumeric17      *null.Float  `json:"custom_numeric17"`
+	CustomText17         *null.String `json:"custom_text17"`
+	CustomNumeric18      *null.Float  `json:"custom_numeric18"`
+	CustomText18         *null.String `json:"custom_text18"`
+	CustomNumeric19      *null.Float  `json:"custom_numeric19"`
+	CustomText19         *null.String `json:"custom_text19"`
+	CustomNumeric20      *null.Float  `json:"custom_numeric20"`
+	CustomText20         *null.String `json:"custom_text20"`
+	CustomNumeric21      *null.Float  `json:"custom_numeric21"`
+	CustomText21         *null.String `json:"custom_text21"`
+	CustomNumeric22      *null.Float  `json:"custom_numeric22"`
+	CustomText22         *null.String `json:"custom_text22"`
+	CustomNumeric23      *null.Float  `json:"custom_numeric23"`
+	CustomText23         *null.String `json:"custom_text23"`
+	CustomNumeric24      *null.Float  `json:"custom_numeric24"`
+	CustomText24         *null.String `json:"custom_text24"`
+	CustomNumeric25      *null.Float  `json:"custom_numeric25"`
+	CustomText25         *null.String `json:"custom_text25"`
+	CustomNumeric26      *null.Float  `json:"custom_numeric26"`
+	CustomText26         *null.String `json:"custom_text26"`
+	CustomNumeric27      *null.Float  `json:"custom_numeric27"`
+	CustomText27         *null.String `json:"custom_text27"`
+	CustomNumeric28      *null.Float  `json:"custom_numeric28"`
+	CustomText28         *null.String `json:"custom_text28"`
+	CustomNumeric29      *null.Float  `json:"custom_numeric29"`
+	CustomText29         *null.String `json:"custom_text29"`
+	CustomNumeric30      *null.Float  `json:"custom_numeric30"`
+	CustomText30         *null.String `json:"custom_text30"`
 }
 
 // Location represents a BadgerMaps location
 type Location struct {
-	ID            int     `json:"id"`
-	City          string  `json:"city"`
-	Name          *string `json:"name"`
-	Zipcode       string  `json:"zipcode"`
-	Long          float64 `json:"long"`
-	State         string  `json:"state"`
-	Lat           float64 `json:"lat"`
-	AddressLine1  string  `json:"address_line_1"`
-	Location      string  `json:"location"`
-	IsApproximate bool    `json:"is_approximate"`
+	ID            null.Int     `json:"id"`
+	City          null.String  `json:"city"`
+	Name          *null.String `json:"name"`
+	Zipcode       null.String  `json:"zipcode"`
+	Long          null.Float   `json:"long"`
+	State         null.String  `json:"state"`
+	Lat           null.Float   `json:"lat"`
+	AddressLine1  null.String  `json:"address_line_1"`
+	Location      null.String  `json:"location"`
+	IsApproximate null.Bool    `json:"is_approximate"`
 }
 
 // Route represents a BadgerMaps route
 type Route struct {
-	ID                 int        `json:"id"`
-	Name               string     `json:"name"`
-	RouteDate          string     `json:"route_date"`
-	Duration           *int       `json:"duration"`
-	Waypoints          []Waypoint `json:"waypoints"`
-	StartAddress       string     `json:"start_address"`
-	DestinationAddress string     `json:"destination_address"`
-	StartTime          string     `json:"start_time"`
+	ID                 null.Int    `json:"id"`
+	Name               null.String `json:"name"`
+	RouteDate          null.String `json:"route_date"`
+	Duration           *null.Int   `json:"duration"`
+	Waypoints          []Waypoint  `json:"waypoints"`
+	StartAddress       null.String `json:"start_address"`
+	DestinationAddress null.String `json:"destination_address"`
+	StartTime          null.String `json:"start_time"`
 }
 
-// Waypoint represents a route waypoint
+// Wayponull.Int represents a route waypoint
 type Waypoint struct {
-	ID              int     `json:"id"`
-	Name            string  `json:"name"`
-	Address         string  `json:"address"`
-	Suite           *string `json:"suite"`
-	City            *string `json:"city"`
-	State           *string `json:"state"`
-	Zipcode         *string `json:"zipcode"`
-	Location        string  `json:"location"`
-	Lat             float64 `json:"lat"`
-	Long            float64 `json:"long"`
-	LayoverMinutes  int     `json:"layover_minutes"`
-	Position        int     `json:"position"`
-	CompleteAddress *string `json:"complete_address"`
-	LocationID      int     `json:"location_id"`
-	CustomerID      int     `json:"customer_id"`
-	ApptTime        *string `json:"appt_time"`
-	Type            int     `json:"type"`
-	PlaceID         *string `json:"place_id"`
+	ID              null.Int     `json:"id"`
+	Name            null.String  `json:"name"`
+	Address         null.String  `json:"address"`
+	Suite           *null.String `json:"suite"`
+	City            *null.String `json:"city"`
+	State           *null.String `json:"state"`
+	Zipcode         *null.String `json:"zipcode"`
+	Location        null.String  `json:"location"`
+	Lat             null.Float   `json:"lat"`
+	Long            null.Float   `json:"long"`
+	LayoverMinutes  null.Int     `json:"layover_minutes"`
+	Position        null.Int     `json:"position"`
+	CompleteAddress *null.String `json:"complete_address"`
+	LocationID      null.Int     `json:"location_id"`
+	CustomerID      null.Int     `json:"customer_id"`
+	ApptTime        *null.String `json:"appt_time"`
+	Type            null.Int     `json:"type"`
+	PlaceID         *null.String `json:"place_id"`
 }
 
-// Checkin represents a BadgerMaps checkin (appointment)
+// Checkin represents a BadgerMaps checkin (apponull.Intment)
 type Checkin struct {
-	ID          int     `json:"id"`
-	CRMID       *string `json:"crm_id"`
-	Customer    int     `json:"customer"`
-	LogDatetime string  `json:"log_datetime"`
-	Type        string  `json:"type"`
-	Comments    string  `json:"comments"`
-	ExtraFields *string `json:"extra_fields"`
-	CreatedBy   string  `json:"created_by"`
+	ID          null.Int     `json:"id"`
+	CRMID       *null.String `json:"crm_id"`
+	Customer    null.Int     `json:"customer"`
+	LogDatetime null.String  `json:"log_datetime"`
+	Type        null.String  `json:"type"`
+	Comments    null.String  `json:"comments"`
+	ExtraFields *null.String `json:"extra_fields"`
+	CreatedBy   null.String  `json:"created_by"`
 }
 
 // UserProfile represents a BadgerMaps user profile
 type UserProfile struct {
-	ID                        int         `json:"id"`
-	Email                     string      `json:"email"`
-	FirstName                 string      `json:"first_name"`
-	LastName                  string      `json:"last_name"`
-	IsManager                 bool        `json:"is_manager"`
-	IsHideReferralIOSBanner   bool        `json:"is_hide_referral_ios_banner"`
-	MarkerIcon                string      `json:"marker_icon"`
-	Manager                   *string     `json:"manager"`
-	CRMEditableFieldsList     []string    `json:"crm_editable_fields_list"`
-	CRMBaseURL                string      `json:"crm_base_url"`
-	CRMType                   string      `json:"crm_type"`
-	ReferralURL               string      `json:"referral_url"`
-	MapStartZoom              int         `json:"map_start_zoom"`
-	MapStart                  string      `json:"map_start"`
-	IsUserCanEdit             bool        `json:"is_user_can_edit"`
-	IsUserCanDeleteCheckins   bool        `json:"is_user_can_delete_checkins"`
-	IsUserCanAddNewTextValues bool        `json:"is_user_can_add_new_text_values"`
-	HasData                   bool        `json:"has_data"`
-	DefaultApptLength         int         `json:"default_appt_length"`
-	Completed                 bool        `json:"completed"`
-	TrialDaysLeft             int         `json:"trial_days_left"`
-	ApptlogFields             []DataField `json:"apptlog_fields"`
-	AcctlogFields             []DataField `json:"acctlog_fields"`
-	Datafields                []DataField `json:"datafields"`
-	Company                   Company     `json:"company"`
+	ID                        null.Int      `json:"id"`
+	Email                     null.String   `json:"email"`
+	FirstName                 null.String   `json:"first_name"`
+	LastName                  null.String   `json:"last_name"`
+	IsManager                 null.Bool     `json:"is_manager"`
+	IsHideReferralIOSBanner   null.Bool     `json:"is_hide_referral_ios_banner"`
+	MarkerIcon                null.String   `json:"marker_icon"`
+	Manager                   *null.String  `json:"manager"`
+	CRMEditableFieldsList     []null.String `json:"crm_editable_fields_list"`
+	CRMBaseURL                null.String   `json:"crm_base_url"`
+	CRMType                   null.String   `json:"crm_type"`
+	ReferralURL               null.String   `json:"referral_url"`
+	MapStartZoom              null.Int      `json:"map_start_zoom"`
+	MapStart                  null.String   `json:"map_start"`
+	IsUserCanEdit             null.Bool     `json:"is_user_can_edit"`
+	IsUserCanDeleteCheckins   null.Bool     `json:"is_user_can_delete_checkins"`
+	IsUserCanAddNewTextValues null.Bool     `json:"is_user_can_add_new_text_values"`
+	HasData                   null.Bool     `json:"has_data"`
+	DefaultApptLength         null.Int      `json:"default_appt_length"`
+	Completed                 null.Bool     `json:"completed"`
+	TrialDaysLeft             null.Int      `json:"trial_days_left"`
+	ApptlogFields             []DataField   `json:"apptlog_fields"`
+	AcctlogFields             []DataField   `json:"acctlog_fields"`
+	Datafields                []DataField   `json:"datafields"`
+	Company                   Company       `json:"company"`
 }
 
 // Company represents a BadgerMaps company
 type Company struct {
-	ID        int    `json:"id"`
-	ShortName string `json:"short_name"`
-	Name      string `json:"name"`
+	ID        null.Int    `json:"id"`
+	ShortName null.String `json:"short_name"`
+	Name      null.String `json:"name"`
 }
 
 // DataField represents a custom data field
 type DataField struct {
-	Name                      string       `json:"name"`
-	Filterable                bool         `json:"filterable"`
-	Label                     string       `json:"label"`
+	Name                      null.String  `json:"name"`
+	Filterable                null.Bool    `json:"filterable"`
+	Label                     null.String  `json:"label"`
 	Values                    []FieldValue `json:"values,omitempty"`
-	Position                  int          `json:"position"`
-	Type                      string       `json:"type"`
-	HasData                   bool         `json:"has_data"`
-	IsUserCanAddNewTextValues bool         `json:"is_user_can_add_new_text_values"`
-	RawMin                    *float64     `json:"rawmin,omitempty"`
-	Min                       *float64     `json:"min,omitempty"`
-	Max                       *float64     `json:"max,omitempty"`
-	RawMax                    *float64     `json:"rawmax,omitempty"`
+	Position                  null.Int     `json:"position"`
+	Type                      null.String  `json:"type"`
+	HasData                   null.Bool    `json:"has_data"`
+	IsUserCanAddNewTextValues null.Bool    `json:"is_user_can_add_new_text_values"`
+	RawMin                    *null.Float  `json:"rawmin,omitempty"`
+	Min                       *null.Float  `json:"min,omitempty"`
+	Max                       *null.Float  `json:"max,omitempty"`
+	RawMax                    *null.Float  `json:"rawmax,omitempty"`
 }
 
 // FieldValue represents a field value option
 type FieldValue struct {
-	Text  string      `json:"text"`
+	Text  null.String `json:"text"`
 	Value interface{} `json:"value"`
 }
 
@@ -255,7 +256,7 @@ func (api *APIClient) GetAccounts() ([]Account, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("endpoint customers test failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -285,7 +286,7 @@ func (api *APIClient) GetRoutes() ([]Route, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("endpoint routes test failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -315,7 +316,7 @@ func (api *APIClient) GetCheckins() ([]Checkin, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("endpoint appointments test failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -345,7 +346,7 @@ func (api *APIClient) GetUserProfile() (*UserProfile, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("endpoint profiles test failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -381,7 +382,7 @@ func (api *APIClient) TestAPIConnection() error {
 		return nil
 	}
 
-	body, _ := ioutil.ReadAll(resp.Body)
+	body, _ := io.ReadAll(resp.Body)
 	return fmt.Errorf("API test failed with status %d: %s", resp.StatusCode, string(body))
 }
 
@@ -404,7 +405,7 @@ func (api *APIClient) TestEndpoint(endpoint string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("endpoint %s test failed with status %d: %s", endpoint, resp.StatusCode, string(body))
 	}
 
@@ -441,7 +442,7 @@ func (api *APIClient) GetAccountDetailed(accountID int) (*Account, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("endpoint customer %d test failed with status %d: %s", accountID, resp.StatusCode, string(body))
 	}
 
@@ -479,7 +480,7 @@ func (api *APIClient) UpdateAccount(accountID int, data map[string]string) (*Acc
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("update customer %d failed with status %d: %s", accountID, resp.StatusCode, string(body))
 	}
 
@@ -508,7 +509,7 @@ func (api *APIClient) DeleteAccount(accountID int) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusNoContent {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("delete customer %d failed with status %d: %s", accountID, resp.StatusCode, string(body))
 	}
 
@@ -541,7 +542,7 @@ func (api *APIClient) CreateAccount(data map[string]string) (*Account, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("create customer failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -571,7 +572,7 @@ func (api *APIClient) GetRoute(routeID int) (*Route, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("endpoint route %d test failed with status %d: %s", routeID, resp.StatusCode, string(body))
 	}
 
@@ -601,7 +602,7 @@ func (api *APIClient) GetCheckinsForAccount(customerID int) ([]Checkin, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("endpoint appointments for customer %d test failed with status %d: %s", customerID, resp.StatusCode, string(body))
 	}
 
@@ -639,7 +640,7 @@ func (api *APIClient) CreateCheckin(data map[string]string) (*Checkin, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("create appointment failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -677,7 +678,7 @@ func (api *APIClient) UpdateLocation(locationID int, data map[string]string) (*L
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("update location %d failed with status %d: %s", locationID, resp.StatusCode, string(body))
 	}
 
@@ -707,7 +708,7 @@ func (api *APIClient) SearchUsers(query string) (*UserProfile, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("search users failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -737,7 +738,7 @@ func (api *APIClient) SearchAccounts(query string) ([]Account, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("search accounts failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -767,7 +768,7 @@ func (api *APIClient) SearchLocations(query string) ([]Location, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("search locations failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -797,7 +798,7 @@ func (api *APIClient) SearchProfiles(query string) ([]UserProfile, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("search profiles failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -827,7 +828,7 @@ func (api *APIClient) GetCheckin(checkinID int) (*Checkin, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := ioutil.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("endpoint appointment %d test failed with status %d: %s", checkinID, resp.StatusCode, string(body))
 	}
 
