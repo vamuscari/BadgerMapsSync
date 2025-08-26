@@ -35,3 +35,5 @@ go.work.sum
 .vscode/
 /badgermaps__test/
 /badgermaps
+
+GEMINI.md
