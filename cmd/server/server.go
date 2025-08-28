@@ -36,7 +36,7 @@ func ServerCmd(config *app.State) *cobra.Command {
 	serverCmd := &cobra.Command{
 		Use:   "server",
 		Short: "Run in server mode",
-		Long:  `Run the BadgerMaps CLI in server mode, listening for incoming webhooks.`, 
+		Long:  `Run the BadgerMaps CLI in server mode, listening for incoming webhooks.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			// Set verbose and debug from flags
 			if verbose, _ := cmd.Flags().GetBool("verbose"); verbose {
@@ -55,7 +55,7 @@ func ServerCmd(config *app.State) *cobra.Command {
 					fmt.Println("Running scheduled job: pull all")
 					pull.PullAllAccounts(config, apiClient, 0)
 					// pull.PullAllCheckins(config)
-				pull.PullAllRoutes(config, apiClient)
+					pull.PullAllRoutes(config, apiClient)
 				})
 				if err != nil {
 					log.Fatalf("Error scheduling job: %v", err)
@@ -120,11 +120,14 @@ func runServer(App *app.State, host string, port int, tlsEnabled bool) {
 	// Add health check endpoint
 	mux.HandleFunc("/health", handleHealthCheck)
 
+	// Handle unknown endpoints
+	mux.HandleFunc("/", s.handleUnknownEndpoint)
+
 	// Create server
 	addr := fmt.Sprintf("%s:%d", host, port)
 	server := &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: logAllRequests(mux, s.App.Debug),
 	}
 
 	// Set up graceful shutdown
@@ -169,6 +172,16 @@ func runServer(App *app.State, host string, port int, tlsEnabled bool) {
 func handleHealthCheck(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "OK")
+}
+
+// handleUnknownEndpoint handles requests for endpoints that don't have a specific handler
+func (s *server) handleUnknownEndpoint(w http.ResponseWriter, r *http.Request) {
+	// The middleware already logs all requests in debug mode.
+	// This handler is for endpoints that are not explicitly handled.
+	if s.App.Debug {
+		log.Printf("Request to unknown endpoint: %s", r.URL.Path)
+	}
+	http.NotFound(w, r)
 }
 
 type server struct {
