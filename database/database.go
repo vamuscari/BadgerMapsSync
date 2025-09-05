@@ -1,7 +1,7 @@
 package database
 
 import (
-	"badgermapscli/utils"
+	"badgermaps/utils"
 	"bufio"
 	"database/sql"
 	"fmt"

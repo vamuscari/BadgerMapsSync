@@ -1,7 +1,7 @@
 package app
 
 import (
-	"badgermapscli/utils"
+	"badgermaps/utils"
 	"bufio"
 	"fmt"
 	"os"
@@ -52,7 +52,7 @@ func InteractiveSetup(app *State) bool {
 
 	// API URL
 	config.APIURL = "https://badgerapis.badgermapping.com/api/2"
-	if QuickSetup {
+	if !QuickSetup {
 		defaultAPIURL := "https://badgerapis.badgermapping.com/api/2"
 		if config.APIURL == "" {
 			config.APIURL = defaultAPIURL
@@ -60,6 +60,22 @@ func InteractiveSetup(app *State) bool {
 		config.APIURL = utils.PromptString(reader, "API URL", config.APIURL)
 	}
 	viper.Set("API_URL", config.APIURL)
+
+	// Database Settings
+	fmt.Println()
+	fmt.Println(utils.Colors.Blue("--- Database Settings ---"))
+
+	// DB Type
+	dbType := utils.PromptChoice(reader, "Database Type", []string{"sqlite3", "postgres", "mssql"})
+	viper.Set("DB_TYPE", dbType)
+
+	// DB Connection String
+	defaultDBConnStr := "badgermaps.db"
+	if config.DBConnStr == "" {
+		config.DBConnStr = defaultDBConnStr
+	}
+	dbConnStr := utils.PromptString(reader, "Database Connection String", config.DBConnStr)
+	viper.Set("DB_CONN_STR", dbConnStr)
 
 	if !QuickSetup {
 		// Server Settings
@@ -126,7 +142,7 @@ func InteractiveSetup(app *State) bool {
 		configFile = utils.PromptChoice(reader, "Pick Config Save Location", []string{configFile, ".env"})
 	}
 
-	if err := viper.SafeWriteConfigAs(configFile); err != nil {
+	if err := viper.WriteConfigAs(configFile); err != nil {
 		fmt.Println(utils.Colors.Red("Error saving config file: %v", err))
 		return false
 	}

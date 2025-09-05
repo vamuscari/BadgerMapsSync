@@ -1,7 +1,7 @@
 package config
 
 import (
-	"badgermapscli/app"
+	"badgermaps/app"
 	"fmt"
 
 	"github.com/fatih/color"

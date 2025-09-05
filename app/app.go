@@ -1,7 +1,7 @@
 package app
 
 import (
-	"badgermapscli/database"
+	"badgermaps/database"
 	"fmt"
 	"os"
 

@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"os"
 
-	"badgermapscli/app"
-	"badgermapscli/cmd/config"
-	"badgermapscli/cmd/pull"
-	"badgermapscli/cmd/push"
-	"badgermapscli/cmd/server"
-	"badgermapscli/cmd/test"
-	"badgermapscli/cmd/version"
+	"badgermaps/app"
+	"badgermaps/cmd/config"
+	"badgermaps/cmd/pull"
+	"badgermaps/cmd/push"
+	"badgermaps/cmd/server"
+	"badgermaps/cmd/test"
+	"badgermaps/cmd/version"
 
 	"github.com/spf13/cobra"
 )

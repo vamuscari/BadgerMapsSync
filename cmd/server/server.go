@@ -1,9 +1,9 @@
 package server
 
 import (
-	"badgermapscli/api"
-	"badgermapscli/app"
-	"badgermapscli/cmd/pull"
+	"badgermaps/api"
+	"badgermaps/app"
+	"badgermaps/cmd/pull"
 	"context"
 	"encoding/json"
 	"fmt"

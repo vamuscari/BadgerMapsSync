@@ -1,8 +1,8 @@
 package server
 
 import (
-	"badgermapscli/app"
-	"badgermapscli/database"
+	"badgermaps/app"
+	"badgermaps/database"
 	"bytes"
 	"encoding/json"
 	"net/http"

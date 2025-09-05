@@ -1,8 +1,8 @@
 package app
 
 import (
-	"badgermapscli/database"
-	"badgermapscli/utils"
+	"badgermaps/database"
+	"badgermaps/utils"
 	"bufio"
 	"fmt"
 	"os"
@@ -21,7 +21,8 @@ type Config struct {
 	APIURL string
 
 	// Database settings
-	DBType string
+	DBType    string
+	DBConnStr string
 
 	// Rate limiting
 	RateLimitRequests int
@@ -44,6 +45,7 @@ func defaultConfig(application *State) *Config {
 	config := &Config{
 		App:                  application,
 		DBType:               "sqlite3",
+		DBConnStr:            "badgermaps.db",
 		APIKey:               "",
 		APIURL:               "https://badgerapis.badgermapping.com/api/2",
 		RateLimitRequests:    100,
@@ -80,7 +82,8 @@ func LoadConfig(application *State) *Config {
 	config := &Config{
 		App: application,
 		// Database settings
-		DBType: viper.GetString("DB_TYPE"),
+		DBType:    viper.GetString("DB_TYPE"),
+		DBConnStr: viper.GetString("DB_CONN_STR"),
 
 		// API settings
 		APIKey: viper.GetString("API_KEY"),

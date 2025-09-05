@@ -1,8 +1,8 @@
 package push
 
 import (
-	"badgermapscli/api"
-	"badgermapscli/app"
+	"badgermaps/api"
+	"badgermaps/app"
 	"fmt"
 	"os"
 	"strconv"

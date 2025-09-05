@@ -1,9 +1,9 @@
 package pull
 
 import (
-	"badgermapscli/api"
-	"badgermapscli/app"
-	"badgermapscli/database"
+	"badgermaps/api"
+	"badgermaps/app"
+	"badgermaps/database"
 	"fmt"
 	"os"
 	"strconv"

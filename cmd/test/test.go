@@ -1,7 +1,7 @@
 package test
 
 import (
-	"badgermapscli/app"
+	"badgermaps/app"
 	"bufio"
 	"encoding/json"
 	"fmt"
@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"badgermapscli/api"
-	"badgermapscli/database"
-	"badgermapscli/utils"
+	"badgermaps/api"
+	"badgermaps/database"
+	"badgermaps/utils"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"

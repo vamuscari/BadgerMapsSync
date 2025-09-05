@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"badgermapscli/app"
-	"badgermapscli/utils"
+	"badgermaps/app"
+	"badgermaps/utils"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
