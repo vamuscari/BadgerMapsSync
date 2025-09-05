@@ -1,1 +1,1 @@
-DELETE FROM [AccountLocations] WHERE [AccountId] = ?; 
+DELETE FROM [account_locations] WHERE [account_id] = ?; 
