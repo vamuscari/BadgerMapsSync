@@ -2,37 +2,35 @@ package app
 
 import (
 	"badgermaps/api"
+	"badgermaps/app/state"
 	"badgermaps/database"
 	"badgermaps/utils"
 	"bufio"
 	"fmt"
-	"github.com/fatih/color"
-	"github.com/spf13/viper"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/fatih/color"
+	"github.com/spf13/viper"
 )
 
-type State struct {
-	Verbose bool
-	Quiet   bool
-	Debug   bool
-	NoColor bool
+type App struct {
 	CfgFile string
 
-	DB  database.DB
-	API *api.APIClient
+	State *state.State
+	DB    database.DB
+	API   *api.APIClient
 }
 
-func NewApplication() *State {
-	return &State{
-		Verbose: false,
-		Quiet:   false,
-		Debug:   false,
+func NewApplication() *App {
+	return &App{
+		State: state.NewState(),
 	}
+
 }
 
-func (a *State) LoadConfiguration() error {
+func (a *App) LoadConfiguration() error {
 	path, ok := GetConfigFilePath()
 	if ok {
 		viper.SetConfigFile(path)
@@ -56,32 +54,32 @@ func (a *State) LoadConfiguration() error {
 	return nil
 }
 
-func (a *State) VerifySetupOrExit() bool {
-	if a.NoColor {
+func (a *App) VerifySetupOrExit() bool {
+	if a.State.NoColor {
 		color.NoColor = true
 	}
 
 	path, ok := GetConfigFilePath()
 	if ok {
-		if a.Verbose || a.Debug {
+		if a.State.Verbose || a.State.Debug {
 			fmt.Println(color.GreenString("Configuration detected: %s", path))
 		}
 		if err := a.LoadConfiguration(); err != nil {
 			fmt.Println(color.RedString("Error loading configuration: %v", err))
 		} else {
-			if (a.Verbose || a.Debug) && a.API != nil {
+			if (a.State.Verbose || a.State.Debug) && a.API != nil {
 				apiKeyStatus := "not set"
 				if a.API.APIKey != "" {
 					apiKeyStatus = "set"
 				}
-			dbType := a.DB.GetType()
-			fmt.Println(color.CyanString("Setup OK: DB_TYPE=%s, API_KEY=%s", dbType, apiKeyStatus))
+				dbType := a.DB.GetType()
+				fmt.Println(color.CyanString("Setup OK: DB_TYPE=%s, API_KEY=%s", dbType, apiKeyStatus))
 			}
 			return true
 		}
 	}
 
-	if a.Verbose || a.Debug {
+	if a.State.Verbose || a.State.Debug {
 		fmt.Println(color.YellowString("No configuration file found (.env or config.yaml)."))
 	}
 

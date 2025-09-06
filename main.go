@@ -17,7 +17,7 @@ import (
 
 var (
 	// Global configuration
-	App *app.State
+	App *app.App
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -48,10 +48,10 @@ func bind() {
 	rootCmd.AddCommand(versionCmd)
 
 	// Global flags
-	rootCmd.PersistentFlags().BoolVarP(&App.Verbose, "verbose", "v", false, "Enable verbose output with additional details")
-	rootCmd.PersistentFlags().BoolVarP(&App.Quiet, "quiet", "q", false, "Suppress all non-essential output")
-	rootCmd.PersistentFlags().BoolVar(&App.Debug, "debug", false, "Enable debug mode with maximum verbosity")
-	rootCmd.PersistentFlags().BoolVar(&App.NoColor, "no-color", false, "Disable colored output")
+	rootCmd.PersistentFlags().BoolVarP(&App.State.Verbose, "verbose", "v", false, "Enable verbose output with additional details")
+	rootCmd.PersistentFlags().BoolVarP(&App.State.Quiet, "quiet", "q", false, "Suppress all non-essential output")
+	rootCmd.PersistentFlags().BoolVar(&App.State.Debug, "debug", false, "Enable debug mode with maximum verbosity")
+	rootCmd.PersistentFlags().BoolVar(&App.State.NoColor, "no-color", false, "Disable colored output")
 	rootCmd.PersistentFlags().StringVar(&App.CfgFile, "config", "", "Config file (default is $HOME/.badgermaps.yaml)")
 }
 
@@ -60,7 +60,7 @@ func main() {
 	bind()
 	// Check if no arguments were provided
 	if err := rootCmd.Execute(); err != nil {
-		if App.Debug {
+		if App.State.Debug {
 			fmt.Printf("Error: %v\n", err)
 		}
 		os.Exit(1)
