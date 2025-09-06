@@ -19,7 +19,7 @@ func newServerSetupCmd(App *app.State) *cobra.Command {
 		Short: "Configure server settings interactively",
 		Long:  `An interactive setup wizard to configure server settings like host, port, TLS, and webhook secret.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			if err := interactiveServerSetup(App); err != nil {
+			if err := interactiveServerSetup(); err != nil {
 				fmt.Println(color.RedString("Error during server setup: %v", err))
 				os.Exit(1)
 			}
@@ -29,38 +29,33 @@ func newServerSetupCmd(App *app.State) *cobra.Command {
 	return cmd
 }
 
-func interactiveServerSetup(App *app.State) error {
+func interactiveServerSetup() error {
 	reader := bufio.NewReader(os.Stdin)
+	var serverConfig ServerConfig
+	viper.Unmarshal(&serverConfig)
 
 	fmt.Println(utils.Colors.Blue("--- Server Setup ---"))
 
-	// Server Host
-	App.Config.ServerHost = utils.PromptString(reader, "Server Host", App.Config.ServerHost)
-	viper.Set("SERVER_HOST", App.Config.ServerHost)
+	serverConfig.Host = utils.PromptString(reader, "Server Host", serverConfig.Host)
+	viper.Set("SERVER_HOST", serverConfig.Host)
 
-	// Server Port
-	App.Config.ServerPort = utils.PromptInt(reader, "Server Port", App.Config.ServerPort)
-	viper.Set("SERVER_PORT", App.Config.ServerPort)
+	serverConfig.Port = utils.PromptInt(reader, "Server Port", serverConfig.Port)
+	viper.Set("SERVER_PORT", serverConfig.Port)
 
-	// Enable TLS
-	App.Config.ServerTLSEnable = utils.PromptBool(reader, "Enable TLS/HTTPS", App.Config.ServerTLSEnable)
-	viper.Set("SERVER_TLS_ENABLED", App.Config.ServerTLSEnable)
+	serverConfig.TLSEnabled = utils.PromptBool(reader, "Enable TLS/HTTPS", serverConfig.TLSEnabled)
+	viper.Set("SERVER_TLS_ENABLED", serverConfig.TLSEnabled)
 
-	if App.Config.ServerTLSEnable {
-		// TLS Cert and Key
-		App.Config.ServerTLSCert = utils.PromptString(reader, "TLS Certificate File", App.Config.ServerTLSCert)
-		viper.Set("SERVER_TLS_CERT", App.Config.ServerTLSCert)
-		App.Config.ServerTLSKey = utils.PromptString(reader, "TLS Key File", App.Config.ServerTLSKey)
-		viper.Set("SERVER_TLS_KEY", App.Config.ServerTLSKey)
+	if serverConfig.TLSEnabled {
+		serverConfig.TLSCert = utils.PromptString(reader, "TLS Certificate File", serverConfig.TLSCert)
+		viper.Set("SERVER_TLS_CERT", serverConfig.TLSCert)
+		serverConfig.TLSKey = utils.PromptString(reader, "TLS Key File", serverConfig.TLSKey)
+		viper.Set("SERVER_TLS_KEY", serverConfig.TLSKey)
 	}
 
-	// Webhook Secret
-	App.Config.WebhookSecret = utils.PromptString(reader, "Webhook Secret", App.Config.WebhookSecret)
-	viper.Set("WEBHOOK_SECRET", App.Config.WebhookSecret)
+	serverConfig.WebhookSecret = utils.PromptString(reader, "Webhook Secret", serverConfig.WebhookSecret)
+	viper.Set("WEBHOOK_SECRET", serverConfig.WebhookSecret)
 
-	// Save the configuration
 	if err := viper.WriteConfig(); err != nil {
-		// If the config file doesn't exist, try to save it to the default path.
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
 			if err = viper.SafeWriteConfig(); err != nil {
 				return err

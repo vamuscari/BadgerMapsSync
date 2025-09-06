@@ -11,38 +11,59 @@ import (
 )
 
 const (
-	// BadgerMaps API base URL
-	ApiBaseURL = "https://badgerapis.badgermapping.com/api/2"
+	DefaultApiBaseURL = "https://badgerapis.badgermapping.com/api/2"
 )
 
 // APIClient handles BadgerMaps API interactions
 type APIClient struct {
-	baseURL   string
-	apiKey    string
+	BaseURL   string `mapstructure:"API_URL"`
+	APIKey    string `mapstructure:"API_KEY"`
 	client    *http.Client
 	endpoints *Endpoints
 }
 
 // NewAPIClient creates a new BadgerMaps API client
-func NewAPIClient(apiKey string) *APIClient {
-	return NewAPIClientWithURL(apiKey, ApiBaseURL)
-}
-
-// NewAPIClientWithURL creates a new BadgerMaps API client with custom URL
-func NewAPIClientWithURL(apiKey, baseURL string) *APIClient {
-	return NewAPIClientWithClient(apiKey, baseURL, &http.Client{
-		Timeout: 30 * time.Second,
-	})
-}
-
-// NewAPIClientWithClient creates a new BadgerMaps API client with a custom http.Client
-func NewAPIClientWithClient(apiKey, baseURL string, client *http.Client) *APIClient {
+func NewAPIClient(apiKey, baseURL string) *APIClient {
+	if baseURL == "" {
+		baseURL = DefaultApiBaseURL
+	}
 	return &APIClient{
-		baseURL:   baseURL,
-		apiKey:    apiKey,
-		client:    client,
+		BaseURL:   baseURL,
+		APIKey:    apiKey,
+		client:    &http.Client{Timeout: 30 * time.Second},
 		endpoints: NewEndpoints(baseURL),
 	}
+}
+
+// All other API method receivers need to be updated from `api.apiKey` to `api.APIKey`
+// Example for GetAccounts:
+func (api *APIClient) GetAccounts() ([]Account, error) {
+	url := api.endpoints.Customers()
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := api.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to customers: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("endpoint customers test failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var accounts []Account
+	if err := json.NewDecoder(resp.Body).Decode(&accounts); err != nil {
+		return nil, fmt.Errorf("failed to decode customers response: %w", err)
+	}
+
+	return accounts, nil
 }
 
 // Account represents a BadgerMaps account (customer)
@@ -243,36 +264,6 @@ type FieldValue struct {
 	Value interface{} `json:"value"`
 }
 
-// GetAccounts retrieves all accounts from the BadgerMaps API
-func (api *APIClient) GetAccounts() ([]Account, error) {
-	url := api.endpoints.Customers()
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := api.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to customers: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("endpoint customers test failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var accounts []Account
-	if err := json.NewDecoder(resp.Body).Decode(&accounts); err != nil {
-		return nil, fmt.Errorf("failed to decode customers response: %w", err)
-	}
-
-	return accounts, nil
-}
-
 // GetAccountIDs retrieves all account IDs from the BadgerMaps API
 func (api *APIClient) GetAccountIDs() ([]int, error) {
 	url := api.endpoints.Customers()
@@ -281,7 +272,7 @@ func (api *APIClient) GetAccountIDs() ([]int, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := api.client.Do(req)
@@ -320,7 +311,7 @@ func (api *APIClient) GetRoutes() ([]Route, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := api.client.Do(req)
@@ -350,7 +341,7 @@ func (api *APIClient) GetCheckins() ([]Checkin, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := api.client.Do(req)
@@ -380,7 +371,7 @@ func (api *APIClient) GetUserProfile() (*UserProfile, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := api.client.Do(req)
@@ -412,7 +403,7 @@ func (api *APIClient) TestAPIConnection() error {
 		return fmt.Errorf("failed to create API test request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := api.client.Do(req)
@@ -433,13 +424,13 @@ func (api *APIClient) TestAPIConnection() error {
 // TestEndpoint tests a specific API endpoint
 func (api *APIClient) TestEndpoint(endpoint string) error {
 	// For custom endpoints that don't have a specific method in the Endpoints struct
-	url := fmt.Sprintf("%s/%s", api.baseURL, strings.TrimPrefix(endpoint, "/"))
+	url := fmt.Sprintf("%s/%s", api.BaseURL, strings.TrimPrefix(endpoint, "/"))
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create %s test request: %w", endpoint, err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := api.client.Do(req)
@@ -476,7 +467,7 @@ func (api *APIClient) GetAccountDetailed(accountID int) (*Account, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := api.client.Do(req)
@@ -514,7 +505,7 @@ func (api *APIClient) UpdateAccount(accountID int, data map[string]string) (*Acc
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := api.client.Do(req)
@@ -544,7 +535,7 @@ func (api *APIClient) DeleteAccount(accountID int) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
 
 	resp, err := api.client.Do(req)
 	if err != nil {
@@ -576,7 +567,7 @@ func (api *APIClient) CreateAccount(data map[string]string) (*Account, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := api.client.Do(req)
@@ -606,7 +597,7 @@ func (api *APIClient) GetRoute(routeID int) (*Route, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := api.client.Do(req)
@@ -636,7 +627,7 @@ func (api *APIClient) GetCheckinsForAccount(customerID int) ([]Checkin, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := api.client.Do(req)
@@ -674,7 +665,7 @@ func (api *APIClient) CreateCheckin(data map[string]string) (*Checkin, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := api.client.Do(req)
@@ -712,7 +703,7 @@ func (api *APIClient) UpdateLocation(locationID int, data map[string]string) (*L
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := api.client.Do(req)
@@ -742,7 +733,7 @@ func (api *APIClient) SearchUsers(query string) (*UserProfile, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := api.client.Do(req)
@@ -772,7 +763,7 @@ func (api *APIClient) SearchAccounts(query string) ([]Account, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := api.client.Do(req)
@@ -802,7 +793,7 @@ func (api *APIClient) SearchLocations(query string) ([]Location, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := api.client.Do(req)
@@ -832,7 +823,7 @@ func (api *APIClient) SearchProfiles(query string) ([]UserProfile, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := api.client.Do(req)
@@ -862,7 +853,7 @@ func (api *APIClient) GetCheckin(checkinID int) (*Checkin, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.apiKey))
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := api.client.Do(req)

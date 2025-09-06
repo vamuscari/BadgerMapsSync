@@ -32,7 +32,9 @@ func NewEndpoints(baseURL string) *Endpoints {
 // Returns:
 //   - *Endpoints: A new Endpoints instance with the default API base URL
 func DefaultEndpoints() *Endpoints {
-	return NewEndpoints(ApiBaseURL)
+	return &Endpoints{
+		baseURL: DefaultApiBaseURL,
+	}
 }
 
 // Customers returns the URL for the customers endpoint.

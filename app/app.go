@@ -1,11 +1,16 @@
 package app
 
 import (
+	"badgermaps/api"
 	"badgermaps/database"
+	"badgermaps/utils"
+	"bufio"
 	"fmt"
-	"os"
-
 	"github.com/fatih/color"
+	"github.com/spf13/viper"
+	"os"
+	"path/filepath"
+	"strings"
 )
 
 type State struct {
@@ -15,8 +20,8 @@ type State struct {
 	NoColor bool
 	CfgFile string
 
-	Config *Config
-	DB     database.DB
+	DB  database.DB
+	API *api.APIClient
 }
 
 func NewApplication() *State {
@@ -27,11 +32,31 @@ func NewApplication() *State {
 	}
 }
 
-// VerifySetupOrExit checks if setup is complete and prompts the user to run setup if not
-// If the user declines, the program exits
-// Returns true if setup is complete or the user wants to run setup, false otherwise
+func (a *State) LoadConfiguration() error {
+	path, ok := GetConfigFilePath()
+	if ok {
+		viper.SetConfigFile(path)
+		if err := viper.ReadInConfig(); err != nil {
+			return fmt.Errorf("error reading config file: %w", err)
+		}
+	}
+
+	var apiClient api.APIClient
+	if err := viper.Unmarshal(&apiClient); err != nil {
+		return fmt.Errorf("error unmarshalling API config: %w", err)
+	}
+	a.API = api.NewAPIClient(apiClient.APIKey, apiClient.BaseURL)
+
+	var err error
+	a.DB, err = database.LoadDatabaseSettings()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (a *State) VerifySetupOrExit() bool {
-	// Respect NoColor setting as early as possible
 	if a.NoColor {
 		color.NoColor = true
 	}
@@ -41,22 +66,19 @@ func (a *State) VerifySetupOrExit() bool {
 		if a.Verbose || a.Debug {
 			fmt.Println(color.GreenString("Configuration detected: %s", path))
 		}
-		// Attempt to load configuration if not already loaded
-		if a.Config == nil {
-			a.Config = LoadConfig(a)
-			if (a.Verbose || a.Debug) && a.Config != nil {
+		if err := a.LoadConfiguration(); err != nil {
+			fmt.Println(color.RedString("Error loading configuration: %v", err))
+		} else {
+			if (a.Verbose || a.Debug) && a.API != nil {
 				apiKeyStatus := "not set"
-				if a.Config.APIKey != "" {
+				if a.API.APIKey != "" {
 					apiKeyStatus = "set"
 				}
-				dbType := a.Config.DBType
-				if a.DB != nil && dbType == "" {
-					dbType = a.DB.GetType()
-				}
-				fmt.Println(color.CyanString("Setup OK: DB_TYPE=%s, API_KEY=%s", dbType, apiKeyStatus))
+			dbType := a.DB.GetType()
+			fmt.Println(color.CyanString("Setup OK: DB_TYPE=%s, API_KEY=%s", dbType, apiKeyStatus))
 			}
+			return true
 		}
-		return true
 	}
 
 	if a.Verbose || a.Debug {
@@ -64,21 +86,37 @@ func (a *State) VerifySetupOrExit() bool {
 	}
 
 	if promptForSetup() {
-		if a.Verbose || a.Debug {
-			fmt.Println(color.CyanString("Starting interactive setup..."))
-		}
 		if InteractiveSetup(a) {
-			if a.Verbose || a.Debug {
-				fmt.Println(color.GreenString("Setup completed successfully."))
+			if err := a.LoadConfiguration(); err != nil {
+				fmt.Println(color.RedString("Error reloading configuration after setup: %v", err))
+				os.Exit(1)
 			}
 			return true
-		}
-		if a.Verbose || a.Debug {
-			fmt.Println(color.RedString("Setup did not complete successfully."))
 		}
 	}
 
 	fmt.Println(color.YellowString("Setup is required to use this command. Exiting."))
 	os.Exit(0)
 	return false
+}
+
+func GetConfigFilePath() (string, bool) {
+	if utils.CheckIfFileExists(".env") {
+		return ".env", true
+	}
+	if utils.CheckIfFileExists(filepath.Join(".", "config.yaml")) {
+		return filepath.Join(".", "config.yaml"), true
+	}
+	if utils.CheckIfFileExists(utils.GetConfigDirFile("config.yaml")) {
+		return utils.GetConfigDirFile("config.yaml"), true
+	}
+	return "", false
+}
+
+func promptForSetup() bool {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print(color.YellowString("BadgerMaps CLI is not set up. Would you like to run setup now? [y/N]: "))
+	response, _ := reader.ReadString('\n')
+	response = strings.TrimSpace(strings.ToLower(response))
+	return response == "y" || response == "yes"
 }

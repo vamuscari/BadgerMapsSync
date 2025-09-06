@@ -28,24 +28,13 @@ func PromptString(reader *bufio.Reader, prompt string, defaultValue string) stri
 	return input
 }
 
-// PromptPassword prompts for a password (no echo)
-func PromptPassword(reader *bufio.Reader, prompt string) string {
-	fmt.Print(Colors.Cyan("%s: ", prompt))
-
-	// Note: In a real implementation, you would use a package like
-	// golang.org/x/term to read passwords without echo.
-	// For simplicity, we're using regular input here.
-	input, err := reader.ReadString('\n')
-	if err != nil {
-		return ""
-	}
-
-	return strings.TrimSpace(input)
-}
-
 // PromptInt prompts for an integer value with a default option
 func PromptInt(reader *bufio.Reader, prompt string, defaultValue int) int {
-	fmt.Print(Colors.Cyan("%s [%d]: ", prompt, defaultValue))
+	if defaultValue == 0 {
+		fmt.Print(Colors.Cyan("%s: ", prompt))
+	} else {
+		fmt.Print(Colors.Cyan("%s [%d]: ", prompt, defaultValue))
+	}
 
 	input, err := reader.ReadString('\n')
 	if err != nil {
@@ -64,6 +53,30 @@ func PromptInt(reader *bufio.Reader, prompt string, defaultValue int) int {
 	}
 
 	return value
+}
+
+// PromptPassword prompts for a password value with a default option
+func PromptPassword(reader *bufio.Reader, prompt string, defaultValue string) string {
+	if defaultValue == "" {
+		fmt.Print(Colors.Cyan("%s: ", prompt))
+	} else {
+		fmt.Print(Colors.Cyan("%s [%s]: ", prompt, defaultValue))
+	}
+
+	// Note: In a real implementation, you would use a package like
+	// golang.org/x/term to read passwords without echo.
+	// For simplicity, we're using regular input here.
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return ""
+	}
+
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return defaultValue
+	}
+
+	return input
 }
 
 // PromptBool prompts for a boolean value with a default option
@@ -119,10 +132,12 @@ func PromptChoice(reader *bufio.Reader, prompt string, options []string) string 
 	index, err := strconv.Atoi(input)
 	if err != nil {
 		fmt.Println(Colors.Yellow("Invalid input, please choose a number."))
+		return PromptChoice(reader, prompt, options)
 	}
 
 	if index < 1 || index > len(options) {
 		fmt.Println(Colors.Yellow("Invalid input, please choose a number between 1 and %d.", len(options)))
+		return PromptChoice(reader, prompt, options)
 	}
 
 	return options[index-1]

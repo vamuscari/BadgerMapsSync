@@ -1,18 +1,16 @@
 package app
 
 import (
+	"badgermaps/database"
 	"badgermaps/utils"
 	"bufio"
 	"fmt"
-	"os"
-
 	"github.com/spf13/viper"
+	"os"
 )
 
 // InteractiveSetup guides the user through setting up the configuration
-// It creates both the config.yaml and .env files with user-provided values
 func InteractiveSetup(app *State) bool {
-	var QuickSetup bool = true
 	reader := bufio.NewReader(os.Stdin)
 
 	fmt.Println(utils.Colors.Blue("=== BadgerMaps CLI Setup ==="))
@@ -20,128 +18,47 @@ func InteractiveSetup(app *State) bool {
 	fmt.Println(utils.Colors.Yellow("Press Enter to accept the default value shown in [brackets]."))
 	fmt.Println()
 
-	// Create a new config instance
-	config := defaultConfig(app)
-
-	// Load existing configuration if it exists
-	path, ok := GetConfigFilePath()
-	if ok {
-		viper.SetConfigFile(path)
-		if err := viper.ReadInConfig(); err != nil {
-			fmt.Println(utils.Colors.Red("Error reading config file: %v", err))
-			return false
-		}
-		config = LoadConfig(app)
-	}
-
-	// QuickSetup vs AdvancedSetup
-	QuickSetup = utils.PromptBool(reader, "Quick Setup?", QuickSetup)
-
-	// Ensure config directory exists
-	if err := utils.EnsureDirExists(utils.GetConfigDir()); err != nil {
-		fmt.Println(utils.Colors.Red("Error creating config directory: %v", err))
-		return false
-	}
-
 	// API Settings
 	fmt.Println(utils.Colors.Blue("--- API Settings ---"))
-
-	// API Key
-	apiKey := utils.PromptString(reader, "API Key", config.APIKey)
+	apiKey := utils.PromptString(reader, "API Key", viper.GetString("API_KEY"))
 	viper.Set("API_KEY", apiKey)
-
-	// API URL
-	config.APIURL = "https://badgerapis.badgermapping.com/api/2"
-	if !QuickSetup {
-		defaultAPIURL := "https://badgerapis.badgermapping.com/api/2"
-		if config.APIURL == "" {
-			config.APIURL = defaultAPIURL
-		}
-		config.APIURL = utils.PromptString(reader, "API URL", config.APIURL)
-	}
-	viper.Set("API_URL", config.APIURL)
+	apiURL := utils.PromptString(reader, "API URL", viper.GetString("API_URL"))
+	viper.Set("API_URL", apiURL)
 
 	// Database Settings
-	fmt.Println()
 	fmt.Println(utils.Colors.Blue("--- Database Settings ---"))
+	// Try to load the current configuration first
+	currentDB, err := database.LoadDatabaseSettings()
+	if err != nil {
+		fmt.Println(utils.Colors.Yellow("Could not load current database configuration: %v", err))
+	}
 
-	// DB Type
-	dbType := utils.PromptChoice(reader, "Database Type", []string{"sqlite3", "postgres", "mssql"})
+	// Prompt the user to select a database type
+	dbType := utils.PromptChoice(reader, "Select database type", []string{"sqlite3", "postgres", "mssql"})
 	viper.Set("DB_TYPE", dbType)
 
-	// DB Connection String
-	defaultDBConnStr := "badgermaps.db"
-	if config.DBConnStr == "" {
-		config.DBConnStr = defaultDBConnStr
+	// If the selected database type is different from the current one,
+	// we need to create a new database configuration
+	if currentDB == nil || currentDB.GetType() != dbType {
+		newDB, err := database.LoadDatabaseSettings()
+		if err != nil {
+			fmt.Println(utils.Colors.Red("Error creating new database configuration: %v", err))
+			return false
+		}
+		app.DB = newDB
 	}
-	dbConnStr := utils.PromptString(reader, "Database Connection String", config.DBConnStr)
-	viper.Set("DB_CONN_STR", dbConnStr)
 
-	if !QuickSetup {
-		// Server Settings
-		fmt.Println()
-		fmt.Println(utils.Colors.Blue("--- Server Settings ---"))
+	// Run the promptDatabaseSettings() to configure the database
+	app.DB.PromptDatabaseSettings()
 
-		// Server Host
-		defaultServerHost := "localhost"
-		if config.ServerHost == "" {
-			config.ServerHost = defaultServerHost
-		}
-		serverHost := utils.PromptString(reader, "Server Host", config.ServerHost)
-		viper.Set("SERVER_HOST", serverHost)
-
-		// Server Port
-		defaultServerPort := 8080
-		if config.ServerPort == 0 {
-			config.ServerPort = defaultServerPort
-		}
-		serverPort := utils.PromptInt(reader, "Server Port", config.ServerPort)
-		viper.Set("SERVER_PORT", serverPort)
-
-		// Server TLS Enable
-		serverTLS := utils.PromptBool(reader, "Enable TLS", config.ServerTLSEnable)
-		viper.Set("SERVER_TLS_ENABLED", serverTLS)
-
-		// Rate Limiting Settings
-		fmt.Println()
-		fmt.Println(utils.Colors.Blue("--- Rate Limiting Settings ---"))
-
-		// Rate Limit Requests
-		defaultRateLimitRequests := 100
-		if config.RateLimitRequests == 0 {
-			config.RateLimitRequests = defaultRateLimitRequests
-		}
-		rateLimitRequests := utils.PromptInt(reader, "Rate Limit Requests", config.RateLimitRequests)
-		viper.Set("RATE_LIMIT_REQUESTS", rateLimitRequests)
-
-		// Rate Limit Period
-		defaultRateLimitPeriod := 60
-		if config.RateLimitPeriod == 0 {
-			config.RateLimitPeriod = defaultRateLimitPeriod
-		}
-		rateLimitPeriod := utils.PromptInt(reader, "Rate Limit Period (seconds)", config.RateLimitPeriod)
-		viper.Set("RATE_LIMIT_PERIOD", rateLimitPeriod)
-
-		// Parallel Processing Settings
-		fmt.Println()
-		fmt.Println(utils.Colors.Blue("--- Parallel Processing Settings ---"))
-
-		// Max Parallel Processes
-		defaultMaxParallelProcesses := 5
-		if config.MaxParallelProcesses == 0 {
-			config.MaxParallelProcesses = defaultMaxParallelProcesses
-		}
-		maxParallelProcesses := utils.PromptInt(reader, "Max Parallel Processes", config.MaxParallelProcesses)
-		viper.Set("MAX_PARALLEL_PROCESSES", maxParallelProcesses)
-
+	// After run SetDatabaseSettings to save the DB
+	if err := app.DB.SetDatabaseSettings(); err != nil {
+		fmt.Println(utils.Colors.Red("Error saving database settings: %v", err))
+		return false
 	}
 
 	// Save configuration
 	configFile := utils.GetConfigDirFile("config.yaml")
-	if !QuickSetup {
-		configFile = utils.PromptChoice(reader, "Pick Config Save Location", []string{configFile, ".env"})
-	}
-
 	if err := viper.WriteConfigAs(configFile); err != nil {
 		fmt.Println(utils.Colors.Red("Error saving config file: %v", err))
 		return false
