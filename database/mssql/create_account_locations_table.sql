@@ -1,18 +1,18 @@
-IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='account_locations' AND xtype='U')
-CREATE TABLE account_locations (
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='AccountLocations' AND xtype='U')
+CREATE TABLE AccountLocations (
     LocationId INT IDENTITY(1,1) PRIMARY KEY,
     Id INT,
-    account_id INT,
-    city NVARCHAR(255),
-    name NVARCHAR(255),
-    zipcode NVARCHAR(20),
-    longitude FLOAT,
-    state NVARCHAR(100),
-    latitude FLOAT,
-    address_line1 NTEXT,
-    location NTEXT,
-    is_approximate BIT DEFAULT 0,
-    created_at DATETIME2 DEFAULT GETDATE(),
-    updated_at DATETIME2 DEFAULT GETDATE(),
-    UNIQUE (Id, account_id)
+    AccountId INT,
+    City NVARCHAR(255),
+    Name NVARCHAR(255),
+    Zipcode NVARCHAR(20),
+    Longitude FLOAT,
+    State NVARCHAR(100),
+    Latitude FLOAT,
+    AddressLine1 NTEXT,
+    Location NTEXT,
+    IsApproximate BIT DEFAULT 0,
+    CreatedAt DATETIME2 DEFAULT GETDATE(),
+    UpdatedAt DATETIME2 DEFAULT GETDATE(),
+    UNIQUE (Id, AccountId)
 ); 

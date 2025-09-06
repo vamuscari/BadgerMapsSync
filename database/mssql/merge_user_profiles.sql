@@ -1,4 +1,4 @@
-MERGE user_profiles AS target
+MERGE UserProfiles AS target
 USING (SELECT ? as Id, ? as FirstName, ? as LastName, ? as Email,
        ? as IsManager, ? as Manager, ? as CompanyId, ? as CompanyName,
        ? as CompanyShortName, ? as Completed, ? as TrialDaysLeft,

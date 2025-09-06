@@ -1,12 +1,12 @@
-INSERT INTO [account_locations] (
-	[id], 
-	[account_id], 
-	[city], 
-	[name], 
-	[zipcode], 
-	[longitude], 
-	[state], 
-	[latitude], 
-	[address_line1], 
-	[location]
+INSERT INTO [AccountLocations] (
+	[Id], 
+	[AccountId], 
+	[City], 
+	[Name], 
+	[Zipcode], 
+	[Longitude], 
+	[State], 
+	[Latitude], 
+	[AddressLine1], 
+	[Location]
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?); 

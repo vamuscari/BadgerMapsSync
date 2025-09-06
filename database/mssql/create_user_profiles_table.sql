@@ -1,19 +1,19 @@
-IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='user_profiles' AND xtype='U')
-CREATE TABLE user_profiles (
-    id INT IDENTITY(1,1) PRIMARY KEY,
-    email NVARCHAR(255),
-    first_name NVARCHAR(255),
-    last_name NVARCHAR(255),
-    is_manager BIT,
-    manager NTEXT,
-    company_id INT,
-    company_name NVARCHAR(255),
-    company_short_name NVARCHAR(255),
-    completed BIT,
-    trial_days_left INT,
-    has_data BIT,
-    default_appt_length INT,
-    crm_base_url NTEXT,
-    created_at DATETIME2 DEFAULT GETDATE(),
-    updated_at DATETIME2 DEFAULT GETDATE()
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='UserProfiles' AND xtype='U')
+CREATE TABLE UserProfiles (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    Email NVARCHAR(255),
+    FirstName NVARCHAR(255),
+    LastName NVARCHAR(255),
+    IsManager BIT,
+    Manager NTEXT,
+    CompanyId INT,
+    CompanyName NVARCHAR(255),
+    CompanyShortName NVARCHAR(255),
+    Completed BIT,
+    TrialDaysLeft INT,
+    HasData BIT,
+    DefaultApptLength INT,
+    CrmBaseUrl NTEXT,
+    CreatedAt DATETIME2 DEFAULT GETDATE(),
+    UpdatedAt DATETIME2 DEFAULT GETDATE()
 ); 

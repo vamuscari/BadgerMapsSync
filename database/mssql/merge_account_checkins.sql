@@ -1,4 +1,4 @@
-MERGE [account_checkins] AS target
+MERGE [AccountCheckins] AS target
 USING (SELECT ? as Id, ? as CrmId, ? as CustomerId, ? as LogDateTime,
        ? as Type, ? as Comments, ? as ExtraFields, ? as CreatedBy) AS source
 ON target.[Id] = source.Id
