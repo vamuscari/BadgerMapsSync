@@ -2,6 +2,8 @@ package test
 
 import (
 	"badgermaps/app"
+	"badgermaps/utils"
+	"bufio"
 	"fmt"
 	"os"
 
@@ -55,16 +57,49 @@ func testDatabase(app *app.State) {
 	fmt.Println(color.CyanString("Connecting to %s database...", db.GetType()))
 	if err := db.TestConnection(); err != nil {
 		fmt.Println(color.RedString("FAILED: Could not connect to database"))
-		fmt.Printf("Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println(color.GreenString("PASSED: Database connection successful"))
 
 	fmt.Println(color.CyanString("\nValidating database schema..."))
-	if err := db.ValidateSchema(); err != nil {
+	if err := db.ValidateSchema(app.Verbose || app.Debug); err != nil {
 		fmt.Println(color.RedString("FAILED: Schema validation failed"))
-		fmt.Printf("Error: %v\n", err)
-		os.Exit(1)
+		if app.Debug {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		}
+
+		reader := bufio.NewReader(os.Stdin)
+		if utils.PromptBool(reader, "Would you like to drop all tables and re-initialize the schema?", false) {
+			fmt.Println(color.YellowString("Dropping all tables..."))
+			if err := db.DropAllTables(); err != nil {
+				fmt.Println(color.RedString("FAILED: Could not drop tables"))
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println(color.GreenString("Tables dropped successfully."))
+
+			fmt.Println(color.CyanString("Re-initializing schema..."))
+			if err := db.EnforceSchema(app.Verbose || app.Debug); err != nil {
+				fmt.Println(color.RedString("FAILED: Could not enforce schema"))
+				if app.Debug {
+					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				}
+				os.Exit(1)
+			}
+			fmt.Println(color.GreenString("Schema re-initialized successfully."))
+
+			fmt.Println(color.CyanString("\nRe-validating database schema..."))
+			if err := db.ValidateSchema(app.Verbose || app.Debug); err != nil {
+				fmt.Println(color.RedString("FAILED: Schema validation failed again after re-initialization"))
+				if app.Debug {
+					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				}
+				os.Exit(1)
+			}
+		} else {
+			os.Exit(1)
+		}
 	}
 	fmt.Println(color.GreenString("PASSED: All required tables exist"))
 }

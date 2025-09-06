@@ -34,7 +34,18 @@ func InteractiveSetup(app *State) bool {
 	}
 
 	// Prompt the user to select a database type
-	dbType := utils.PromptChoice(reader, "Select database type", []string{"sqlite3", "postgres", "mssql"})
+	dbOptions := []string{"sqlite3", "postgres", "mssql"}
+	if currentDB != nil {
+		// Move the current db type to the front of the list to make it the default
+		for i, dbType := range dbOptions {
+			if dbType == currentDB.GetType() {
+				dbOptions = append(dbOptions[:i], dbOptions[i+1:]...)
+				dbOptions = append([]string{currentDB.GetType()}, dbOptions...)
+				break
+			}
+		}
+	}
+	dbType := utils.PromptChoice(reader, "Select database type", dbOptions)
 	viper.Set("DB_TYPE", dbType)
 
 	// If the selected database type is different from the current one,

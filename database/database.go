@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/fatih/color"
 	_ "github.com/lib/pq"               // PostgreSQL driver
 	_ "github.com/mattn/go-sqlite3"     // SQLite driver
 	_ "github.com/microsoft/go-mssqldb" // SQL Server driver
@@ -21,9 +22,10 @@ type DB interface {
 	SetDatabaseSettings() error
 	PromptDatabaseSettings()
 	TableExists(tableName string) (bool, error)
-	ValidateSchema() error
-	EnforceSchema() error
+	ValidateSchema(verbose bool) error
+	EnforceSchema(verbose bool) error
 	TestConnection() error
+	DropAllTables() error
 }
 
 // SQLiteConfig represents a SQLite database configuration
@@ -31,7 +33,7 @@ type SQLiteConfig struct {
 	Path string `mapstructure:"DB_PATH"`
 }
 
-func (db *SQLiteConfig) EnforceSchema() error {
+func (db *SQLiteConfig) EnforceSchema(verbose bool) error {
 	sqlDB, err := sql.Open("sqlite3", db.DatabaseConnection())
 	if err != nil {
 		return fmt.Errorf("failed to open SQLite database: %w", err)
@@ -39,16 +41,19 @@ func (db *SQLiteConfig) EnforceSchema() error {
 	defer sqlDB.Close()
 
 	for _, tableName := range RequiredTables() {
-		exists, err := db.TableExists(tableName)
-		if err != nil {
-			return fmt.Errorf("error checking if table %s exists: %w", tableName, err)
+		if verbose {
+			fmt.Printf("Creating table: %s... ", tableName)
 		}
-		if !exists {
-			createCmd := createCommandForTable(tableName)
-			sqlText := sqlCommandLoader(db.GetType(), createCmd)
-			if _, err := sqlDB.Exec(sqlText); err != nil {
-				return fmt.Errorf("failed to create table %s: %w", tableName, err)
+		createCmd := createCommandForTable(tableName)
+		sqlText := sqlCommandLoader(db.GetType(), createCmd)
+		if _, err := sqlDB.Exec(sqlText); err != nil {
+			if verbose {
+				fmt.Println(color.RedString("ERROR"))
 			}
+			return fmt.Errorf("failed to create table %s: %w", tableName, err)
+		}
+		if verbose {
+			fmt.Println(color.GreenString("OK"))
 		}
 	}
 	return nil
@@ -63,14 +68,29 @@ func (db *SQLiteConfig) TestConnection() error {
 	return sqlDB.Ping()
 }
 
-func (db *SQLiteConfig) ValidateSchema() error {
+func (db *SQLiteConfig) ValidateSchema(verbose bool) error {
 	for _, tableName := range RequiredTables() {
+		if verbose {
+			fmt.Printf("Checking table: %s... ", tableName)
+		}
 		exists, err := db.TableExists(tableName)
 		if err != nil {
+			if verbose {
+				fmt.Println(color.RedString("ERROR"))
+			}
+			if viper.GetBool("debug") {
+				fmt.Printf("ValidateSchema error: %v\n", err)
+			}
 			return fmt.Errorf("error checking if table %s exists: %w", tableName, err)
 		}
 		if !exists {
+			if verbose {
+				fmt.Println(color.RedString("MISSING"))
+			}
 			return fmt.Errorf("required table %s does not exist", tableName)
+		}
+		if verbose {
+			fmt.Println(color.GreenString("OK"))
 		}
 	}
 	return nil
@@ -83,13 +103,16 @@ func (db *SQLiteConfig) TableExists(tableName string) (bool, error) {
 	}
 	defer sqlDB.Close()
 
-	query := "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
-	var name string
-	err = sqlDB.QueryRow(query, tableName).Scan(&name)
-	if err == sql.ErrNoRows {
-		return false, nil
+	query := sqlCommandLoader(db.GetType(), "check_table_exists")
+	var count int
+	err = sqlDB.QueryRow(query, tableName).Scan(&count)
+	if err != nil {
+		if viper.GetBool("debug") {
+			fmt.Printf("TableExists error: %v\n", err)
+		}
+		return false, err
 	}
-	return err == nil, err
+	return count > 0, nil
 }
 
 func (db *SQLiteConfig) GetType() string {
@@ -119,6 +142,22 @@ func (db *SQLiteConfig) PromptDatabaseSettings() {
 	db.Path = utils.PromptString(reader, "Database Path", db.Path)
 }
 
+func (db *SQLiteConfig) DropAllTables() error {
+	sqlDB, err := sql.Open("sqlite3", db.DatabaseConnection())
+	if err != nil {
+		return fmt.Errorf("failed to open SQLite database: %w", err)
+	}
+	defer sqlDB.Close()
+
+	for _, tableName := range RequiredTables() {
+		query := fmt.Sprintf("DROP TABLE IF EXISTS %s", tableName)
+		if _, err := sqlDB.Exec(query); err != nil {
+			return fmt.Errorf("failed to drop table %s: %w", tableName, err)
+		}
+	}
+	return nil
+}
+
 // PostgreSQLConfig represents a PostgreSQL database configuration
 type PostgreSQLConfig struct {
 	Host     string `mapstructure:"DB_HOST"`
@@ -129,7 +168,7 @@ type PostgreSQLConfig struct {
 	SSLMode  string `mapstructure:"DB_SSL_MODE"`
 }
 
-func (db *PostgreSQLConfig) EnforceSchema() error {
+func (db *PostgreSQLConfig) EnforceSchema(verbose bool) error {
 	sqlDB, err := sql.Open("postgres", db.DatabaseConnection())
 	if err != nil {
 		return fmt.Errorf("failed to open PostgreSQL database: %w", err)
@@ -137,16 +176,19 @@ func (db *PostgreSQLConfig) EnforceSchema() error {
 	defer sqlDB.Close()
 
 	for _, tableName := range RequiredTables() {
-		exists, err := db.TableExists(tableName)
-		if err != nil {
-			return fmt.Errorf("error checking if table %s exists: %w", tableName, err)
+		if verbose {
+			fmt.Printf("Creating table: %s... ", tableName)
 		}
-		if !exists {
-			createCmd := createCommandForTable(tableName)
-			sqlText := sqlCommandLoader(db.GetType(), createCmd)
-			if _, err := sqlDB.Exec(sqlText); err != nil {
-				return fmt.Errorf("failed to create table %s: %w", tableName, err)
+		createCmd := createCommandForTable(tableName)
+		sqlText := sqlCommandLoader(db.GetType(), createCmd)
+		if _, err := sqlDB.Exec(sqlText); err != nil {
+			if verbose {
+				fmt.Println(color.RedString("ERROR"))
 			}
+			return fmt.Errorf("failed to create table %s: %w", tableName, err)
+		}
+		if verbose {
+			fmt.Println(color.GreenString("OK"))
 		}
 	}
 	return nil
@@ -159,14 +201,29 @@ func (db *PostgreSQLConfig) TestConnection() error {
 	defer sqlDB.Close()
 	return sqlDB.Ping()
 }
-func (db *PostgreSQLConfig) ValidateSchema() error {
+func (db *PostgreSQLConfig) ValidateSchema(verbose bool) error {
 	for _, tableName := range RequiredTables() {
+		if verbose {
+			fmt.Printf("Checking table: %s... ", tableName)
+		}
 		exists, err := db.TableExists(tableName)
 		if err != nil {
+			if verbose {
+				fmt.Println(color.RedString("ERROR"))
+			}
+			if viper.GetBool("debug") {
+				fmt.Printf("ValidateSchema error: %v\n", err)
+			}
 			return fmt.Errorf("error checking if table %s exists: %w", tableName, err)
 		}
 		if !exists {
+			if verbose {
+				fmt.Println(color.RedString("MISSING"))
+			}
 			return fmt.Errorf("required table %s does not exist", tableName)
+		}
+		if verbose {
+			fmt.Println(color.GreenString("OK"))
 		}
 	}
 	return nil
@@ -178,13 +235,16 @@ func (db *PostgreSQLConfig) TableExists(tableName string) (bool, error) {
 	}
 	defer sqlDB.Close()
 
-	query := "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1"
-	var name string
-	err = sqlDB.QueryRow(query, tableName).Scan(&name)
-	if err == sql.ErrNoRows {
-		return false, nil
+	query := sqlCommandLoader(db.GetType(), "check_table_exists")
+	var count int
+	err = sqlDB.QueryRow(query, tableName).Scan(&count)
+	if err != nil {
+		if viper.GetBool("debug") {
+			fmt.Printf("TableExists error: %v\n", err)
+		}
+		return false, err
 	}
-	return err == nil, err
+	return count > 0, nil
 }
 func (db *PostgreSQLConfig) GetType() string {
 	return "postgres"
@@ -221,6 +281,22 @@ func (db *PostgreSQLConfig) PromptDatabaseSettings() {
 	db.SSLMode = utils.PromptString(reader, "Database SSL Mode", db.SSLMode)
 }
 
+func (db *PostgreSQLConfig) DropAllTables() error {
+	sqlDB, err := sql.Open("postgres", db.DatabaseConnection())
+	if err != nil {
+		return fmt.Errorf("failed to open PostgreSQL database: %w", err)
+	}
+	defer sqlDB.Close()
+
+	for _, tableName := range RequiredTables() {
+		query := fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE", tableName)
+		if _, err := sqlDB.Exec(query); err != nil {
+			return fmt.Errorf("failed to drop table %s: %w", tableName, err)
+		}
+	}
+	return nil
+}
+
 // MSSQLConfig represents a Microsoft SQL Server database configuration
 type MSSQLConfig struct {
 	Host     string `mapstructure:"DB_HOST"`
@@ -230,7 +306,7 @@ type MSSQLConfig struct {
 	Password string `mapstructure:"DB_PASSWORD"`
 }
 
-func (db *MSSQLConfig) EnforceSchema() error {
+func (db *MSSQLConfig) EnforceSchema(verbose bool) error {
 	sqlDB, err := sql.Open("mssql", db.DatabaseConnection())
 	if err != nil {
 		return fmt.Errorf("failed to open MSSQL database: %w", err)
@@ -238,16 +314,19 @@ func (db *MSSQLConfig) EnforceSchema() error {
 	defer sqlDB.Close()
 
 	for _, tableName := range RequiredTables() {
-		exists, err := db.TableExists(tableName)
-		if err != nil {
-			return fmt.Errorf("error checking if table %s exists: %w", tableName, err)
+		if verbose {
+			fmt.Printf("Creating table: %s... ", tableName)
 		}
-		if !exists {
-			createCmd := createCommandForTable(tableName)
-			sqlText := sqlCommandLoader(db.GetType(), createCmd)
-			if _, err := sqlDB.Exec(sqlText); err != nil {
-				return fmt.Errorf("failed to create table %s: %w", tableName, err)
+		createCmd := createCommandForTable(tableName)
+		sqlText := sqlCommandLoader(db.GetType(), createCmd)
+		if _, err := sqlDB.Exec(sqlText); err != nil {
+			if verbose {
+				fmt.Println(color.RedString("ERROR"))
 			}
+			return fmt.Errorf("failed to create table %s: %w", tableName, err)
+		}
+		if verbose {
+			fmt.Println(color.GreenString("OK"))
 		}
 	}
 	return nil
@@ -260,14 +339,29 @@ func (db *MSSQLConfig) TestConnection() error {
 	defer sqlDB.Close()
 	return sqlDB.Ping()
 }
-func (db *MSSQLConfig) ValidateSchema() error {
+func (db *MSSQLConfig) ValidateSchema(verbose bool) error {
 	for _, tableName := range RequiredTables() {
+		if verbose {
+			fmt.Printf("Checking table: %s... ", tableName)
+		}
 		exists, err := db.TableExists(tableName)
 		if err != nil {
+			if verbose {
+				fmt.Println(color.RedString("ERROR"))
+			}
+			if viper.GetBool("debug") {
+				fmt.Printf("ValidateSchema error: %v\n", err)
+			}
 			return fmt.Errorf("error checking if table %s exists: %w", tableName, err)
 		}
 		if !exists {
+			if verbose {
+				fmt.Println(color.RedString("MISSING"))
+			}
 			return fmt.Errorf("required table %s does not exist", tableName)
+		}
+		if verbose {
+			fmt.Println(color.GreenString("OK"))
 		}
 	}
 	return nil
@@ -279,13 +373,22 @@ func (db *MSSQLConfig) TableExists(tableName string) (bool, error) {
 	}
 	defer sqlDB.Close()
 
-	query := "SELECT name FROM sys.tables WHERE name = @p1"
-	var name string
-	err = sqlDB.QueryRow(query, tableName).Scan(&name)
-	if err == sql.ErrNoRows {
-		return false, nil
+	query := "SELECT COUNT(*) FROM sys.tables WHERE name = @p1"
+	if viper.GetBool("debug") {
+		fmt.Printf("DEBUG: Executing query: %s with arg: %s\n", query, tableName)
 	}
-	return err == nil, err
+	var count int
+	err = sqlDB.QueryRow(query, tableName).Scan(&count)
+	if err != nil {
+		if viper.GetBool("debug") {
+			fmt.Printf("DEBUG: TableExists SQL ERROR: %v\n", err)
+		}
+		return false, err
+	}
+	if viper.GetBool("debug") {
+		fmt.Printf("DEBUG: TableExists count for %s: %d\n", tableName, count)
+	}
+	return count > 0, nil
 }
 func (db *MSSQLConfig) GetType() string {
 	return "mssql"
@@ -317,6 +420,48 @@ func (db *MSSQLConfig) PromptDatabaseSettings() {
 	db.Database = utils.PromptString(reader, "Database Name", db.Database)
 	db.Username = utils.PromptString(reader, "Database Username", db.Username)
 	db.Password = utils.PromptPassword(reader, "Database Password", db.Password)
+}
+
+func (db *MSSQLConfig) DropAllTables() error {
+	sqlDB, err := sql.Open("mssql", db.DatabaseConnection())
+	if err != nil {
+		return fmt.Errorf("failed to open MSSQL database: %w", err)
+	}
+	defer sqlDB.Close()
+
+	// First, drop all foreign key constraints
+	// This is a bit of a heavy-handed approach, but it's reliable
+	// A more elegant solution would be to drop tables in the correct order
+	// but that requires parsing the schema, which is complex.
+	rows, err := sqlDB.Query("SELECT name, object_id FROM sys.foreign_keys")
+	if err != nil {
+		return fmt.Errorf("failed to query foreign keys: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var name, objectId string
+		if err := rows.Scan(&name, &objectId); err != nil {
+			return fmt.Errorf("failed to scan foreign key: %w", err)
+		}
+		parentTableQuery := fmt.Sprintf("SELECT OBJECT_NAME(parent_object_id) FROM sys.foreign_keys WHERE object_id = %s", objectId)
+		var parentTable string
+		if err := sqlDB.QueryRow(parentTableQuery).Scan(&parentTable); err != nil {
+			return fmt.Errorf("failed to get parent table for foreign key %s: %w", name, err)
+		}
+		query := fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s", parentTable, name)
+		if _, err := sqlDB.Exec(query); err != nil {
+			return fmt.Errorf("failed to drop foreign key %s: %w", name, err)
+		}
+	}
+
+	for _, tableName := range RequiredTables() {
+		query := fmt.Sprintf("IF OBJECT_ID('%s', 'U') IS NOT NULL DROP TABLE %s", tableName, tableName)
+		if _, err := sqlDB.Exec(query); err != nil {
+			return fmt.Errorf("failed to drop table %s: %w", tableName, err)
+		}
+	}
+	return nil
 }
 
 // LoadDatabaseSettings loads database settings based on the database type
@@ -355,6 +500,7 @@ func RequiredTables() []string {
 		"Accounts",
 		"AccountCheckins",
 		"AccountLocations",
+		"AccountsPendingChanges",
 		"Routes",
 		"RouteWaypoints",
 		"UserProfiles",
