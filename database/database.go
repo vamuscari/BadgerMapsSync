@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -396,7 +397,16 @@ func (db *PostgreSQLConfig) SetDatabaseSettings() error {
 	return nil
 }
 func (db *PostgreSQLConfig) DatabaseConnection() string {
-	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s", db.Username, db.Password, db.Host, db.Port, db.Database, db.SSLMode)
+	u := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(db.Username, db.Password),
+		Host:   fmt.Sprintf("%s:%d", db.Host, db.Port),
+		Path:   db.Database,
+	}
+	q := u.Query()
+	q.Set("sslmode", db.SSLMode)
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 func (db *PostgreSQLConfig) PromptDatabaseSettings() {
 	reader := bufio.NewReader(os.Stdin)
@@ -598,7 +608,15 @@ func (db *MSSQLConfig) SetDatabaseSettings() error {
 	return nil
 }
 func (db *MSSQLConfig) DatabaseConnection() string {
-	return fmt.Sprintf("sqlserver://%s:%s@%s:%d?database=%s", db.Username, db.Password, db.Host, db.Port, db.Database)
+	u := &url.URL{
+		Scheme: "sqlserver",
+		User:   url.UserPassword(db.Username, db.Password),
+		Host:   fmt.Sprintf("%s:%d", db.Host, db.Port),
+	}
+	q := u.Query()
+	q.Set("database", db.Database)
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 func (db *MSSQLConfig) PromptDatabaseSettings() {
 	reader := bufio.NewReader(os.Stdin)
