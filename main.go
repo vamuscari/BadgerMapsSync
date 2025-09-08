@@ -59,7 +59,10 @@ func main() {
 	App = app.NewApplication()
 	bind()
 	// Check if no arguments were provided
-	if err := rootCmd.Execute(); err != nil {
+		if appState.DB != nil {
+		defer appState.DB.Close()
+	}
+	cmd.Execute()
 		if App.State.Debug {
 			fmt.Printf("Error: %v\n", err)
 		}

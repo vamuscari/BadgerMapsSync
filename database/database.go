@@ -30,21 +30,40 @@ type DB interface {
 	EnforceSchema() error
 	TestConnection() error
 	DropAllTables() error
+	Connect() error
+	Close() error
+	GetDB() *sql.DB
 }
 
 // SQLiteConfig represents a SQLite database configuration
 type SQLiteConfig struct {
 	state *state.State
+	db    *sql.DB
 	Path  string `mapstructure:"DB_PATH"`
 }
 
-func (db *SQLiteConfig) GetTableColumns(tableName string) ([]string, error) {
-	sqlDB, err := sql.Open("sqlite3", db.DatabaseConnection())
+func (db *SQLiteConfig) Connect() error {
+	var err error
+	db.db, err = sql.Open("sqlite3", db.DatabaseConnection())
 	if err != nil {
-		return nil, fmt.Errorf("failed to open SQLite database: %w", err)
+		return fmt.Errorf("failed to open SQLite database: %w", err)
 	}
-	defer sqlDB.Close()
+	return nil
+}
 
+func (db *SQLiteConfig) Close() error {
+	if db.db != nil {
+		return db.db.Close()
+	}
+	return nil
+}
+
+func (db *SQLiteConfig) GetDB() *sql.DB {
+	return db.db
+}
+
+func (db *SQLiteConfig) GetTableColumns(tableName string) ([]string, error) {
+	sqlDB := db.GetDB()
 	query := sqlCommandLoader(db.GetType(), "get_table_columns")
 
 	rows, err := sqlDB.Query(query, tableName)
@@ -70,11 +89,7 @@ func (db *SQLiteConfig) GetTableColumns(tableName string) ([]string, error) {
 }
 
 func (db *SQLiteConfig) EnforceSchema() error {
-	sqlDB, err := sql.Open("sqlite3", db.DatabaseConnection())
-	if err != nil {
-		return fmt.Errorf("failed to open SQLite database: %w", err)
-	}
-	defer sqlDB.Close()
+	sqlDB := db.GetDB()
 
 	for _, tableName := range RequiredTables() {
 		if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -109,12 +124,7 @@ func (db *SQLiteConfig) EnforceSchema() error {
 }
 
 func (db *SQLiteConfig) TestConnection() error {
-	sqlDB, err := sql.Open("sqlite3", db.DatabaseConnection())
-	if err != nil {
-		return fmt.Errorf("failed to open SQLite database: %w", err)
-	}
-	defer sqlDB.Close()
-	return sqlDB.Ping()
+	return db.GetDB().Ping()
 }
 
 func (db *SQLiteConfig) ValidateSchema() error {
@@ -166,15 +176,10 @@ func (db *SQLiteConfig) ValidateSchema() error {
 }
 
 func (db *SQLiteConfig) TableExists(tableName string) (bool, error) {
-	sqlDB, err := sql.Open("sqlite3", db.DatabaseConnection())
-	if err != nil {
-		return false, fmt.Errorf("failed to open SQLite database: %w", err)
-	}
-	defer sqlDB.Close()
-
+	sqlDB := db.GetDB()
 	query := sqlCommandLoader(db.GetType(), "check_table_exists")
 	var count int
-	err = sqlDB.QueryRow(query, tableName).Scan(&count)
+	err := sqlDB.QueryRow(query, tableName).Scan(&count)
 	if err != nil {
 		if db.state.Debug {
 			fmt.Printf("TableExists error: %v\n", err)
@@ -212,12 +217,7 @@ func (db *SQLiteConfig) PromptDatabaseSettings() {
 }
 
 func (db *SQLiteConfig) DropAllTables() error {
-	sqlDB, err := sql.Open("sqlite3", db.DatabaseConnection())
-	if err != nil {
-		return fmt.Errorf("failed to open SQLite database: %w", err)
-	}
-	defer sqlDB.Close()
-
+	sqlDB := db.GetDB()
 	for _, tableName := range RequiredTables() {
 		query := fmt.Sprintf("DROP TABLE IF EXISTS %s", tableName)
 		if _, err := sqlDB.Exec(query); err != nil {
@@ -230,6 +230,7 @@ func (db *SQLiteConfig) DropAllTables() error {
 // PostgreSQLConfig represents a PostgreSQL database configuration
 type PostgreSQLConfig struct {
 	state    *state.State
+	db       *sql.DB
 	Host     string `mapstructure:"DB_HOST"`
 	Port     int    `mapstructure:"DB_PORT"`
 	Database string `mapstructure:"DB_NAME"`
@@ -238,13 +239,28 @@ type PostgreSQLConfig struct {
 	SSLMode  string `mapstructure:"DB_SSL_MODE"`
 }
 
-func (db *PostgreSQLConfig) GetTableColumns(tableName string) ([]string, error) {
-	sqlDB, err := sql.Open("postgres", db.DatabaseConnection())
+func (db *PostgreSQLConfig) Connect() error {
+	var err error
+	db.db, err = sql.Open("postgres", db.DatabaseConnection())
 	if err != nil {
-		return nil, fmt.Errorf("failed to open PostgreSQL database: %w", err)
+		return fmt.Errorf("failed to open PostgreSQL database: %w", err)
 	}
-	defer sqlDB.Close()
+	return nil
+}
 
+func (db *PostgreSQLConfig) Close() error {
+	if db.db != nil {
+		return db.db.Close()
+	}
+	return nil
+}
+
+func (db *PostgreSQLConfig) GetDB() *sql.DB {
+	return db.db
+}
+
+func (db *PostgreSQLConfig) GetTableColumns(tableName string) ([]string, error) {
+	sqlDB := db.GetDB()
 	query := sqlCommandLoader(db.GetType(), "get_table_columns")
 
 	rows, err := sqlDB.Query(query, tableName)
@@ -265,11 +281,7 @@ func (db *PostgreSQLConfig) GetTableColumns(tableName string) ([]string, error) 
 }
 
 func (db *PostgreSQLConfig) EnforceSchema() error {
-	sqlDB, err := sql.Open("postgres", db.DatabaseConnection())
-	if err != nil {
-		return fmt.Errorf("failed to open PostgreSQL database: %w", err)
-	}
-	defer sqlDB.Close()
+	sqlDB := db.GetDB()
 
 	for _, tableName := range RequiredTables() {
 		if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -303,12 +315,7 @@ func (db *PostgreSQLConfig) EnforceSchema() error {
 	return nil
 }
 func (db *PostgreSQLConfig) TestConnection() error {
-	sqlDB, err := sql.Open("postgres", db.DatabaseConnection())
-	if err != nil {
-		return err
-	}
-	defer sqlDB.Close()
-	return sqlDB.Ping()
+	return db.GetDB().Ping()
 }
 func (db *PostgreSQLConfig) ValidateSchema() error {
 	expectedSchema := GetExpectedSchema()
@@ -358,15 +365,10 @@ func (db *PostgreSQLConfig) ValidateSchema() error {
 	return nil
 }
 func (db *PostgreSQLConfig) TableExists(tableName string) (bool, error) {
-	sqlDB, err := sql.Open("postgres", db.DatabaseConnection())
-	if err != nil {
-		return false, fmt.Errorf("failed to open PostgreSQL database: %w", err)
-	}
-	defer sqlDB.Close()
-
+	sqlDB := db.GetDB()
 	query := sqlCommandLoader(db.GetType(), "check_table_exists")
 	var count int
-	err = sqlDB.QueryRow(query, tableName).Scan(&count)
+	err := sqlDB.QueryRow(query, tableName).Scan(&count)
 	if err != nil {
 		if db.state.Debug {
 			fmt.Printf("TableExists error: %v\n", err)
@@ -420,12 +422,7 @@ func (db *PostgreSQLConfig) PromptDatabaseSettings() {
 }
 
 func (db *PostgreSQLConfig) DropAllTables() error {
-	sqlDB, err := sql.Open("postgres", db.DatabaseConnection())
-	if err != nil {
-		return fmt.Errorf("failed to open PostgreSQL database: %w", err)
-	}
-	defer sqlDB.Close()
-
+	sqlDB := db.GetDB()
 	for _, tableName := range RequiredTables() {
 		query := fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE", tableName)
 		if _, err := sqlDB.Exec(query); err != nil {
@@ -438,6 +435,7 @@ func (db *PostgreSQLConfig) DropAllTables() error {
 // MSSQLConfig represents a Microsoft SQL Server database configuration
 type MSSQLConfig struct {
 	state    *state.State
+	db       *sql.DB
 	Host     string `mapstructure:"DB_HOST"`
 	Port     int    `mapstructure:"DB_PORT"`
 	Database string `mapstructure:"DB_NAME"`
@@ -445,13 +443,28 @@ type MSSQLConfig struct {
 	Password string `mapstructure:"DB_PASSWORD"`
 }
 
-func (db *MSSQLConfig) GetTableColumns(tableName string) ([]string, error) {
-	sqlDB, err := sql.Open("mssql", db.DatabaseConnection())
+func (db *MSSQLConfig) Connect() error {
+	var err error
+	db.db, err = sql.Open("mssql", db.DatabaseConnection())
 	if err != nil {
-		return nil, fmt.Errorf("failed to open MSSQL database: %w", err)
+		return fmt.Errorf("failed to open MSSQL database: %w", err)
 	}
-	defer sqlDB.Close()
+	return nil
+}
 
+func (db *MSSQLConfig) Close() error {
+	if db.db != nil {
+		return db.db.Close()
+	}
+	return nil
+}
+
+func (db *MSSQLConfig) GetDB() *sql.DB {
+	return db.db
+}
+
+func (db *MSSQLConfig) GetTableColumns(tableName string) ([]string, error) {
+	sqlDB := db.GetDB()
 	query := sqlCommandLoader(db.GetType(), "get_table_columns")
 
 	rows, err := sqlDB.Query(query, tableName)
@@ -472,11 +485,7 @@ func (db *MSSQLConfig) GetTableColumns(tableName string) ([]string, error) {
 }
 
 func (db *MSSQLConfig) EnforceSchema() error {
-	sqlDB, err := sql.Open("mssql", db.DatabaseConnection())
-	if err != nil {
-		return fmt.Errorf("failed to open MSSQL database: %w", err)
-	}
-	defer sqlDB.Close()
+	sqlDB := db.GetDB()
 
 	for _, tableName := range RequiredTables() {
 		if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -510,12 +519,7 @@ func (db *MSSQLConfig) EnforceSchema() error {
 	return nil
 }
 func (db *MSSQLConfig) TestConnection() error {
-	sqlDB, err := sql.Open("mssql", db.DatabaseConnection())
-	if err != nil {
-		return err
-	}
-	defer sqlDB.Close()
-	return sqlDB.Ping()
+	return db.GetDB().Ping()
 }
 func (db *MSSQLConfig) ValidateSchema() error {
 	expectedSchema := GetExpectedSchema()
@@ -565,18 +569,14 @@ func (db *MSSQLConfig) ValidateSchema() error {
 	return nil
 }
 func (db *MSSQLConfig) TableExists(tableName string) (bool, error) {
-	sqlDB, err := sql.Open("mssql", db.DatabaseConnection())
-	if err != nil {
-		return false, fmt.Errorf("failed to open MSSQL database: %w", err)
-	}
-	defer sqlDB.Close()
-
+	sqlDB := db.GetDB()
 	query := sqlCommandLoader(db.GetType(), "check_table_exists")
 	if db.state.Debug {
 		fmt.Printf("DEBUG: Executing query: %s with arg: %s\n", query, tableName)
 	}
 	var count int
-	err = sqlDB.QueryRow(query, tableName).Scan(&count)
+	err := sqlDB.QueryRow(query, tableName).Scan(&count)
+
 	if err != nil {
 		if db.state.Debug {
 			fmt.Printf("DEBUG: TableExists SQL ERROR: %v\n", err)
@@ -629,12 +629,7 @@ func (db *MSSQLConfig) PromptDatabaseSettings() {
 }
 
 func (db *MSSQLConfig) DropAllTables() error {
-	sqlDB, err := sql.Open("mssql", db.DatabaseConnection())
-	if err != nil {
-		return fmt.Errorf("failed to open MSSQL database: %w", err)
-	}
-	defer sqlDB.Close()
-
+	sqlDB := db.GetDB()
 	// First, drop all foreign key constraints
 	// This is a bit of a heavy-handed approach, but it's reliable
 	// A more elegant solution would be to drop tables in the correct order
@@ -705,6 +700,10 @@ func LoadDatabaseSettings(s *state.State) (DB, error) {
 		return nil, err
 	}
 
+	if err := db.Connect(); err != nil {
+		return nil, fmt.Errorf("error connecting to database: %w", err)
+	}
+
 	return db, nil
 }
 
@@ -750,12 +749,8 @@ func RunCommand(db DB, command string, args ...any) error {
 	if sqlText == "" {
 		return fmt.Errorf("unknown or unavailable SQL command: %s", command)
 	}
-	sqlDB, err := sql.Open(db.GetType(), db.DatabaseConnection())
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer sqlDB.Close()
-	_, err = sqlDB.Exec(sqlText, args...)
+	sqlDB := db.GetDB()
+	_, err := sqlDB.Exec(sqlText, args...)
 	return err
 }
 

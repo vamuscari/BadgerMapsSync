@@ -12,11 +12,7 @@ func GetAccountByID(db DB, accountID int) (*api.Account, error) {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: get_account_by_id")
 	}
 
-	sqlDB, err := sql.Open(db.GetType(), db.DatabaseConnection())
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-	defer sqlDB.Close()
+	sqlDB := db.GetDB()
 
 	var account api.Account
 	err = sqlDB.QueryRow(sqlText, accountID).Scan(
@@ -52,11 +48,7 @@ func GetCheckinByID(db DB, checkinID int) (*api.Checkin, error) {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: get_checkin_by_id")
 	}
 
-	sqlDB, err := sql.Open(db.GetType(), db.DatabaseConnection())
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-	defer sqlDB.Close()
+	sqlDB := db.GetDB()
 
 	var checkin api.Checkin
 	err = sqlDB.QueryRow(sqlText, checkinID).Scan(
@@ -75,11 +67,7 @@ func GetRouteByID(db DB, routeID int) (*api.Route, error) {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: get_route_by_id")
 	}
 
-	sqlDB, err := sql.Open(db.GetType(), db.DatabaseConnection())
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-	defer sqlDB.Close()
+	sqlDB := db.GetDB()
 
 	var route api.Route
 	err = sqlDB.QueryRow(sqlText, routeID).Scan(
@@ -98,11 +86,7 @@ func GetProfile(db DB) (*api.UserProfile, error) {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: get_profile")
 	}
 
-	sqlDB, err := sql.Open(db.GetType(), db.DatabaseConnection())
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-	defer sqlDB.Close()
+	sqlDB := db.GetDB()
 
 	var profile api.UserProfile
 	err = sqlDB.QueryRow(sqlText).Scan(
@@ -125,11 +109,7 @@ func GetAllAccountIDs(db DB) ([]int, error) {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: get_all_account_ids")
 	}
 
-	sqlDB, err := sql.Open(db.GetType(), db.DatabaseConnection())
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-	defer sqlDB.Close()
+	sqlDB := db.GetDB()
 
 	rows, err := sqlDB.Query(sqlText)
 	if err != nil {

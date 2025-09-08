@@ -32,12 +32,7 @@ func GetPendingAccountChanges(db DB) ([]AccountPendingChange, error) {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: get_pending_account_changes")
 	}
 
-	sqlDB, err := sql.Open(db.GetType(), db.DatabaseConnection())
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-	defer sqlDB.Close()
-
+	sqlDB := db.GetDB()
 	rows, err := sqlDB.Query(sqlText)
 	if err != nil {
 		return nil, err
@@ -61,12 +56,7 @@ func GetPendingCheckinChanges(db DB) ([]CheckinPendingChange, error) {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: get_pending_checkin_changes")
 	}
 
-	sqlDB, err := sql.Open(db.GetType(), db.DatabaseConnection())
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-	defer sqlDB.Close()
-
+	sqlDB := db.GetDB()
 	rows, err := sqlDB.Query(sqlText)
 	if err != nil {
 		return nil, err
@@ -90,12 +80,7 @@ func UpdatePendingChangeStatus(db DB, table string, changeId int, status string)
 		return fmt.Errorf("unknown or unavailable SQL command: update_pending_change_status")
 	}
 
-	sqlDB, err := sql.Open(db.GetType(), db.DatabaseConnection())
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer sqlDB.Close()
-
-	_, err = sqlDB.Exec(sqlText, status, changeId)
+	sqlDB := db.GetDB()
+	_, err := sqlDB.Exec(sqlText, status, changeId)
 	return err
 }
