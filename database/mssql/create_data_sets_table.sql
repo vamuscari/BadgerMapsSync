@@ -1,9 +1,9 @@
-IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='DataSets' AND xtype='U')
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='DataSets' and xtype='U')
 CREATE TABLE DataSets (
     Name NVARCHAR(255),
     ProfileId INT,
     Filterable BIT,
-    Label NVARCHAR(MAX),
+    Label NVARCHAR(255),
     Position INT,
     Type NVARCHAR(255),
     HasData BIT,
@@ -12,7 +12,9 @@ CREATE TABLE DataSets (
     Min FLOAT,
     Max FLOAT,
     RawMax FLOAT,
+    AccountField NVARCHAR(255),
     CreatedAt DATETIME2 DEFAULT GETDATE(),
     UpdatedAt DATETIME2 DEFAULT GETDATE(),
-    PRIMARY KEY (Name, ProfileId)
+    PRIMARY KEY (Name, ProfileId),
+    FOREIGN KEY (ProfileId) REFERENCES UserProfiles (ProfileId)
 );

@@ -1,0 +1,1 @@
+SELECT TOP 1 id, email, first_name, last_name, is_manager, is_hide_referral_ios_banner, marker_icon, manager, crm_base_url, crm_type, referral_url, map_start_zoom, map_start, is_user_can_edit, is_user_can_delete_checkins, is_user_can_add_new_text_values, has_data, default_appt_length, completed, trial_days_left FROM UserProfiles

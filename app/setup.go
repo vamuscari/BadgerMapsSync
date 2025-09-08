@@ -5,18 +5,21 @@ import (
 	"badgermaps/utils"
 	"bufio"
 	"fmt"
-	"github.com/spf13/viper"
 	"os"
+
+	"github.com/spf13/viper"
 )
 
 // InteractiveSetup guides the user through setting up the configuration
-func InteractiveSetup(app *State) bool {
+func InteractiveSetup(App *App) bool {
 	reader := bufio.NewReader(os.Stdin)
 
 	fmt.Println(utils.Colors.Blue("=== BadgerMaps CLI Setup ==="))
 	fmt.Println(utils.Colors.Yellow("This will guide you through setting up the BadgerMaps CLI."))
-	fmt.Println(utils.Colors.Yellow("Press Enter to accept the default value shown in [brackets]."))
 	fmt.Println()
+
+	setupOptions := []string{"Quick Setup", "Advanced Setup"}
+	setupChoice := utils.PromptChoice(reader, "Select setup type", setupOptions)
 
 	// API Settings
 	fmt.Println(utils.Colors.Blue("--- API Settings ---"))
@@ -27,16 +30,13 @@ func InteractiveSetup(app *State) bool {
 
 	// Database Settings
 	fmt.Println(utils.Colors.Blue("--- Database Settings ---"))
-	// Try to load the current configuration first
-	currentDB, err := database.LoadDatabaseSettings()
+	currentDB, err := database.LoadDatabaseSettings(App.State)
 	if err != nil {
 		fmt.Println(utils.Colors.Yellow("Could not load current database configuration: %v", err))
 	}
 
-	// Prompt the user to select a database type
 	dbOptions := []string{"sqlite3", "postgres", "mssql"}
 	if currentDB != nil {
-		// Move the current db type to the front of the list to make it the default
 		for i, dbType := range dbOptions {
 			if dbType == currentDB.GetType() {
 				dbOptions = append(dbOptions[:i], dbOptions[i+1:]...)
@@ -48,24 +48,35 @@ func InteractiveSetup(app *State) bool {
 	dbType := utils.PromptChoice(reader, "Select database type", dbOptions)
 	viper.Set("DB_TYPE", dbType)
 
-	// If the selected database type is different from the current one,
-	// we need to create a new database configuration
 	if currentDB == nil || currentDB.GetType() != dbType {
-		newDB, err := database.LoadDatabaseSettings()
+		newDB, err := database.LoadDatabaseSettings(App.State)
 		if err != nil {
 			fmt.Println(utils.Colors.Red("Error creating new database configuration: %v", err))
 			return false
 		}
-		app.DB = newDB
+		App.DB = newDB
 	}
 
-	// Run the promptDatabaseSettings() to configure the database
-	app.DB.PromptDatabaseSettings()
-
-	// After run SetDatabaseSettings to save the DB
-	if err := app.DB.SetDatabaseSettings(); err != nil {
+	App.DB.PromptDatabaseSettings()
+	if err := App.DB.SetDatabaseSettings(); err != nil {
 		fmt.Println(utils.Colors.Red("Error saving database settings: %v", err))
 		return false
+	}
+
+	if setupChoice == "Advanced Setup" {
+		// Server Settings
+		fmt.Println(utils.Colors.Blue("--- Server Settings ---"))
+		serverHost := utils.PromptString(reader, "Server Host", viper.GetString("SERVER_HOST"))
+		viper.Set("SERVER_HOST", serverHost)
+		serverPort := utils.PromptInt(reader, "Server Port", viper.GetInt("SERVER_PORT"))
+		viper.Set("SERVER_PORT", serverPort)
+		webhookSecret := utils.PromptString(reader, "Webhook Secret", viper.GetString("WEBHOOK_SECRET"))
+		viper.Set("WEBHOOK_SECRET", webhookSecret)
+
+		// Advanced Settings
+		fmt.Println(utils.Colors.Blue("--- Advanced Settings ---"))
+		maxConcurrent := utils.PromptInt(reader, "Max Concurrent Requests", viper.GetInt("MAX_CONCURRENT_REQUESTS"))
+		viper.Set("MAX_CONCURRENT_REQUESTS", maxConcurrent)
 	}
 
 	// Save configuration

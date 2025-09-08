@@ -1,11 +1,7 @@
-MERGE [Accounts] AS target
-USING (SELECT ? as Id, ? as FirstName, ? as LastName) AS source
-ON target.[Id] = source.Id
+MERGE Accounts AS target
+USING (SELECT ? AS Id, ? AS FullName) AS source
+ON (target.Id = source.Id)
 WHEN MATCHED THEN
-	UPDATE SET 
-		[FirstName] = source.FirstName,
-		[LastName] = source.LastName,
-		[UpdatedAt] = GETDATE()
+    UPDATE SET FullName = source.FullName
 WHEN NOT MATCHED THEN
-	INSERT ([Id], [FirstName], [LastName])
-	VALUES (source.Id, source.FirstName, source.LastName); 
+    INSERT (Id, FullName) VALUES (source.Id, source.FullName);

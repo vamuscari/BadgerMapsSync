@@ -4,14 +4,19 @@ import (
 	"badgermaps/api"
 	"badgermaps/app"
 	"badgermaps/database"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/spf13/viper"
 )
 
-func TestPushAccountCmd(t *testing.T) {
+func TestPushAccountsCmd(t *testing.T) {
+	viper.Reset()
+	viper.AutomaticEnv()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Type", "application/json")
@@ -19,20 +24,83 @@ func TestPushAccountCmd(t *testing.T) {
 	}))
 	defer server.Close()
 
-	db, err := database.LoadDatabaseSettings()
+	app := app.NewApplication()
+	app.State.NoColor = true
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	os.Setenv("DB_PATH", dbPath)
+
+	db, err := database.LoadDatabaseSettings(app.State)
 	if err != nil {
 		t.Fatalf("Failed to create temporary database: %v", err)
 	}
-
-	appState := &app.State{
-		DB:  db,
-		API: api.NewAPIClient("test-api-key", server.URL),
+	if err := db.EnforceSchema(); err != nil {
+		t.Fatalf("Failed to enforce schema: %v", err)
 	}
 
-	cmd := pushAccountCmd(appState)
-	cmd.SetArgs([]string{"123"})
+	sqlDB, err := sql.Open("sqlite3", db.DatabaseConnection())
+	if err != nil {
+		t.Fatalf("Failed to open test database: %v", err)
+	}
+	defer sqlDB.Close()
+
+	_, err = sqlDB.Exec("INSERT INTO AccountsPendingChanges (AccountId, ChangeType, Changes) VALUES (?, ?, ?)", 123, "UPDATE", `{"last_name":"Test Account"}`)
+	if err != nil {
+		t.Fatalf("Failed to insert test pending change: %v", err)
+	}
+
+	app.DB = db
+	app.API = api.NewAPIClient("test--key", server.URL)
+
+	cmd := PushCmd(app)
+	cmd.SetArgs([]string{"accounts"})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("pushAccountCmd() failed with error: %v", err)
+		t.Fatalf("push accounts failed with error: %v", err)
+	}
+}
+
+func TestPushCheckinsCmd(t *testing.T) {
+	viper.Reset()
+	viper.AutomaticEnv()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id": 456, "customer": 123}`))
+	}))
+	defer server.Close()
+
+	app := app.NewApplication()
+	app.State.NoColor = true
+
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	os.Setenv("DB_PATH", dbPath)
+
+	db, err := database.LoadDatabaseSettings(app.State)
+	if err != nil {
+		t.Fatalf("Failed to create temporary database: %v", err)
+	}
+	if err := db.EnforceSchema(); err != nil {
+		t.Fatalf("Failed to enforce schema: %v", err)
+	}
+
+	sqlDB, err := sql.Open("sqlite3", db.DatabaseConnection())
+	if err != nil {
+		t.Fatalf("Failed to open test database: %v", err)
+	}
+	defer sqlDB.Close()
+
+	_, err = sqlDB.Exec("INSERT INTO AccountCheckinsPendingChanges (CheckinId, ChangeType, Changes) VALUES (?, ?, ?)", 456, "CREATE", `{"customer":123,"comments":"Test"}`)
+	if err != nil {
+		t.Fatalf("Failed to insert test pending change: %v", err)
+	}
+
+	app.DB = db
+	app.API = api.NewAPIClient("test--key", server.URL)
+
+	cmd := PushCmd(app)
+	cmd.SetArgs([]string{"checkins"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("push checkins failed with error: %v", err)
 	}
 }
 

@@ -1,5 +1,6 @@
 INSERT OR REPLACE INTO UserProfiles (
-    ProfileId, FirstName, LastName, Email, IsManager, Manager, CompanyId,
-    CompanyName, CompanyShortName, Completed, TrialDaysLeft, HasData, DefaultApptLength,
-    UpdatedAt
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP);
+    ProfileId, Email, FirstName, LastName, IsManager, IsHideReferralIOSBanner, MarkerIcon, Manager,
+    CRMEditableFieldsList, CRMBaseUrl, CRMType, ReferralURL, MapStartZoom, MapStart, IsUserCanEdit,
+    IsUserCanDeleteCheckins, IsUserCanAddNewTextValues, HasData, DefaultApptLength, Completed, TrialDaysLeft,
+    CompanyId, CompanyName, CompanyShortName, UpdatedAt
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP);

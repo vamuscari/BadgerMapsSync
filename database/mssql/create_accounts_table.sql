@@ -6,7 +6,7 @@ CREATE TABLE Accounts (
     FullName NVARCHAR(255),
     PhoneNumber NVARCHAR(50),
     Email NVARCHAR(255),
-    CustomerId NVARCHAR(255),
+    CustomerId NVARCHAR(MAX),
     Notes NTEXT,
     OriginalAddress NTEXT,
     CrmId NVARCHAR(255),

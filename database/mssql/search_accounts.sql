@@ -1,3 +1,3 @@
 SELECT Id, FullName, FirstName, LastName, Email, PhoneNumber
 FROM Accounts
-WHERE FullName LIKE @p1 OR FirstName LIKE @p2 OR LastName LIKE @p3 OR Email LIKE @p4 OR PhoneNumber LIKE @p5
+WHERE FullName LIKE ? OR FirstName LIKE ? OR LastName LIKE ? OR Email LIKE ? OR PhoneNumber LIKE ?

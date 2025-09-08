@@ -20,17 +20,17 @@ func TestPullAccountCmd(t *testing.T) {
 	}))
 	defer server.Close()
 
-	db, err := database.LoadDatabaseSettings()
+	app := app.NewApplication()
+
+	db, err := database.LoadDatabaseSettings(app.State)
 	if err != nil {
 		t.Fatalf("Failed to create temporary database: %v", err)
 	}
 
-	appState := &app.State{
-		DB:  db,
-		API: api.NewAPIClient("test-api-key", server.URL),
-	}
+	app.DB = db
+	app.API = api.NewAPIClient("test-api-key", server.URL)
 
-	cmd := pullAccountCmd(appState)
+	cmd := pullAccountCmd(app)
 	cmd.SetArgs([]string{"123"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("pullAccountCmd() failed with error: %v", err)

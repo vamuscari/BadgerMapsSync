@@ -18,16 +18,17 @@ import (
 type App struct {
 	CfgFile string
 
-	State *state.State
-	DB    database.DB
-	API   *api.APIClient
+	State          *state.State
+	DB             database.DB
+	API            *api.APIClient
+	AdvancedConfig *AdvancedConfig
 }
 
 func NewApplication() *App {
 	return &App{
-		State: state.NewState(),
+		State:          state.NewState(),
+		AdvancedConfig: &AdvancedConfig{MaxConcurrentRequests: 10},
 	}
-
 }
 
 func (a *App) LoadConfiguration() error {
@@ -46,10 +47,19 @@ func (a *App) LoadConfiguration() error {
 	a.API = api.NewAPIClient(apiClient.APIKey, apiClient.BaseURL)
 
 	var err error
-	a.DB, err = database.LoadDatabaseSettings()
+	a.DB, err = database.LoadDatabaseSettings(a.State)
 	if err != nil {
 		return err
 	}
+
+	var advancedConfig AdvancedConfig
+	if err := viper.Unmarshal(&advancedConfig); err != nil {
+		return fmt.Errorf("error unmarshalling advanced config: %w", err)
+	}
+	if advancedConfig.MaxConcurrentRequests == 0 {
+		advancedConfig.MaxConcurrentRequests = 10
+	}
+	a.AdvancedConfig = &advancedConfig
 
 	return nil
 }

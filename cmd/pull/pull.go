@@ -1,7 +1,6 @@
 package pull
 
 import (
-	"badgermaps/api"
 	"badgermaps/app"
 	"fmt"
 	"os"
@@ -12,7 +11,7 @@ import (
 )
 
 // PullCmd creates a new pull command
-func PullCmd(App *app.State) *cobra.Command {
+func PullCmd(App *app.App) *cobra.Command {
 	App.VerifySetupOrExit()
 
 	pullCmd := &cobra.Command{
@@ -37,7 +36,7 @@ func PullCmd(App *app.State) *cobra.Command {
 	return pullCmd
 }
 
-func pullAccountCmd(App *app.State) *cobra.Command {
+func pullAccountCmd(App *app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "account [id]",
 		Short: "Pull a single account from BadgerMaps",
@@ -49,7 +48,7 @@ func pullAccountCmd(App *app.State) *cobra.Command {
 				fmt.Println(color.RedString("Invalid account ID: %s", args[0]))
 				os.Exit(1)
 			}
-			if App.Verbose {
+			if App.State.Verbose {
 				fmt.Println(color.CyanString("Pulling account with ID: %d", accountID))
 			}
 			account, err := App.API.GetAccountDetailed(accountID)
@@ -66,13 +65,13 @@ func pullAccountCmd(App *app.State) *cobra.Command {
 	}
 	return cmd
 }
-func pullAccountsCmd(App *app.State) *cobra.Command {
+func pullAccountsCmd(App *app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "accounts",
 		Short: "Pull all accounts from BadgerMaps",
 		Long:  `Pull all accounts from the BadgerMaps API and store them in the local database.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			if App.Verbose {
+			if App.State.Verbose {
 				fmt.Println(color.CyanString("Pulling all accounts..."))
 			}
 			PullAllAccounts(App, 0)
@@ -80,7 +79,7 @@ func pullAccountsCmd(App *app.State) *cobra.Command {
 	}
 	return cmd
 }
-func pullCheckinCmd(App *app.State) *cobra.Command {
+func pullCheckinCmd(App *app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "checkin [id]",
 		Short: "Pull a single checkin from BadgerMaps",
@@ -92,7 +91,7 @@ func pullCheckinCmd(App *app.State) *cobra.Command {
 				fmt.Println(color.RedString("Invalid checkin ID: %s", args[0]))
 				os.Exit(1)
 			}
-			if App.Verbose {
+			if App.State.Verbose {
 				fmt.Println(color.CyanString("Pulling checkin with ID: %d", checkinID))
 			}
 			checkin, err := App.API.GetCheckin(checkinID)
@@ -109,31 +108,21 @@ func pullCheckinCmd(App *app.State) *cobra.Command {
 	}
 	return cmd
 }
-func pullCheckinsCmd(App *app.State) *cobra.Command {
+func pullCheckinsCmd(App *app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "checkins",
 		Short: "Pull all checkins from BadgerMaps",
 		Long:  `Pull all checkins from the BadgerMaps API and store them in the local database.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			if App.Verbose {
+			if App.State.Verbose {
 				fmt.Println(color.CyanString("Pulling all checkins..."))
 			}
-			checkins, err := App.API.GetCheckins()
-			if err != nil {
-				fmt.Println(color.RedString("Error pulling checkins: %v", err))
-				os.Exit(1)
-			}
-			for _, checkin := range checkins {
-				if err := StoreCheckin(App, checkin); err != nil {
-					fmt.Println(color.RedString("Error storing checkin: %v", err))
-				}
-			}
-			fmt.Println(color.GreenString("Successfully pulled all checkins"))
+			PullAllCheckins(App)
 		},
 	}
 	return cmd
 }
-func pullRouteCmd(App *app.State) *cobra.Command {
+func pullRouteCmd(App *app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "route [id]",
 		Short: "Pull a single route from BadgerMaps",
@@ -145,7 +134,7 @@ func pullRouteCmd(App *app.State) *cobra.Command {
 				fmt.Println(color.RedString("Invalid route ID: %s", args[0]))
 				os.Exit(1)
 			}
-			if App.Verbose {
+			if App.State.Verbose {
 				fmt.Println(color.CyanString("Pulling route with ID: %d", routeID))
 			}
 			route, err := App.API.GetRoute(routeID)
@@ -153,19 +142,22 @@ func pullRouteCmd(App *app.State) *cobra.Command {
 				fmt.Println(color.RedString("Error pulling route: %v", err))
 				os.Exit(1)
 			}
-			// TODO: Store route
+			if err := StoreRoute(App, *route); err != nil {
+				fmt.Println(color.RedString("Error storing route: %v", err))
+				os.Exit(1)
+			}
 			fmt.Println(color.GreenString("Successfully pulled route with ID: %d", route.ID))
 		},
 	}
 	return cmd
 }
-func pullRoutesCmd(App *app.State) *cobra.Command {
+func pullRoutesCmd(App *app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "routes",
 		Short: "Pull all routes from BadgerMaps",
 		Long:  `Pull all routes from the BadgerMaps API and store them in the local database.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			if App.Verbose {
+			if App.State.Verbose {
 				fmt.Println(color.CyanString("Pulling all routes..."))
 			}
 			PullAllRoutes(App)
@@ -173,13 +165,13 @@ func pullRoutesCmd(App *app.State) *cobra.Command {
 	}
 	return cmd
 }
-func pullProfileCmd(App *app.State) *cobra.Command {
+func pullProfileCmd(App *app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "profile",
 		Short: "Pull user profile from BadgerMaps",
 		Long:  `Pull the user profile from the BadgerMaps API and store it in the local database.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			if App.Verbose {
+			if App.State.Verbose {
 				fmt.Println(color.CyanString("Pulling user profile..."))
 			}
 			profile, err := App.API.GetUserProfile()
@@ -187,65 +179,12 @@ func pullProfileCmd(App *app.State) *cobra.Command {
 				fmt.Println(color.RedString("Error pulling user profile: %v", err))
 				os.Exit(1)
 			}
-			// TODO: Store profile
+			if err := StoreProfile(App, profile); err != nil {
+				fmt.Println(color.RedString("Error storing profile: %v", err))
+				os.Exit(1)
+			}
 			fmt.Println(color.GreenString("Successfully pulled user profile for: %s", profile.Email))
 		},
 	}
 	return cmd
-}
-func PullAllCmd(App *app.State) *cobra.Command {
-	// ... implementation ...
-	return &cobra.Command{}
-}
-func PullAllAccounts(App *app.State, top int) {
-	accountIDs, err := App.API.GetAccountIDs()
-	if err != nil {
-		fmt.Println(color.RedString("Error getting account IDs: %v", err))
-		os.Exit(1)
-	}
-
-	if top > 0 && top < len(accountIDs) {
-		accountIDs = accountIDs[:top]
-	}
-
-	for _, id := range accountIDs {
-		account, err := App.API.GetAccountDetailed(id)
-		if err != nil {
-			fmt.Println(color.RedString("Error getting detailed account info for ID %d: %v", id, err))
-			continue
-		}
-		if err := StoreAccountDetailed(App, account); err != nil {
-			fmt.Println(color.RedString("Error storing account %d: %v", id, err))
-		}
-	}
-	fmt.Println(color.GreenString("Successfully pulled all accounts"))
-}
-func PullAllRoutes(App *app.State) {
-	routes, err := App.API.GetRoutes()
-	if err != nil {
-		fmt.Println(color.RedString("Error getting routes: %v", err))
-		os.Exit(1)
-	}
-
-	for _, route := range routes {
-		// TODO: Store route
-		if App.Verbose {
-			fmt.Println(color.CyanString("Pulled route: %s", route.Name))
-		}
-	}
-	fmt.Println(color.GreenString("Successfully pulled all routes"))
-}
-func StoreAccountDetailed(App *app.State, acc *api.Account) error {
-	// TODO: Implement database storage
-	if App.Verbose {
-		fmt.Println(color.CyanString("Stored account: %s", acc.FullName))
-	}
-	return nil
-}
-func StoreCheckin(App *app.State, checkin api.Checkin) error {
-	// TODO: Implement database storage
-	if App.Verbose {
-		fmt.Println(color.CyanString("Stored checkin: %d", checkin.ID))
-	}
-	return nil
 }

@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS DataSets (
-    Name VARCHAR(255),
+    Name TEXT,
     ProfileId INTEGER,
     Filterable BOOLEAN,
     Label TEXT,
@@ -7,11 +7,13 @@ CREATE TABLE IF NOT EXISTS DataSets (
     Type TEXT,
     HasData BOOLEAN,
     IsUserCanAddNewTextValues BOOLEAN,
-    RawMin REAL,
-    Min REAL,
-    Max REAL,
-    RawMax REAL,
-    CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (Name, ProfileId)
+    RawMin NUMERIC,
+    Min NUMERIC,
+    Max NUMERIC,
+    RawMax NUMERIC,
+    AccountField TEXT,
+    CreatedAt TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UpdatedAt TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (Name, ProfileId),
+    FOREIGN KEY (ProfileId) REFERENCES UserProfiles (ProfileId)
 );

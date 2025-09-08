@@ -7,6 +7,6 @@ CREATE TABLE IF NOT EXISTS DataSetValues
     DataSetPosition INTEGER,
     CreatedAt       DATETIME DEFAULT CURRENT_TIMESTAMP,
     UpdatedAt       DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (DataSetName) REFERENCES DataSet (Name),
+    FOREIGN KEY (DataSetName, ProfileId) REFERENCES DataSets (Name, ProfileId),
     FOREIGN KEY (ProfileId) REFERENCES UserProfiles (ProfileId)
 );

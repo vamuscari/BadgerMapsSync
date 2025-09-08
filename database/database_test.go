@@ -12,6 +12,7 @@ func TestSQLFiles(t *testing.T) {
 		"check_column_exists.sql",
 		"check_index_exists.sql",
 		"check_table_exists.sql",
+		"create_account_checkins_pending_changes_table.sql",
 		"create_account_checkins_table.sql",
 		"create_account_locations_table.sql",
 		"create_accounts_pending_changes_table.sql",
@@ -26,6 +27,14 @@ func TestSQLFiles(t *testing.T) {
 		"delete_data_set_values.sql",
 		"delete_data_sets.sql",
 		"delete_route_waypoints.sql",
+		"get_account_by_id.sql",
+		"get_all_account_ids.sql",
+		"get_checkin_by_id.sql",
+		"get_pending_account_changes.sql",
+		"get_pending_checkin_changes.sql",
+		"get_profile.sql",
+		"get_route_by_id.sql",
+		"get_table_columns.sql",
 		"insert_account_locations.sql",
 		"insert_data_set_values.sql",
 		"insert_data_sets.sql",
@@ -37,6 +46,7 @@ func TestSQLFiles(t *testing.T) {
 		"merge_user_profiles.sql",
 		"search_accounts.sql",
 		"search_routes.sql",
+		"update_pending_change_status.sql",
 	}
 
 	checkFiles := func(t *testing.T, dir string, expected []string) {
@@ -79,8 +89,7 @@ func TestSQLFiles(t *testing.T) {
 	})
 
 	t.Run("postgres", func(t *testing.T) {
-		postgresExpected := append(expectedFiles[:5], expectedFiles[6:]...) // Remove pending changes table
-		checkFiles(t, filepath.Join("postgres"), postgresExpected)
+		checkFiles(t, filepath.Join("postgres"), expectedFiles)
 	})
 
 	t.Run("mssql", func(t *testing.T) {

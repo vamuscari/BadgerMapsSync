@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS DataSets (
     Min REAL,
     Max REAL,
     RawMax REAL,
+    AccountField TEXT,
     CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
     UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (Name, ProfileId),

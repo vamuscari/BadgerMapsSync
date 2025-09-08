@@ -1,1 +1,1 @@
-DELETE FROM DataSets WHERE ProfileId = ? 
+DELETE FROM DataSets WHERE ProfileId = ?;

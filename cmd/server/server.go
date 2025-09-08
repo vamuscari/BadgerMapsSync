@@ -21,8 +21,8 @@ import (
 )
 
 // ServerCmd creates a new server command
-func ServerCmd(appState *app.State) *cobra.Command {
-	appState.VerifySetupOrExit()
+func ServerCmd(App *app.App) *cobra.Command {
+	App.VerifySetupOrExit()
 
 	serverCmd := &cobra.Command{
 		Use:   "server",
@@ -33,14 +33,14 @@ func ServerCmd(appState *app.State) *cobra.Command {
 			if err := viper.Unmarshal(&serverConfig); err != nil {
 				log.Fatalf("Error unmarshalling server config: %v", err)
 			}
-			runServer(appState, &serverConfig)
+			runServer(App, &serverConfig)
 		},
 	}
 	return serverCmd
 }
 
-func runServer(appState *app.State, config *ServerConfig) {
-	s := &server{App: appState}
+func runServer(App *app.App, config *ServerConfig) {
+	s := &server{App: App}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/webhook/account/create", s.handleAccountCreateWebhook)
 	mux.HandleFunc("/webhook/checkin", s.handleCheckinWebhook)
@@ -68,7 +68,7 @@ func runServer(appState *app.State, config *ServerConfig) {
 }
 
 type server struct {
-	App *app.State
+	App *app.App
 }
 
 func (s *server) handleAccountCreateWebhook(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +90,7 @@ func (s *server) handleAccountCreateWebhook(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "invalid JSON payload", http.StatusBadRequest)
 		return
 	}
-	if err := pull.StoreAccountDetailed(s.App, &acc); err != nil {
+	if err := pull.StoreAccountBasic(s.App, &acc); err != nil {
 		http.Error(w, "failed to store account", http.StatusInternalServerError)
 		return
 	}

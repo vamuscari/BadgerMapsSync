@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-func newServerSetupCmd(App *app.State) *cobra.Command {
+func newServerSetupCmd(App *app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "setup",
 		Short: "Configure server settings interactively",

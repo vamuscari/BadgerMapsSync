@@ -18,6 +18,7 @@ const (
 type APIClient struct {
 	BaseURL   string `mapstructure:"API_URL"`
 	APIKey    string `mapstructure:"API_KEY"`
+	UserID    int
 	client    *http.Client
 	endpoints *Endpoints
 }
@@ -144,6 +145,8 @@ type Account struct {
 	CustomText29         *null.String `json:"custom_text29"`
 	CustomNumeric30      *null.Float  `json:"custom_numeric30"`
 	CustomText30         *null.String `json:"custom_text30"`
+	CreatedAt            null.String  `json:"created_at"`
+	UpdatedAt            null.String  `json:"updated_at"`
 }
 
 // Location represents a BadgerMaps location
@@ -256,6 +259,7 @@ type DataField struct {
 	Min                       *null.Float  `json:"min,omitempty"`
 	Max                       *null.Float  `json:"max,omitempty"`
 	RawMax                    *null.Float  `json:"rawmax,omitempty"`
+	AccountField              null.String  `json:"account_field"`
 }
 
 // FieldValue represents a field value option
@@ -298,6 +302,43 @@ func (api *APIClient) GetAccountIDs() ([]int, error) {
 	ids := make([]int, len(accounts))
 	for i, acc := range accounts {
 		ids[i] = acc.ID
+	}
+
+	return ids, nil
+}
+
+// GetCheckinIDs retrieves all checkin IDs from the BadgerMaps API
+func (api *APIClient) GetCheckinIDs() ([]int, error) {
+	url := api.endpoints.Appointments()
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := api.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to appointments: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("endpoint appointments test failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var checkins []struct {
+		ID int `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&checkins); err != nil {
+		return nil, fmt.Errorf("failed to decode appointments response: %w", err)
+	}
+
+	ids := make([]int, len(checkins))
+	for i, checkin := range checkins {
+		ids[i] = checkin.ID
 	}
 
 	return ids, nil
@@ -390,6 +431,12 @@ func (api *APIClient) GetUserProfile() (*UserProfile, error) {
 		return nil, fmt.Errorf("failed to decode profiles response: %w", err)
 	}
 
+	for i, datafield := range profile.Datafields {
+		if accountField, ok := DataSetAccountFieldMappings[datafield.Name.String]; ok {
+			profile.Datafields[i].AccountField = null.StringFrom(accountField)
+		}
+	}
+
 	return &profile, nil
 }
 
@@ -414,6 +461,13 @@ func (api *APIClient) TestAPIConnection() error {
 
 	// Accept any 2xx status code as success
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		var profile struct {
+			ID int `json:"id"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&profile); err != nil {
+			return fmt.Errorf("failed to decode profile response: %w", err)
+		}
+		api.UserID = profile.ID
 		return nil
 	}
 
@@ -421,13 +475,26 @@ func (api *APIClient) TestAPIConnection() error {
 	return fmt.Errorf("API test failed with status %d: %s", resp.StatusCode, string(body))
 }
 
-// TestEndpoint tests a specific API endpoint
-func (api *APIClient) TestEndpoint(endpoint string) error {
-	// For custom endpoints that don't have a specific method in the Endpoints struct
-	url := fmt.Sprintf("%s/%s", api.BaseURL, strings.TrimPrefix(endpoint, "/"))
+// GetRaw performs a GET request to the specified endpoint and returns the raw response body as a string.
+func (api *APIClient) GetRaw(endpoint string) (string, error) {
+	var url string
+	if strings.Contains(endpoint, "?") {
+		parts := strings.Split(endpoint, "?")
+		endpointName := parts[0]
+		queryParams := parts[1]
+		url = fmt.Sprintf("%s/%s?%s", api.BaseURL, endpointName, queryParams)
+	} else if strings.Contains(endpoint, "/") {
+		url = fmt.Sprintf("%s/%s/", api.BaseURL, endpoint)
+	} else {
+		url = api.endpoints.GetEndpoint(endpoint)
+		if url == "" {
+			return "", fmt.Errorf("endpoint not found: %s", endpoint)
+		}
+	}
+
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create %s test request: %w", endpoint, err)
+		return "", fmt.Errorf("failed to create request for endpoint %s: %w", endpoint, err)
 	}
 
 	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
@@ -435,28 +502,140 @@ func (api *APIClient) TestEndpoint(endpoint string) error {
 
 	resp, err := api.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to connect to %s: %w", endpoint, err)
+		return "", fmt.Errorf("failed to connect to endpoint %s: %w", endpoint, err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("endpoint %s test failed with status %d: %s", endpoint, resp.StatusCode, string(body))
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body from endpoint %s: %w", endpoint, err)
 	}
 
-	return nil
+	if resp.StatusCode != http.StatusOK {
+		return string(body), fmt.Errorf("endpoint %s test failed with status %d", endpoint, resp.StatusCode)
+	}
+
+	return string(body), nil
 }
 
-// TestAllEndpoints tests all API endpoints
-func (api *APIClient) TestAllEndpoints() map[string]error {
-	endpoints := []string{"customers", "routes", "appointments", "profiles"}
-	results := make(map[string]error)
-
-	for _, endpoint := range endpoints {
-		results[endpoint] = api.TestEndpoint(endpoint)
+// PostRaw performs a POST request to the specified endpoint and returns the raw response body as a string.
+func (api *APIClient) PostRaw(endpoint string, data map[string]string) (string, error) {
+	url := api.endpoints.GetEndpoint(endpoint)
+	if url == "" {
+		return "", fmt.Errorf("endpoint not found: %s", endpoint)
 	}
 
-	return results
+	formData := make([]string, 0, len(data))
+	for key, value := range data {
+		formData = append(formData, fmt.Sprintf("%s=%s", key, value))
+	}
+	body := strings.Join(formData, "&")
+
+	req, err := http.NewRequest("POST", url, strings.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request for endpoint %s: %w", endpoint, err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := api.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to connect to endpoint %s: %w", endpoint, err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body from endpoint %s: %w", endpoint, err)
+	}
+
+	if resp.StatusCode != http.StatusCreated {
+		return string(bodyBytes), fmt.Errorf("endpoint %s test failed with status %d", endpoint, resp.StatusCode)
+	}
+
+	return string(bodyBytes), nil
+}
+
+// PatchRaw performs a PATCH request to the specified endpoint and returns the raw response body as a string.
+func (api *APIClient) PatchRaw(endpoint string, data map[string]string) (string, error) {
+	var url string
+	if strings.Contains(endpoint, "/") {
+		url = fmt.Sprintf("%s/%s/", api.BaseURL, endpoint)
+	} else {
+		url = api.endpoints.GetEndpoint(endpoint)
+		if url == "" {
+			return "", fmt.Errorf("endpoint not found: %s", endpoint)
+		}
+	}
+
+	formData := make([]string, 0, len(data))
+	for key, value := range data {
+		formData = append(formData, fmt.Sprintf("%s=%s", key, value))
+	}
+	body := strings.Join(formData, "&")
+
+	req, err := http.NewRequest("PATCH", url, strings.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request for endpoint %s: %w", endpoint, err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := api.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to connect to endpoint %s: %w", endpoint, err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body from endpoint %s: %w", endpoint, err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return string(bodyBytes), fmt.Errorf("endpoint %s test failed with status %d", endpoint, resp.StatusCode)
+	}
+
+	return string(bodyBytes), nil
+}
+
+// DeleteRaw performs a DELETE request to the specified endpoint and returns the raw response body as a string.
+func (api *APIClient) DeleteRaw(endpoint string) (string, error) {
+	var url string
+	if strings.Contains(endpoint, "/") {
+		url = fmt.Sprintf("%s/%s/", api.BaseURL, endpoint)
+	} else {
+		url = api.endpoints.GetEndpoint(endpoint)
+		if url == "" {
+			return "", fmt.Errorf("endpoint not found: %s", endpoint)
+		}
+	}
+
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request for endpoint %s: %w", endpoint, err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
+
+	resp, err := api.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to connect to endpoint %s: %w", endpoint, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body from endpoint %s: %w", endpoint, err)
+	}
+
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		return string(body), fmt.Errorf("endpoint %s test failed with status %d", endpoint, resp.StatusCode)
+	}
+
+	return string(body), nil
 }
 
 // GetAccountDetailed retrieves a specific account by ID
@@ -873,4 +1052,66 @@ func (api *APIClient) GetCheckin(checkinID int) (*Checkin, error) {
 	}
 
 	return &checkin, nil
+}
+
+// UpdateCheckin updates a checkin
+func (api *APIClient) UpdateCheckin(checkinID int, data map[string]string) (*Checkin, error) {
+	url := api.endpoints.Appointment(checkinID)
+
+	// Convert data to form-encoded string
+	formData := make([]string, 0, len(data))
+	for key, value := range data {
+		formData = append(formData, fmt.Sprintf("%s=%s", key, value))
+	}
+	body := strings.Join(formData, "&")
+
+	req, err := http.NewRequest("PATCH", url, strings.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := api.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update appointment %d: %w", checkinID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("update appointment %d failed with status %d: %s", checkinID, resp.StatusCode, string(body))
+	}
+
+	var checkin Checkin
+	if err := json.NewDecoder(resp.Body).Decode(&checkin); err != nil {
+		return nil, fmt.Errorf("failed to decode appointment response: %w", err)
+	}
+
+	return &checkin, nil
+}
+
+// DeleteCheckin deletes a checkin
+func (api *APIClient) DeleteCheckin(checkinID int) error {
+	url := api.endpoints.Appointment(checkinID)
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
+
+	resp, err := api.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to delete appointment %d: %w", checkinID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("delete appointment %d failed with status %d: %s", checkinID, resp.StatusCode, string(body))
+	}
+
+	return nil
 }

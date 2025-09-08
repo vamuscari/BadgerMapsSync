@@ -1,8 +1,9 @@
+SET IDENTITY_INSERT Accounts ON;
 MERGE [Accounts] AS target
 USING (SELECT ? as Id, ? as FirstName, ? as LastName, ? as FullName, 
-       ? as PhoneNumber, ? as Email, ? as AccountOwner, ? as CustomerId, ? as Notes, 
-       ? as OriginalAddress, ? as CrmId, ? as DaysSinceLastCheckin, ? as FollowUpDate,
-       ? as LastCheckinDate, ? as LastModifiedDate,
+       ? as PhoneNumber, ? as Email, ? as CustomerId, ? as Notes, 
+       ? as OriginalAddress, ? as CrmId, ? as AccountOwner, ? as DaysSinceLastCheckin, 
+       ? as LastCheckinDate, ? as LastModifiedDate, ? as FollowUpDate,
        ? as CustomNumeric, ? as CustomText, ? as CustomNumeric2, ? as CustomText2,
        ? as CustomNumeric3, ? as CustomText3, ? as CustomNumeric4, ? as CustomText4,
        ? as CustomNumeric5, ? as CustomText5, ? as CustomNumeric6, ? as CustomText6,
@@ -77,7 +78,7 @@ WHEN MATCHED THEN
 		[CustomText20] = source.CustomText20,
 		[CustomNumeric21] = source.CustomNumeric21,
 		[CustomText21] = source.CustomText21,
-		[CustomNumeric22] = source.CustomText22,
+		[CustomNumeric22] = source.CustomNumeric22,
 		[CustomText22] = source.CustomText22,
 		[CustomNumeric23] = source.CustomNumeric23,
 		[CustomText23] = source.CustomText23,
@@ -130,4 +131,5 @@ WHEN NOT MATCHED THEN
 	        source.CustomText24, source.CustomNumeric25, source.CustomText25, source.CustomNumeric26, 
 	        source.CustomText26, source.CustomNumeric27, source.CustomText27, source.CustomNumeric28, 
 	        source.CustomText28, source.CustomNumeric29, source.CustomText29, source.CustomNumeric30, 
-	        source.CustomText30); 
+	        source.CustomText30);
+SET IDENTITY_INSERT Accounts OFF;

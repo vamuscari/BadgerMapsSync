@@ -14,15 +14,17 @@ import (
 )
 
 func TestHandleAccountCreateWebhook(t *testing.T) {
-	db, err := database.LoadDatabaseSettings()
+	app := app.NewApplication()
+
+	db, err := database.LoadDatabaseSettings(app.State)
 	if err != nil {
 		t.Fatalf("Failed to create temporary database: %v", err)
 	}
-	appState := &app.State{
-		DB:  db,
-		API: api.NewAPIClient("test-api-key", ""),
-	}
-	s := &server{App: appState}
+
+	app.DB = db
+	app.API = api.NewAPIClient("test-api-key", "")
+
+	s := &server{App: app}
 	account := map[string]interface{}{
 		"id":        123,
 		"full_name": "Test Account",

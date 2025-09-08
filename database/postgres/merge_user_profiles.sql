@@ -1,5 +1,31 @@
-INSERT OR REPLACE INTO UserProfiles (
-    Id, FirstName, LastName, Email, IsManager, Manager, CompanyId,
-    CompanyName, CompanyShortName, Completed, TrialDaysLeft, HasData, DefaultApptLength,
-    UpdatedAt
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP); 
+INSERT INTO UserProfiles (
+    ProfileId, Email, FirstName, LastName, IsManager, IsHideReferralIOSBanner, MarkerIcon, Manager,
+    CRMEditableFieldsList, CRMBaseUrl, CRMType, ReferralURL, MapStartZoom, MapStart, IsUserCanEdit,
+    IsUserCanDeleteCheckins, IsUserCanAddNewTextValues, HasData, DefaultApptLength, Completed, TrialDaysLeft,
+    CompanyId, CompanyName, CompanyShortName, UpdatedAt
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+ON CONFLICT (ProfileId) DO UPDATE SET
+    Email = EXCLUDED.Email,
+    FirstName = EXCLUDED.FirstName,
+    LastName = EXCLUDED.LastName,
+    IsManager = EXCLUDED.IsManager,
+    IsHideReferralIOSBanner = EXCLUDED.IsHideReferralIOSBanner,
+    MarkerIcon = EXCLUDED.MarkerIcon,
+    Manager = EXCLUDED.Manager,
+    CRMEditableFieldsList = EXCLUDED.CRMEditableFieldsList,
+    CRMBaseUrl = EXCLUDED.CRMBaseUrl,
+    CRMType = EXCLUDED.CRMType,
+    ReferralURL = EXCLUDED.ReferralURL,
+    MapStartZoom = EXCLUDED.MapStartZoom,
+    MapStart = EXCLUDED.MapStart,
+    IsUserCanEdit = EXCLUDED.IsUserCanEdit,
+    IsUserCanDeleteCheckins = EXCLUDED.IsUserCanDeleteCheckins,
+    IsUserCanAddNewTextValues = EXCLUDED.IsUserCanAddNewTextValues,
+    HasData = EXCLUDED.HasData,
+    DefaultApptLength = EXCLUDED.DefaultApptLength,
+    Completed = EXCLUDED.Completed,
+    TrialDaysLeft = EXCLUDED.TrialDaysLeft,
+    CompanyId = EXCLUDED.CompanyId,
+    CompanyName = EXCLUDED.CompanyName,
+    CompanyShortName = EXCLUDED.CompanyShortName,
+    UpdatedAt = CURRENT_TIMESTAMP; 

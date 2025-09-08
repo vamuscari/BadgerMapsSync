@@ -2,6 +2,7 @@ IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='AccountCheckins' AND xtype='
 CREATE TABLE AccountCheckins (
     Id INT IDENTITY(1,1) PRIMARY KEY,
     CrmId NVARCHAR(255),
+    AccountId INT,
     Customer INT,
     LogDatetime DATETIME2,
     Type NVARCHAR(100),

@@ -8,5 +8,7 @@ CREATE TABLE DataSetValues (
     Text NVARCHAR(MAX),
     Value NVARCHAR(MAX),
     CreatedAt DATETIME2 DEFAULT GETDATE(),
-    UpdatedAt DATETIME2 DEFAULT GETDATE()
+    UpdatedAt DATETIME2 DEFAULT GETDATE(),
+    FOREIGN KEY (ProfileId) REFERENCES UserProfiles(ProfileId),
+    FOREIGN KEY (DataSetName, ProfileId) REFERENCES DataSets(Name, ProfileId)
 );
