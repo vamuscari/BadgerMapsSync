@@ -1,6 +1,6 @@
 IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Accounts' AND xtype='U')
 CREATE TABLE Accounts (
-    Id INT IDENTITY(1,1) PRIMARY KEY,
+    AccountId INT IDENTITY(1,1) PRIMARY KEY,
     FirstName NVARCHAR(255),
     LastName NVARCHAR(255),
     FullName NVARCHAR(255),

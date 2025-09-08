@@ -1,6 +1,6 @@
 IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Routes' AND xtype='U')
 CREATE TABLE Routes (
-    Id INT IDENTITY(1,1) PRIMARY KEY,
+    RouteId INT IDENTITY(1,1) PRIMARY KEY,
     Name NVARCHAR(255),
     RouteDate DATE,
     Duration INT,

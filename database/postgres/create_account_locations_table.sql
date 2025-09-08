@@ -1,6 +1,5 @@
 CREATE TABLE IF NOT EXISTS AccountLocations (
     LocationId SERIAL PRIMARY KEY,
-    Id INTEGER,
     AccountId INTEGER,
     City VARCHAR(255),
     Name VARCHAR(255),
@@ -13,5 +12,6 @@ CREATE TABLE IF NOT EXISTS AccountLocations (
     IsApproximate BOOLEAN DEFAULT FALSE,
     CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (Id, AccountId)
+    FOREIGN KEY (AccountId) REFERENCES Accounts(AccountId),
+    UNIQUE (AccountId)
 );

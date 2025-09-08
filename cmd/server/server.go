@@ -122,7 +122,7 @@ func (s *server) handleCheckinWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to store checkin", http.StatusInternalServerError)
 		return
 	}
-	fmt.Println(color.CyanString("Received and processed checkin webhook for checkin: %d", checkin.ID))
+	fmt.Println(color.CyanString("Received and processed checkin webhook for checkin: %d", checkin.CheckinId))
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "Checkin webhook processed")
 }

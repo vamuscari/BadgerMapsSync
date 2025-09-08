@@ -1,1 +1,1 @@
-SELECT * FROM "Accounts" WHERE "Id" = ?;
+SELECT * FROM "Accounts" WHERE "AccountId" = ?;

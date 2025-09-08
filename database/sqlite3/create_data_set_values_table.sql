@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS DataSetValues
 (
+    DataSetValueId  INTEGER PRIMARY KEY AUTOINCREMENT,
     DataSetName     TEXT,
     ProfileId       INTEGER,
     Text            TEXT,

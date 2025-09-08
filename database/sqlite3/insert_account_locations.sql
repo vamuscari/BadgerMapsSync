@@ -1,5 +1,4 @@
 INSERT INTO AccountLocations (
-	Id, 
 	AccountId, 
 	City, 
 	Name, 
@@ -9,4 +8,4 @@ INSERT INTO AccountLocations (
 	Latitude, 
 	AddressLine1, 
 	Location
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?); 
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?); 

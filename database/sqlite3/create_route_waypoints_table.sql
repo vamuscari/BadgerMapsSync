@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS RouteWaypoints (
-    Id INTEGER PRIMARY KEY,
+    WaypointId INTEGER PRIMARY KEY,
     RouteId INTEGER,
     Name TEXT,
     Address TEXT,

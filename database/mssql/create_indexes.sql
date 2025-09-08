@@ -5,8 +5,8 @@ CREATE INDEX IdxAccountsCustomerId ON Accounts(CustomerId);
 IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IdxAccountsCrmId')
 CREATE INDEX IdxAccountsCrmId ON Accounts(CrmId);
 
-IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IdxAccountCheckinsCustomer')
-CREATE INDEX IdxAccountCheckinsCustomer ON AccountCheckins(Customer);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IdxAccountCheckinsAccountId')
+CREATE INDEX IdxAccountCheckinsAccountId ON AccountCheckins(AccountId);
 
 IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IdxAccountCheckinsCrmId')
 CREATE INDEX IdxAccountCheckinsCrmId ON AccountCheckins(CrmId);

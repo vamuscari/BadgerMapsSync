@@ -369,24 +369,18 @@ func testCreateCheckin(App *app.App, accountId int) EndpointTestResult {
 
 func testGetAccountCheckins(App *app.App, accountId int) EndpointTestResult {
 	start := time.Now()
-	endpoint := "appointments/?customer_id=" + strconv.Itoa(accountId)
-	resp, err := App.API.GetRaw(endpoint)
+	checkins, err := App.API.GetCheckinsForAccount(accountId)
 	duration := time.Since(start)
 
 	passed := err == nil
 	if passed {
-		var checkins []struct {
-			Comments string `json:"comments"`
-			Customer int    `json:"customer"`
-		}
-		json.Unmarshal([]byte(resp), &checkins)
 		if len(checkins) == 0 {
 			passed = false
 			err = fmt.Errorf("validation failed: expected at least one checkin, got 0")
 		} else {
 			found := false
 			for _, checkin := range checkins {
-				if checkin.Comments == "Test checkin" && checkin.Customer == accountId {
+				if checkin.Comments.String == "Test checkin" && checkin.AccountId.Int64 == int64(accountId) {
 					found = true
 					break
 				}
@@ -402,7 +396,7 @@ func testGetAccountCheckins(App *app.App, accountId int) EndpointTestResult {
 		Endpoint: "get account checkins",
 		Passed:   passed,
 		Duration: duration,
-		Response: resp,
+		Response: "", // No raw response to save
 		Error:    err,
 	}
 }

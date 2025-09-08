@@ -1,6 +1,6 @@
 IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='RouteWaypoints' AND xtype='U')
 CREATE TABLE RouteWaypoints (
-    Id INT IDENTITY(1,1) PRIMARY KEY,
+    WaypointId INT IDENTITY(1,1) PRIMARY KEY,
     RouteId INT,
     Name NVARCHAR(255),
     Address NTEXT,

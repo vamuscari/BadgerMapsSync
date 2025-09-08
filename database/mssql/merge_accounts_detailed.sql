@@ -1,6 +1,6 @@
 SET IDENTITY_INSERT Accounts ON;
 MERGE [Accounts] AS target
-USING (SELECT ? as Id, ? as FirstName, ? as LastName, ? as FullName, 
+USING (SELECT ? as AccountId, ? as FirstName, ? as LastName, ? as FullName, 
        ? as PhoneNumber, ? as Email, ? as CustomerId, ? as Notes, 
        ? as OriginalAddress, ? as CrmId, ? as AccountOwner, ? as DaysSinceLastCheckin, 
        ? as LastCheckinDate, ? as LastModifiedDate, ? as FollowUpDate,
@@ -19,7 +19,7 @@ USING (SELECT ? as Id, ? as FirstName, ? as LastName, ? as FullName,
        ? as CustomNumeric25, ? as CustomText25, ? as CustomNumeric26, ? as CustomText26,
        ? as CustomNumeric27, ? as CustomText27, ? as CustomNumeric28, ? as CustomText28,
        ? as CustomNumeric29, ? as CustomText29, ? as CustomNumeric30, ? as CustomText30) AS source
-ON target.[Id] = source.Id
+ON target.[AccountId] = source.AccountId
 WHEN MATCHED THEN
 	UPDATE SET 
 		[FirstName] = source.FirstName,
@@ -98,7 +98,7 @@ WHEN MATCHED THEN
 		[CustomText30] = source.CustomText30,
 		[UpdatedAt] = GETDATE()
 WHEN NOT MATCHED THEN
-	INSERT ([Id], [FirstName], [LastName], [FullName], [PhoneNumber], [Email], [AccountOwner], 
+	INSERT ([AccountId], [FirstName], [LastName], [FullName], [PhoneNumber], [Email], [AccountOwner], 
 	        [CustomerId], [Notes], [OriginalAddress], [CrmId], [DaysSinceLastCheckin], [FollowUpDate],
 	        [LastCheckinDate], [LastModifiedDate], [CustomNumeric], [CustomText], [CustomNumeric2], 
 	        [CustomText2], [CustomNumeric3], [CustomText3], [CustomNumeric4], [CustomText4], 
@@ -113,7 +113,7 @@ WHEN NOT MATCHED THEN
 	        [CustomNumeric25], [CustomText25], [CustomNumeric26], [CustomText26], [CustomNumeric27], 
 	        [CustomText27], [CustomNumeric28], [CustomText28], [CustomNumeric29], [CustomText29], 
 	        [CustomNumeric30], [CustomText30])
-	VALUES (source.Id, source.FirstName, source.LastName, source.FullName, source.PhoneNumber, 
+	VALUES (source.AccountId, source.FirstName, source.LastName, source.FullName, source.PhoneNumber, 
 	        source.Email, source.AccountOwner, source.CustomerId, source.Notes, source.OriginalAddress, 
 	        source.CrmId, source.DaysSinceLastCheckin, source.FollowUpDate, source.LastCheckinDate, 
 	        source.LastModifiedDate, source.CustomNumeric, source.CustomText, source.CustomNumeric2, 

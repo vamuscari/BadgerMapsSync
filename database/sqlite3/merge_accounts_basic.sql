@@ -1,1 +1,1 @@
-INSERT OR REPLACE INTO Accounts (Id, FullName) VALUES (?, ?)
+INSERT OR REPLACE INTO Accounts (AccountId, FullName) VALUES (?, ?)

@@ -146,7 +146,7 @@ func pullRouteCmd(App *app.App) *cobra.Command {
 				fmt.Println(color.RedString("Error storing route: %v", err))
 				os.Exit(1)
 			}
-			fmt.Println(color.GreenString("Successfully pulled route with ID: %d", route.ID))
+			fmt.Println(color.GreenString("Successfully pulled route with ID: %d", route.RouteId))
 		},
 	}
 	return cmd

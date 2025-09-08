@@ -1,1 +1,1 @@
-INSERT INTO Accounts (Id, FullName) VALUES (?, ?) ON CONFLICT (Id) DO UPDATE SET FullName = ?
+INSERT INTO Accounts (AccountId, FullName) VALUES (?, ?) ON CONFLICT (AccountId) DO UPDATE SET FullName = ?

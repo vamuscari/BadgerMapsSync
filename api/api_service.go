@@ -69,16 +69,16 @@ func (api *APIClient) GetAccounts() ([]Account, error) {
 
 // Account represents a BadgerMaps account (customer)
 type Account struct {
-	ID                   null.Int     `json:"id"`
+	AccountId            null.Int     `json:"id"`
 	FirstName            *null.String `json:"first_name"`
 	LastName             null.String  `json:"last_name"`
 	FullName             null.String  `json:"full_name"`
 	PhoneNumber          null.String  `json:"phone_number"`
 	Email                null.String  `json:"email"`
-	CustomerID           *null.String `json:"customer_id"`
+	CustomerId           *null.String `json:"customer_id"`
 	Notes                *null.String `json:"notes"`
 	OriginalAddress      null.String  `json:"original_address"`
-	CRMID                *null.String `json:"crm_id"`
+	CrmId                *null.String `json:"crm_id"`
 	AccountOwner         *null.String `json:"account_owner"`
 	DaysSinceLastCheckin null.Int     `json:"days_since_last_checkin"`
 	LastCheckinDate      *null.String `json:"last_checkin_date"`
@@ -151,7 +151,7 @@ type Account struct {
 
 // Location represents a BadgerMaps location
 type Location struct {
-	ID            null.Int     `json:"id"`
+	LocationId    null.Int     `json:"id"`
 	City          null.String  `json:"city"`
 	Name          *null.String `json:"name"`
 	Zipcode       null.String  `json:"zipcode"`
@@ -165,7 +165,7 @@ type Location struct {
 
 // Route represents a BadgerMaps route
 type Route struct {
-	ID                 null.Int    `json:"id"`
+	RouteId            null.Int    `json:"id"`
 	Name               null.String `json:"name"`
 	RouteDate          null.String `json:"route_date"`
 	Duration           *null.Int   `json:"duration"`
@@ -177,7 +177,7 @@ type Route struct {
 
 // Wayponull.Int represents a route waypoint
 type Waypoint struct {
-	ID              null.Int     `json:"id"`
+	WaypointID      null.Int     `json:"id"`
 	Name            null.String  `json:"name"`
 	Address         null.String  `json:"address"`
 	Suite           *null.String `json:"suite"`
@@ -199,9 +199,9 @@ type Waypoint struct {
 
 // Checkin represents a BadgerMaps checkin (apponull.Intment)
 type Checkin struct {
-	ID          null.Int     `json:"id"`
-	CRMID       *null.String `json:"crm_id"`
-	Customer    null.Int     `json:"customer"`
+	CheckinId   null.Int     `json:"id"`
+	CrmId       *null.String `json:"crm_id"`
+	AccountId   null.Int     `json:"customer"` // Rename for clarity
 	LogDatetime null.String  `json:"log_datetime"`
 	Type        null.String  `json:"type"`
 	Comments    null.String  `json:"comments"`
@@ -211,7 +211,7 @@ type Checkin struct {
 
 // UserProfile represents a BadgerMaps user profile
 type UserProfile struct {
-	ID                        null.Int      `json:"id"`
+	ProfileId                 null.Int      `json:"id"`
 	Email                     null.String   `json:"email"`
 	FirstName                 null.String   `json:"first_name"`
 	LastName                  null.String   `json:"last_name"`
@@ -240,7 +240,7 @@ type UserProfile struct {
 
 // Company represents a BadgerMaps company
 type Company struct {
-	ID        null.Int    `json:"id"`
+	Id        null.Int    `json:"id"`
 	ShortName null.String `json:"short_name"`
 	Name      null.String `json:"name"`
 }
@@ -482,7 +482,7 @@ func (api *APIClient) GetRaw(endpoint string) (string, error) {
 		parts := strings.Split(endpoint, "?")
 		endpointName := parts[0]
 		queryParams := parts[1]
-		url = fmt.Sprintf("%s/%s?%s", api.BaseURL, endpointName, queryParams)
+		url = fmt.Sprintf("%s?%s", api.endpoints.GetEndpoint(endpointName), queryParams)
 	} else if strings.Contains(endpoint, "/") {
 		url = fmt.Sprintf("%s/%s/", api.BaseURL, endpoint)
 	} else {

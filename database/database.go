@@ -744,7 +744,7 @@ func RunCommand(db DB, command string, args ...any) error {
 func GetExpectedSchema() map[string][]string {
 	return map[string][]string{
 		"Accounts": {
-			"Id", "FirstName", "LastName", "FullName", "PhoneNumber", "Email", "CustomerId", "Notes",
+			"AccountId", "FirstName", "LastName", "FullName", "PhoneNumber", "Email", "CustomerId", "Notes",
 			"OriginalAddress", "CrmId", "AccountOwner", "DaysSinceLastCheckin", "LastCheckinDate",
 			"LastModifiedDate", "FollowUpDate", "CustomNumeric", "CustomText", "CustomNumeric2",
 			"CustomText2", "CustomNumeric3", "CustomText3", "CustomNumeric4", "CustomText4",
@@ -761,22 +761,25 @@ func GetExpectedSchema() map[string][]string {
 			"CustomNumeric30", "CustomText30", "CreatedAt", "UpdatedAt",
 		},
 		"AccountCheckins": {
-			"Id", "CrmId", "AccountId", "LogDatetime", "Type", "Comments", "ExtraFields", "CreatedBy",
+			"CheckinId", "CrmId", "AccountId", "LogDatetime", "Type", "Comments", "ExtraFields", "CreatedBy",
 			"CreatedAt", "UpdatedAt",
 		},
 		"AccountLocations": {
-			"LocationId", "Id", "AccountId", "City", "Name", "Zipcode", "Longitude", "State",
+			"LocationId", "AccountId", "City", "Name", "Zipcode", "Longitude", "State",
 			"Latitude", "AddressLine1", "Location", "IsApproximate", "CreatedAt", "UpdatedAt",
 		},
 		"AccountsPendingChanges": {
 			"ChangeId", "AccountId", "ChangeType", "Changes", "Status", "CreatedAt", "ProcessedAt",
 		},
+		"AccountCheckinsPendingChanges": {
+			"ChangeId", "CheckinId", "ChangeType", "Changes", "Status", "CreatedAt", "ProcessedAt",
+		},
 		"Routes": {
-			"Id", "Name", "RouteDate", "Duration", "StartAddress", "DestinationAddress", "StartTime",
+			"RouteId", "Name", "RouteDate", "Duration", "StartAddress", "DestinationAddress", "StartTime",
 			"CreatedAt", "UpdatedAt",
 		},
 		"RouteWaypoints": {
-			"Id", "RouteId", "Name", "Address", "Suite", "City", "State", "Zipcode", "Location",
+			"WaypointId", "RouteId", "Name", "Address", "Suite", "City", "State", "Zipcode", "Location",
 			"Latitude", "Longitude", "LayoverMinutes", "Position", "CompleteAddress", "LocationId",
 			"CustomerId", "ApptTime", "Type", "PlaceId", "CreatedAt", "UpdatedAt",
 		},

@@ -1,5 +1,5 @@
 INSERT OR REPLACE INTO Accounts (
-	Id,
+	AccountId,
     FirstName,	
     LastName,
  	FullName,

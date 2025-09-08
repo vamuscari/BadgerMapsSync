@@ -1,1 +1,1 @@
-SELECT Id FROM Accounts;
+SELECT AccountId FROM Accounts;

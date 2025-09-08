@@ -80,7 +80,7 @@ func PullAllCheckins(App *app.App) {
 			}
 			for _, checkin := range checkins {
 				if err := StoreCheckin(App, checkin); err != nil {
-					fmt.Fprintf(os.Stderr, "\n%s\n", color.RedString("Error storing checkin %d: %v", checkin.ID, err))
+					fmt.Fprintf(os.Stderr, "\n%s\n", color.RedString("Error storing checkin %d: %v", checkin.CheckinId, err))
 				}
 			}
 			bar.Add(1)
@@ -100,7 +100,7 @@ func PullAllRoutes(App *app.App) {
 
 	bar := progressbar.Default(int64(len(routes)))
 	for _, route := range routes {
-		if !route.ID.Valid {
+		if !route.RouteId.Valid {
 			if App.State.Verbose {
 				fmt.Fprintf(os.Stderr, "\n%s\n", color.YellowString("Skipping route with null ID"))
 			}
@@ -119,8 +119,8 @@ func StoreAccountDetailed(App *app.App, acc *api.Account) error {
 		fmt.Println(color.CyanString("Storing account: %s", acc.FullName))
 	}
 	return database.RunCommand(App.DB, "merge_accounts_detailed",
-		acc.ID, acc.FirstName, acc.LastName, acc.FullName, acc.PhoneNumber, acc.Email, acc.CustomerID, acc.Notes,
-		acc.OriginalAddress, acc.CRMID, acc.AccountOwner, acc.DaysSinceLastCheckin, acc.LastCheckinDate,
+		acc.AccountId, acc.FirstName, acc.LastName, acc.FullName, acc.PhoneNumber, acc.Email, acc.CustomerId, acc.Notes,
+		acc.OriginalAddress, acc.CrmId, acc.AccountOwner, acc.DaysSinceLastCheckin, acc.LastCheckinDate,
 		acc.LastModifiedDate, acc.FollowUpDate, acc.CustomNumeric, acc.CustomText, acc.CustomNumeric2,
 		acc.CustomText2, acc.CustomNumeric3, acc.CustomText3, acc.CustomNumeric4, acc.CustomText4,
 		acc.CustomNumeric5, acc.CustomText5, acc.CustomNumeric6, acc.CustomText6, acc.CustomNumeric7,
@@ -142,16 +142,16 @@ func StoreAccountBasic(App *app.App, acc *api.Account) error {
 		fmt.Println(color.CyanString("Storing account: %s", acc.FullName))
 	}
 	return database.RunCommand(App.DB, "merge_accounts_basic",
-		acc.ID, acc.FullName,
+		acc.AccountId, acc.FullName,
 	)
 }
 
 func StoreCheckin(App *app.App, checkin api.Checkin) error {
 	if App.State.Verbose {
-		fmt.Println(color.CyanString("Storing checkin: %d", checkin.ID))
+		fmt.Println(color.CyanString("Storing checkin: %d", checkin.CheckinId))
 	}
 	return database.RunCommand(App.DB, "merge_account_checkins",
-		checkin.ID, checkin.CRMID, checkin.Customer, checkin.LogDatetime, checkin.Type, checkin.Comments,
+		checkin.CheckinId, checkin.CrmId, checkin.AccountId, checkin.LogDatetime, checkin.Type, checkin.Comments,
 		checkin.ExtraFields, checkin.CreatedBy,
 	)
 }
@@ -161,7 +161,7 @@ func StoreRoute(App *app.App, route api.Route) error {
 		fmt.Println(color.CyanString("Storing route: %s", route.Name))
 	}
 	return database.RunCommand(App.DB, "merge_routes",
-		route.ID, route.Name, route.RouteDate, route.Duration, route.StartAddress, route.DestinationAddress,
+		route.RouteId, route.Name, route.RouteDate, route.Duration, route.StartAddress, route.DestinationAddress,
 		route.StartTime,
 	)
 }
@@ -180,27 +180,27 @@ func StoreProfile(App *app.App, profile *api.UserProfile) error {
 	crmEditableFieldsListStr := strings.Join(crmFields, ",")
 
 	err := database.RunCommand(App.DB, "merge_user_profiles",
-		profile.ID, profile.Email, profile.FirstName, profile.LastName, profile.IsManager,
+		profile.ProfileId, profile.Email, profile.FirstName, profile.LastName, profile.IsManager,
 		profile.IsHideReferralIOSBanner, profile.MarkerIcon, profile.Manager, crmEditableFieldsListStr,
 		profile.CRMBaseURL, profile.CRMType, profile.ReferralURL, profile.MapStartZoom, profile.MapStart,
 		profile.IsUserCanEdit, profile.IsUserCanDeleteCheckins, profile.IsUserCanAddNewTextValues,
 		profile.HasData, profile.DefaultApptLength, profile.Completed, profile.TrialDaysLeft,
-		profile.Company.ID, profile.Company.Name, profile.Company.ShortName,
+		profile.Company.Id, profile.Company.Name, profile.Company.ShortName,
 	)
 	if err != nil {
 		return err
 	}
 
-	if err := database.RunCommand(App.DB, "delete_data_set_values", profile.ID); err != nil {
+	if err := database.RunCommand(App.DB, "delete_data_set_values", profile.ProfileId); err != nil {
 		return err
 	}
-	if err := database.RunCommand(App.DB, "delete_data_sets", profile.ID); err != nil {
+	if err := database.RunCommand(App.DB, "delete_data_sets", profile.ProfileId); err != nil {
 		return err
 	}
 
 	for _, datafield := range profile.Datafields {
 		err := database.RunCommand(App.DB, "insert_data_sets",
-			datafield.Name, profile.ID, datafield.Filterable, datafield.Label, datafield.Position, datafield.Type,
+			datafield.Name, profile.ProfileId, datafield.Filterable, datafield.Label, datafield.Position, datafield.Type,
 			datafield.HasData, datafield.IsUserCanAddNewTextValues, datafield.RawMin, datafield.Min, datafield.Max,
 			datafield.RawMax, datafield.AccountField,
 		)
@@ -209,7 +209,7 @@ func StoreProfile(App *app.App, profile *api.UserProfile) error {
 		}
 		for _, value := range datafield.Values {
 			err := database.RunCommand(App.DB, "insert_data_set_values",
-				datafield.Name, profile.ID, value.Text, value.Value, datafield.Position,
+				datafield.Name, profile.ProfileId, value.Text, value.Value, datafield.Position,
 			)
 			if err != nil {
 				return err

@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS Routes (
-    Id SERIAL PRIMARY KEY,
+    RouteId SERIAL PRIMARY KEY,
     Name VARCHAR(255),
     RouteDate DATE,
     Duration INTEGER,

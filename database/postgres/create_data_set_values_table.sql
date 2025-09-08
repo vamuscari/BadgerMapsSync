@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS DataSetValues (
+    DataSetValueId SERIAL PRIMARY KEY,
     ProfileId INTEGER,
-    DataSetId INTEGER,
     DataSetName TEXT,
     DataSetPosition INTEGER,
     Text TEXT,

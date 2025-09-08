@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS Accounts (
-    Id SERIAL PRIMARY KEY,
+    AccountId SERIAL PRIMARY KEY,
     FirstName VARCHAR(255),
     LastName VARCHAR(255),
     FullName VARCHAR(255),

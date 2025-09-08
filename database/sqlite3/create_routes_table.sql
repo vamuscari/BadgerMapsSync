@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS Routes (
-    Id INTEGER PRIMARY KEY,
+    RouteId INTEGER PRIMARY KEY,
     Name TEXT,
     RouteDate TEXT,
     Duration INTEGER,

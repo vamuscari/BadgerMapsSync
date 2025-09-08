@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS AccountCheckins (
-    Id INTEGER PRIMARY KEY,
+    CheckinId INTEGER PRIMARY KEY,
     CrmId TEXT,
     AccountId INTEGER,
     LogDatetime TEXT,
@@ -9,5 +9,5 @@ CREATE TABLE IF NOT EXISTS AccountCheckins (
     CreatedBy TEXT,
     CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
     UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (AccountId) REFERENCES Accounts(Id)
+    FOREIGN KEY (AccountId) REFERENCES Accounts(AccountId)
 );

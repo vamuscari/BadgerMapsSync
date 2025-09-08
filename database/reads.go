@@ -20,8 +20,8 @@ func GetAccountByID(db DB, accountID int) (*api.Account, error) {
 
 	var account api.Account
 	err = sqlDB.QueryRow(sqlText, accountID).Scan(
-		&account.ID, &account.FirstName, &account.LastName, &account.FullName, &account.PhoneNumber,
-		&account.Email, &account.CustomerID, &account.Notes, &account.OriginalAddress, &account.CRMID,
+		&account.AccountId, &account.FirstName, &account.LastName, &account.FullName, &account.PhoneNumber,
+		&account.Email, &account.CustomerId, &account.Notes, &account.OriginalAddress, &account.CrmId,
 		&account.AccountOwner, &account.DaysSinceLastCheckin, &account.LastCheckinDate, &account.LastModifiedDate,
 		&account.FollowUpDate, &account.CustomNumeric, &account.CustomText, &account.CustomNumeric2,
 		&account.CustomText2, &account.CustomNumeric3, &account.CustomText3, &account.CustomNumeric4,
@@ -60,7 +60,7 @@ func GetCheckinByID(db DB, checkinID int) (*api.Checkin, error) {
 
 	var checkin api.Checkin
 	err = sqlDB.QueryRow(sqlText, checkinID).Scan(
-		&checkin.ID, &checkin.CRMID, &checkin.Customer, &checkin.LogDatetime, &checkin.Type,
+		&checkin.CheckinId, &checkin.CrmId, &checkin.AccountId, &checkin.LogDatetime, &checkin.Type,
 		&checkin.Comments, &checkin.ExtraFields, &checkin.CreatedBy,
 	)
 	if err != nil {
@@ -83,7 +83,7 @@ func GetRouteByID(db DB, routeID int) (*api.Route, error) {
 
 	var route api.Route
 	err = sqlDB.QueryRow(sqlText, routeID).Scan(
-		&route.ID, &route.Name, &route.RouteDate, &route.Duration, &route.StartAddress,
+		&route.RouteId, &route.Name, &route.RouteDate, &route.Duration, &route.StartAddress,
 		&route.DestinationAddress, &route.StartTime,
 	)
 	if err != nil {
@@ -106,12 +106,12 @@ func GetProfile(db DB) (*api.UserProfile, error) {
 
 	var profile api.UserProfile
 	err = sqlDB.QueryRow(sqlText).Scan(
-		&profile.ID, &profile.Email, &profile.FirstName, &profile.LastName, &profile.IsManager,
+		&profile.ProfileId, &profile.Email, &profile.FirstName, &profile.LastName, &profile.IsManager,
 		&profile.IsHideReferralIOSBanner, &profile.MarkerIcon, &profile.Manager, &profile.CRMEditableFieldsList,
 		&profile.CRMBaseURL, &profile.CRMType, &profile.ReferralURL, &profile.MapStartZoom, &profile.MapStart,
 		&profile.IsUserCanEdit, &profile.IsUserCanDeleteCheckins, &profile.IsUserCanAddNewTextValues,
 		&profile.HasData, &profile.DefaultApptLength, &profile.Completed, &profile.TrialDaysLeft,
-		&profile.Company.ID, &profile.Company.Name, &profile.Company.ShortName,
+		&profile.Company.Id, &profile.Company.Name, &profile.Company.ShortName,
 	)
 	if err != nil {
 		return nil, err

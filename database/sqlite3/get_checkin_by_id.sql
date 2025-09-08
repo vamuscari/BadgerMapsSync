@@ -1,1 +1,1 @@
-SELECT id, crm_id, customer, log_datetime, type, comments, extra_fields, created_by FROM AccountCheckins WHERE id = ?
+SELECT CheckinId, CrmId, AccountId, LogDatetime, Type, Comments, ExtraFields, CreatedBy FROM AccountCheckins WHERE CheckinId = ?

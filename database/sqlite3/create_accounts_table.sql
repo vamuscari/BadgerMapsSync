@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS Accounts (
-    Id INTEGER PRIMARY KEY,
+    AccountId INTEGER PRIMARY KEY,
     FirstName TEXT,
     LastName TEXT,
     FullName TEXT,

@@ -1,12 +1,13 @@
 CREATE TABLE IF NOT EXISTS AccountCheckins (
-    Id SERIAL PRIMARY KEY,
+    CheckinId SERIAL PRIMARY KEY,
     CrmId VARCHAR(255),
-    Customer INTEGER,
+    AccountId INTEGER,
     LogDatetime TIMESTAMP,
     Type VARCHAR(100),
     Comments TEXT,
     ExtraFields TEXT,
     CreatedBy VARCHAR(255),
     CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (AccountId) REFERENCES Accounts(AccountId)
 );

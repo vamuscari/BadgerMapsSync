@@ -1,7 +1,6 @@
 IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='AccountLocations' AND xtype='U')
 CREATE TABLE AccountLocations (
     LocationId INT IDENTITY(1,1) PRIMARY KEY,
-    Id INT,
     AccountId INT,
     City NVARCHAR(255),
     Name NVARCHAR(255),
@@ -14,5 +13,6 @@ CREATE TABLE AccountLocations (
     IsApproximate BIT DEFAULT 0,
     CreatedAt DATETIME2 DEFAULT GETDATE(),
     UpdatedAt DATETIME2 DEFAULT GETDATE(),
-    UNIQUE (Id, AccountId)
+    FOREIGN KEY (AccountId) REFERENCES Accounts(AccountId),
+    UNIQUE (AccountId)
 ); 
