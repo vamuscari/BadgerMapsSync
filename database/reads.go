@@ -2,7 +2,6 @@ package database
 
 import (
 	"badgermaps/api"
-	"database/sql"
 	"fmt"
 )
 
@@ -15,7 +14,7 @@ func GetAccountByID(db DB, accountID int) (*api.Account, error) {
 	sqlDB := db.GetDB()
 
 	var account api.Account
-	err = sqlDB.QueryRow(sqlText, accountID).Scan(
+	err := sqlDB.QueryRow(sqlText, accountID).Scan(
 		&account.AccountId, &account.FirstName, &account.LastName, &account.FullName, &account.PhoneNumber,
 		&account.Email, &account.CustomerId, &account.Notes, &account.OriginalAddress, &account.CrmId,
 		&account.AccountOwner, &account.DaysSinceLastCheckin, &account.LastCheckinDate, &account.LastModifiedDate,
@@ -51,7 +50,7 @@ func GetCheckinByID(db DB, checkinID int) (*api.Checkin, error) {
 	sqlDB := db.GetDB()
 
 	var checkin api.Checkin
-	err = sqlDB.QueryRow(sqlText, checkinID).Scan(
+	err := sqlDB.QueryRow(sqlText, checkinID).Scan(
 		&checkin.CheckinId, &checkin.CrmId, &checkin.AccountId, &checkin.LogDatetime, &checkin.Type,
 		&checkin.Comments, &checkin.ExtraFields, &checkin.CreatedBy,
 	)
@@ -70,7 +69,7 @@ func GetRouteByID(db DB, routeID int) (*api.Route, error) {
 	sqlDB := db.GetDB()
 
 	var route api.Route
-	err = sqlDB.QueryRow(sqlText, routeID).Scan(
+	err := sqlDB.QueryRow(sqlText, routeID).Scan(
 		&route.RouteId, &route.Name, &route.RouteDate, &route.Duration, &route.StartAddress,
 		&route.DestinationAddress, &route.StartTime,
 	)
@@ -89,7 +88,7 @@ func GetProfile(db DB) (*api.UserProfile, error) {
 	sqlDB := db.GetDB()
 
 	var profile api.UserProfile
-	err = sqlDB.QueryRow(sqlText).Scan(
+	err := sqlDB.QueryRow(sqlText).Scan(
 		&profile.ProfileId, &profile.Email, &profile.FirstName, &profile.LastName, &profile.IsManager,
 		&profile.IsHideReferralIOSBanner, &profile.MarkerIcon, &profile.Manager, &profile.CRMEditableFieldsList,
 		&profile.CRMBaseURL, &profile.CRMType, &profile.ReferralURL, &profile.MapStartZoom, &profile.MapStart,

@@ -1,7 +1,6 @@
 package pull
 
 import (
-	"badgermaps/api"
 	"badgermaps/app"
 	"badgermaps/database"
 	"encoding/json"
@@ -10,6 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"badgermaps/api"
+	"github.com/spf13/viper"
 )
 
 func TestPullAccountCmd(t *testing.T) {
@@ -20,11 +22,22 @@ func TestPullAccountCmd(t *testing.T) {
 	}))
 	defer server.Close()
 
+	// Create a temporary directory for the test database
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test.db")
+
+	// Set viper values for the test
+	viper.Set("DB_TYPE", "sqlite3")
+	viper.Set("DB_PATH", dbPath)
+
 	app := app.NewApplication()
 
 	db, err := database.LoadDatabaseSettings(app.State)
 	if err != nil {
 		t.Fatalf("Failed to create temporary database: %v", err)
+	}
+	if err := db.EnforceSchema(); err != nil {
+		t.Fatalf("Failed to enforce schema: %v", err)
 	}
 
 	app.DB = db

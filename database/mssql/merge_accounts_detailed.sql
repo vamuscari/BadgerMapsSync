@@ -18,7 +18,8 @@ USING (SELECT ? as AccountId, ? as FirstName, ? as LastName, ? as FullName,
        ? as CustomNumeric23, ? as CustomText23, ? as CustomNumeric24, ? as CustomText24,
        ? as CustomNumeric25, ? as CustomText25, ? as CustomNumeric26, ? as CustomText26,
        ? as CustomNumeric27, ? as CustomText27, ? as CustomNumeric28, ? as CustomText28,
-       ? as CustomNumeric29, ? as CustomText29, ? as CustomNumeric30, ? as CustomText30) AS source
+       ? as CustomNumeric29, ? as CustomText29, ? as CustomNumeric30, ? as CustomText30,
+       ? as CreatedAt, ? as UpdatedAt) AS source
 ON target.[AccountId] = source.AccountId
 WHEN MATCHED THEN
 	UPDATE SET 
@@ -96,7 +97,7 @@ WHEN MATCHED THEN
 		[CustomText29] = source.CustomText29,
 		[CustomNumeric30] = source.CustomNumeric30,
 		[CustomText30] = source.CustomText30,
-		[UpdatedAt] = GETDATE()
+		[UpdatedAt] = source.UpdatedAt
 WHEN NOT MATCHED THEN
 	INSERT ([AccountId], [FirstName], [LastName], [FullName], [PhoneNumber], [Email], [AccountOwner], 
 	        [CustomerId], [Notes], [OriginalAddress], [CrmId], [DaysSinceLastCheckin], [FollowUpDate],
@@ -112,7 +113,7 @@ WHEN NOT MATCHED THEN
 	        [CustomText22], [CustomNumeric23], [CustomText23], [CustomNumeric24], [CustomText24], 
 	        [CustomNumeric25], [CustomText25], [CustomNumeric26], [CustomText26], [CustomNumeric27], 
 	        [CustomText27], [CustomNumeric28], [CustomText28], [CustomNumeric29], [CustomText29], 
-	        [CustomNumeric30], [CustomText30])
+	        [CustomNumeric30], [CustomText30], [CreatedAt], [UpdatedAt])
 	VALUES (source.AccountId, source.FirstName, source.LastName, source.FullName, source.PhoneNumber, 
 	        source.Email, source.AccountOwner, source.CustomerId, source.Notes, source.OriginalAddress, 
 	        source.CrmId, source.DaysSinceLastCheckin, source.FollowUpDate, source.LastCheckinDate, 
@@ -131,5 +132,5 @@ WHEN NOT MATCHED THEN
 	        source.CustomText24, source.CustomNumeric25, source.CustomText25, source.CustomNumeric26, 
 	        source.CustomText26, source.CustomNumeric27, source.CustomText27, source.CustomNumeric28, 
 	        source.CustomText28, source.CustomNumeric29, source.CustomText29, source.CustomNumeric30, 
-	        source.CustomText30);
+	        source.CustomText30, source.CreatedAt, source.UpdatedAt);
 SET IDENTITY_INSERT Accounts OFF;

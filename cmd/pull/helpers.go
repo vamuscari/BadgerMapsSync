@@ -133,7 +133,7 @@ func StoreAccountDetailed(App *app.App, acc *api.Account) error {
 		acc.CustomText22, acc.CustomNumeric23, acc.CustomText23, acc.CustomNumeric24, acc.CustomText24,
 		acc.CustomNumeric25, acc.CustomText25, acc.CustomNumeric26, acc.CustomText26, acc.CustomNumeric27,
 		acc.CustomText27, acc.CustomNumeric28, acc.CustomText28, acc.CustomNumeric29, acc.CustomText29,
-		acc.CustomNumeric30, acc.CustomText30,
+		acc.CustomNumeric30, acc.CustomText30, acc.CreatedAt, acc.UpdatedAt,
 	)
 }
 

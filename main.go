@@ -58,11 +58,12 @@ func bind() {
 func main() {
 	App = app.NewApplication()
 	bind()
-	// Check if no arguments were provided
-		if appState.DB != nil {
-		defer appState.DB.Close()
+
+	if App.DB != nil {
+		defer App.DB.Close()
 	}
-	cmd.Execute()
+
+	if err := rootCmd.Execute(); err != nil {
 		if App.State.Debug {
 			fmt.Printf("Error: %v\n", err)
 		}
