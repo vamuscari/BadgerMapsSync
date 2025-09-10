@@ -30,7 +30,7 @@ func TestPullAccountCmd(t *testing.T) {
 	viper.Set("DB_TYPE", "sqlite3")
 	viper.Set("DB_PATH", dbPath)
 
-	app := app.NewApplication()
+	app := app.NewApp()
 
 	db, err := database.LoadDatabaseSettings(app.State)
 	if err != nil {

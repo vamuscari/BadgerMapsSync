@@ -10,14 +10,19 @@ import (
 )
 
 func PullAllAccounts(a *App, top int, log func(string)) error {
+	a.Events.Dispatch(Event{Type: PullStart, Source: "accounts"})
+
 	accountIDs, err := a.API.GetAccountIDs()
 	if err != nil {
-		return fmt.Errorf("error getting account IDs: %w", err)
+		err = fmt.Errorf("error getting account IDs: %w", err)
+		a.Events.Dispatch(Event{Type: PullError, Source: "accounts", Payload: err})
+		return err
 	}
 
 	if top > 0 && top < len(accountIDs) {
 		accountIDs = accountIDs[:top]
 	}
+	a.Events.Dispatch(Event{Type: ResourceIDsFetched, Source: "accounts", Payload: len(accountIDs)})
 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, a.MaxConcurrentRequests)
@@ -31,14 +36,22 @@ func PullAllAccounts(a *App, top int, log func(string)) error {
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			log(fmt.Sprintf("Pulling account %d of %d (ID: %d)", index+1, len(accountIDs), accountID))
+			a.Events.Dispatch(Event{Type: FetchDetailStart, Source: "accounts", Payload: accountID})
 			account, err := a.API.GetAccountDetailed(accountID)
 			if err != nil {
-				errorChan <- fmt.Errorf("error getting detailed account info for ID %d: %w", accountID, err)
+				err = fmt.Errorf("error getting detailed account info for ID %d: %w", accountID, err)
+				a.Events.Dispatch(Event{Type: PullError, Source: "accounts", Payload: err})
+				errorChan <- err
 				return
 			}
+			a.Events.Dispatch(Event{Type: FetchDetailSuccess, Source: "accounts", Payload: account})
+
 			if err := StoreAccountDetailed(a, account, log); err != nil {
-				errorChan <- fmt.Errorf("error storing account %d: %w", accountID, err)
+				err = fmt.Errorf("error storing account %d: %w", accountID, err)
+				a.Events.Dispatch(Event{Type: PullError, Source: "accounts", Payload: err})
+				errorChan <- err
+			} else {
+				a.Events.Dispatch(Event{Type: StoreSuccess, Source: "accounts", Payload: account})
 			}
 		}(id, i)
 	}
@@ -51,6 +64,8 @@ func PullAllAccounts(a *App, top int, log func(string)) error {
 		pullErrors = append(pullErrors, err.Error())
 	}
 
+	a.Events.Dispatch(Event{Type: PullComplete, Source: "accounts", Payload: len(pullErrors)})
+
 	if len(pullErrors) > 0 {
 		return fmt.Errorf("encountered errors during account pull:\n- %s", strings.Join(pullErrors, "\n- "))
 	}
@@ -60,10 +75,15 @@ func PullAllAccounts(a *App, top int, log func(string)) error {
 }
 
 func PullAllCheckins(a *App, log func(string)) error {
+	a.Events.Dispatch(Event{Type: PullStart, Source: "checkins"})
+
 	accountIDs, err := database.GetAllAccountIDs(a.DB)
 	if err != nil {
-		return fmt.Errorf("error getting account IDs from DB: %w", err)
+		err = fmt.Errorf("error getting account IDs from DB: %w", err)
+		a.Events.Dispatch(Event{Type: PullError, Source: "checkins", Payload: err})
+		return err
 	}
+	a.Events.Dispatch(Event{Type: ResourceIDsFetched, Source: "checkins", Payload: len(accountIDs)})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -86,13 +106,17 @@ func PullAllCheckins(a *App, log func(string)) error {
 			default:
 			}
 
-			log(fmt.Sprintf("Pulling checkins for account %d of %d (ID: %d)", index+1, len(accountIDs), accountID))
+			a.Events.Dispatch(Event{Type: FetchDetailStart, Source: "checkins", Payload: accountID})
 			checkins, err := a.API.GetCheckinsForAccount(accountID)
 			if err != nil {
-				errorChan <- fmt.Errorf("error getting checkins for account ID %d: %w", accountID, err)
+				err = fmt.Errorf("error getting checkins for account ID %d: %w", accountID, err)
+				a.Events.Dispatch(Event{Type: PullError, Source: "checkins", Payload: err})
+				errorChan <- err
 				cancel() // Cancel context on first error
 				return
 			}
+			a.Events.Dispatch(Event{Type: FetchDetailSuccess, Source: "checkins", Payload: checkins})
+
 			for _, checkin := range checkins {
 				select {
 				case <-ctx.Done():
@@ -100,8 +124,12 @@ func PullAllCheckins(a *App, log func(string)) error {
 				default:
 				}
 				if err := StoreCheckin(a, checkin, log); err != nil {
-					errorChan <- fmt.Errorf("error storing checkin %d: %w", checkin.CheckinId, err)
+					err = fmt.Errorf("error storing checkin %d: %w", checkin.CheckinId.Int64, err)
+					a.Events.Dispatch(Event{Type: PullError, Source: "checkins", Payload: err})
+					errorChan <- err
 					cancel() // Cancel context on first error
+				} else {
+					a.Events.Dispatch(Event{Type: StoreSuccess, Source: "checkins", Payload: checkin})
 				}
 			}
 		}(id, i)
@@ -115,6 +143,8 @@ func PullAllCheckins(a *App, log func(string)) error {
 		pullErrors = append(pullErrors, err.Error())
 	}
 
+	a.Events.Dispatch(Event{Type: PullComplete, Source: "checkins", Payload: len(pullErrors)})
+
 	if len(pullErrors) > 0 {
 		return fmt.Errorf("encountered errors during check-in pull:\n- %s", strings.Join(pullErrors, "\n- "))
 	}
@@ -124,11 +154,17 @@ func PullAllCheckins(a *App, log func(string)) error {
 }
 
 func PullAllRoutes(a *App, log func(string)) error {
+	a.Events.Dispatch(Event{Type: PullStart, Source: "routes"})
+
 	routes, err := a.API.GetRoutes()
 	if err != nil {
-		return fmt.Errorf("error getting routes: %w", err)
+		err = fmt.Errorf("error getting routes: %w", err)
+		a.Events.Dispatch(Event{Type: PullError, Source: "routes", Payload: err})
+		return err
 	}
+	a.Events.Dispatch(Event{Type: ResourceIDsFetched, Source: "routes", Payload: len(routes)})
 
+	errorCount := 0
 	for i, route := range routes {
 		if !route.RouteId.Valid {
 			if a.State.Verbose {
@@ -136,19 +172,25 @@ func PullAllRoutes(a *App, log func(string)) error {
 			}
 			continue
 		}
-		log(fmt.Sprintf("Storing route %d of %d: %s", i+1, len(routes), route.Name))
+
+		a.Events.Dispatch(Event{Type: FetchDetailSuccess, Source: "routes", Payload: route})
 		if err := StoreRoute(a, route, log); err != nil {
-			// Log the error but continue trying to store other routes
-			log(fmt.Sprintf("Error storing route: %v", err))
+			err = fmt.Errorf("error storing route: %w", err)
+			a.Events.Dispatch(Event{Type: PullError, Source: "routes", Payload: err})
+			errorCount++
+		} else {
+			a.Events.Dispatch(Event{Type: StoreSuccess, Source: "routes", Payload: route})
 		}
 	}
+
+	a.Events.Dispatch(Event{Type: PullComplete, Source: "routes", Payload: errorCount})
 	log("Successfully pulled all routes")
 	return nil
 }
 
 func StoreAccountDetailed(a *App, acc *api.Account, log func(string)) error {
 	if a.State.Verbose {
-		log(fmt.Sprintf("Storing account: %s", acc.FullName))
+		log(fmt.Sprintf("Storing account: %s", acc.FullName.String))
 	}
 	return database.RunCommand(a.DB, "merge_accounts_detailed",
 		acc.AccountId, acc.FirstName, acc.LastName, acc.FullName, acc.PhoneNumber, acc.Email, acc.CustomerId, acc.Notes,
@@ -171,7 +213,7 @@ func StoreAccountDetailed(a *App, acc *api.Account, log func(string)) error {
 
 func StoreCheckin(a *App, checkin api.Checkin, log func(string)) error {
 	if a.State.Verbose {
-		log(fmt.Sprintf("Storing checkin: %d", checkin.CheckinId))
+		log(fmt.Sprintf("Storing checkin: %d", checkin.CheckinId.Int64))
 	}
 	return database.RunCommand(a.DB, "merge_account_checkins",
 		checkin.CheckinId, checkin.CrmId, checkin.AccountId, checkin.LogDatetime, checkin.Type, checkin.Comments,
@@ -181,7 +223,7 @@ func StoreCheckin(a *App, checkin api.Checkin, log func(string)) error {
 
 func StoreRoute(a *App, route api.Route, log func(string)) error {
 	if a.State.Verbose {
-		log(fmt.Sprintf("Storing route: %s", route.Name))
+		log(fmt.Sprintf("Storing route: %s", route.Name.String))
 	}
 	return database.RunCommand(a.DB, "merge_routes",
 		route.RouteId, route.Name, route.RouteDate, route.Duration, route.StartAddress, route.DestinationAddress,
@@ -191,7 +233,7 @@ func StoreRoute(a *App, route api.Route, log func(string)) error {
 
 func StoreProfile(a *App, profile *api.UserProfile, log func(string)) error {
 	if a.State.Verbose {
-		log(fmt.Sprintf("Storing profile for: %s", profile.Email))
+		log(fmt.Sprintf("Storing profile for: %s", profile.Email.String))
 	}
 
 	var crmFields []string

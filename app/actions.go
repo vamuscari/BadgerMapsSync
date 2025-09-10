@@ -38,7 +38,7 @@ func RunPullAll(a *App, log func(string)) error {
 		log(fmt.Sprintf("Error storing profile: %v", err))
 		return err
 	}
-	log(fmt.Sprintf("Successfully pulled user profile for: %s", profile.Email))
+	log(fmt.Sprintf("Successfully pulled user profile for: %s", profile.Email.String))
 
 	log("Finished pulling all data.")
 	return nil
@@ -140,6 +140,6 @@ func RunPullProfile(a *App, log func(string)) error {
 		return fmt.Errorf("error storing profile: %w", err)
 	}
 
-	log(fmt.Sprintf("Successfully pulled user profile for: %s", profile.Email))
+	log(fmt.Sprintf("Successfully pulled user profile for: %s", profile.Email.String))
 	return nil
 }

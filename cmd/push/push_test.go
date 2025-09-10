@@ -24,18 +24,16 @@ func TestPushAccountsCmd(t *testing.T) {
 	}))
 	defer server.Close()
 
-	app := app.NewApplication()
+	app := app.NewApp()
 	app.State.NoColor = true
 
 	dbPath := filepath.Join(t.TempDir(), "test.db")
+	os.Setenv("DB_TYPE", "sqlite3")
 	os.Setenv("DB_PATH", dbPath)
 
 	db, err := database.LoadDatabaseSettings(app.State)
 	if err != nil {
 		t.Fatalf("Failed to create temporary database: %v", err)
-	}
-	if err := db.EnforceSchema(); err != nil {
-		t.Fatalf("Failed to enforce schema: %v", err)
 	}
 
 	sqlDB, err := sql.Open("sqlite3", db.DatabaseConnection())
@@ -43,6 +41,10 @@ func TestPushAccountsCmd(t *testing.T) {
 		t.Fatalf("Failed to open test database: %v", err)
 	}
 	defer sqlDB.Close()
+
+	if err := db.EnforceSchema(); err != nil {
+		t.Fatalf("Failed to enforce schema: %v", err)
+	}
 
 	_, err = sqlDB.Exec("INSERT INTO AccountsPendingChanges (AccountId, ChangeType, Changes) VALUES (?, ?, ?)", 123, "UPDATE", `{"last_name":"Test Account"}`)
 	if err != nil {
@@ -69,18 +71,16 @@ func TestPushCheckinsCmd(t *testing.T) {
 	}))
 	defer server.Close()
 
-	app := app.NewApplication()
+	app := app.NewApp()
 	app.State.NoColor = true
 
 	dbPath := filepath.Join(t.TempDir(), "test.db")
+	os.Setenv("DB_TYPE", "sqlite3")
 	os.Setenv("DB_PATH", dbPath)
 
 	db, err := database.LoadDatabaseSettings(app.State)
 	if err != nil {
 		t.Fatalf("Failed to create temporary database: %v", err)
-	}
-	if err := db.EnforceSchema(); err != nil {
-		t.Fatalf("Failed to enforce schema: %v", err)
 	}
 
 	sqlDB, err := sql.Open("sqlite3", db.DatabaseConnection())
@@ -89,7 +89,11 @@ func TestPushCheckinsCmd(t *testing.T) {
 	}
 	defer sqlDB.Close()
 
-	_, err = sqlDB.Exec("INSERT INTO AccountCheckinsPendingChanges (CheckinId, ChangeType, Changes) VALUES (?, ?, ?)", 456, "CREATE", `{"customer":123,"comments":"Test"}`)
+	if err := db.EnforceSchema(); err != nil {
+		t.Fatalf("Failed to enforce schema: %v", err)
+	}
+
+	_, err = sqlDB.Exec("INSERT INTO AccountCheckinsPendingChanges (CheckinId, AccountId, ChangeType, Changes) VALUES (?, ?, ?, ?)", 456, 123, "CREATE", `{"customer":123,"comments":"Test"}`)
 	if err != nil {
 		t.Fatalf("Failed to insert test pending change: %v", err)
 	}

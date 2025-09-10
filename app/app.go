@@ -20,16 +20,18 @@ type App struct {
 	CfgFile          string
 	LoadedConfigFile string
 
-	State *state.State
-	DB    database.DB
-	API   *api.APIClient
+	State  *state.State
+	DB     database.DB
+	API    *api.APIClient
+	Events *EventDispatcher
 
 	MaxConcurrentRequests int
 }
 
-func NewApplication() *App {
+func NewApp() *App {
 	return &App{
-		State: state.NewState(),
+		State:  state.NewState(),
+		Events: NewEventDispatcher(),
 	}
 }
 
