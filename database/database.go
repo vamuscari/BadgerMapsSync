@@ -5,6 +5,7 @@ import (
 	"badgermaps/utils"
 	"bufio"
 	"database/sql"
+	"embed"
 	"fmt"
 	"net/url"
 	"os"
@@ -18,12 +19,21 @@ import (
 	"github.com/spf13/viper"
 )
 
+//go:embed mssql/*.sql
+var mssqlFS embed.FS
+
+//go:embed postgres/*.sql
+var postgresFS embed.FS
+
+//go:embed sqlite3/*.sql
+var sqlite3FS embed.FS
+
 type DB interface {
 	GetType() string
 	DatabaseConnection() string
-	GetDatabaseSettings() error
+	LoadConfig() error
 	GetUsername() string
-	SetDatabaseSettings() error
+	SaveConfig() error
 	PromptDatabaseSettings()
 	TableExists(tableName string) (bool, error)
 	ViewExists(viewName string) (bool, error)
@@ -37,6 +47,7 @@ type DB interface {
 	Connect() error
 	Close() error
 	GetDB() *sql.DB
+	GetSQL(command string) string
 }
 
 // SQLiteConfig represents a SQLite database configuration
@@ -44,6 +55,15 @@ type SQLiteConfig struct {
 	state *state.State
 	db    *sql.DB
 	Path  string `mapstructure:"DB_PATH"`
+}
+
+func (db *SQLiteConfig) GetSQL(command string) string {
+	path := fmt.Sprintf("sqlite3/%s.sql", command)
+	data, err := sqlite3FS.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 func (db *SQLiteConfig) Connect() error {
@@ -68,7 +88,7 @@ func (db *SQLiteConfig) GetDB() *sql.DB {
 
 func (db *SQLiteConfig) GetTableColumns(tableName string) ([]string, error) {
 	sqlDB := db.GetDB()
-	query := sqlCommandLoader(db.GetType(), "get_table_columns")
+	query := db.GetSQL("get_table_columns")
 
 	rows, err := sqlDB.Query(query, tableName)
 	if err != nil {
@@ -100,7 +120,7 @@ func (db *SQLiteConfig) EnforceSchema() error {
 			fmt.Printf("Creating table: %s... ", tableName)
 		}
 		createCmd := createCommandForTable(tableName)
-		sqlText := sqlCommandLoader(db.GetType(), createCmd)
+		sqlText := db.GetSQL(createCmd)
 		if sqlText == "" {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 				fmt.Println(color.RedString("ERROR"))
@@ -129,7 +149,7 @@ func (db *SQLiteConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Inserting initial data for FieldMaps... ")
 	}
-	sqlText := sqlCommandLoader(db.GetType(), "insert_field_maps")
+	sqlText := db.GetSQL("insert_field_maps")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -146,7 +166,7 @@ func (db *SQLiteConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Inserting initial data for Configurations... ")
 	}
-	sqlText = sqlCommandLoader(db.GetType(), "insert_configurations")
+	sqlText = db.GetSQL("insert_configurations")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -163,7 +183,7 @@ func (db *SQLiteConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Creating view: AccountsWithLabels... ")
 	}
-	sqlText = sqlCommandLoader(db.GetType(), "create_accounts_with_labels_view")
+	sqlText = db.GetSQL("create_accounts_with_labels_view")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -257,7 +277,7 @@ func (db *SQLiteConfig) ValidateSchema() error {
 
 func (db *SQLiteConfig) TableExists(tableName string) (bool, error) {
 	sqlDB := db.GetDB()
-	query := sqlCommandLoader(db.GetType(), "check_table_exists")
+	query := db.GetSQL("check_table_exists")
 	var count int
 	err := sqlDB.QueryRow(query, tableName).Scan(&count)
 	if err != nil {
@@ -271,7 +291,7 @@ func (db *SQLiteConfig) TableExists(tableName string) (bool, error) {
 
 func (db *SQLiteConfig) ViewExists(viewName string) (bool, error) {
 	sqlDB := db.GetDB()
-	query := sqlCommandLoader(db.GetType(), "check_view_exists")
+	query := db.GetSQL("check_view_exists")
 	var count int
 	err := sqlDB.QueryRow(query, viewName).Scan(&count)
 	if err != nil {
@@ -295,8 +315,7 @@ func (db *SQLiteConfig) GetType() string {
 	return "sqlite3"
 }
 
-func (db *SQLiteConfig) GetDatabaseSettings() error {
-	db.Path = viper.GetString("DB_PATH")
+func (db *SQLiteConfig) LoadConfig() error {
 	if db.Path == "" {
 		db.Path = utils.GetConfigDirFile("badgermaps.db")
 	}
@@ -307,8 +326,7 @@ func (db *SQLiteConfig) GetUsername() string {
 	return ""
 }
 
-func (db *SQLiteConfig) SetDatabaseSettings() error {
-	viper.Set("DB_PATH", db.Path)
+func (db *SQLiteConfig) SaveConfig() error {
 	return nil
 }
 
@@ -345,6 +363,15 @@ type PostgreSQLConfig struct {
 	SSLMode  string `mapstructure:"DB_SSL_MODE"`
 }
 
+func (db *PostgreSQLConfig) GetSQL(command string) string {
+	path := fmt.Sprintf("postgres/%s.sql", command)
+	data, err := postgresFS.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
 func (db *PostgreSQLConfig) Connect() error {
 	var err error
 	db.db, err = sql.Open("postgres", db.DatabaseConnection())
@@ -367,7 +394,7 @@ func (db *PostgreSQLConfig) GetDB() *sql.DB {
 
 func (db *PostgreSQLConfig) GetTableColumns(tableName string) ([]string, error) {
 	sqlDB := db.GetDB()
-	query := sqlCommandLoader(db.GetType(), "get_table_columns")
+	query := db.GetSQL("get_table_columns")
 
 	rows, err := sqlDB.Query(query, tableName)
 	if err != nil {
@@ -394,7 +421,7 @@ func (db *PostgreSQLConfig) EnforceSchema() error {
 			fmt.Printf("Creating table: %s... ", tableName)
 		}
 		createCmd := createCommandForTable(tableName)
-		sqlText := sqlCommandLoader(db.GetType(), createCmd)
+		sqlText := db.GetSQL(createCmd)
 		if sqlText == "" {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 				fmt.Println(color.RedString("ERROR"))
@@ -423,7 +450,7 @@ func (db *PostgreSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Inserting initial data for FieldMaps... ")
 	}
-	sqlText := sqlCommandLoader(db.GetType(), "insert_field_maps")
+	sqlText := db.GetSQL("insert_field_maps")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -440,7 +467,7 @@ func (db *PostgreSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Inserting initial data for Configurations... ")
 	}
-	sqlText = sqlCommandLoader(db.GetType(), "insert_configurations")
+	sqlText = db.GetSQL("insert_configurations")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -457,7 +484,7 @@ func (db *PostgreSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Creating function: AccountsWithLabelsView... ")
 	}
-	sqlText = sqlCommandLoader(db.GetType(), "create_accounts_with_labels_view")
+	sqlText = db.GetSQL("create_accounts_with_labels_view")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -488,7 +515,7 @@ func (db *PostgreSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Creating trigger: datasets_update_trigger... ")
 	}
-	sqlText = sqlCommandLoader(db.GetType(), "create_datasets_update_trigger")
+	sqlText = db.GetSQL("create_datasets_update_trigger")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -505,7 +532,7 @@ func (db *PostgreSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Creating function: update_field_mappings_from_datasets... ")
 	}
-	sqlText = sqlCommandLoader(db.GetType(), "update_field_mappings_from_datasets")
+	sqlText = db.GetSQL("update_field_mappings_from_datasets")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -522,7 +549,7 @@ func (db *PostgreSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Creating trigger: datasets_field_mappings_update_trigger... ")
 	}
-	sqlText = sqlCommandLoader(db.GetType(), "create_field_mappings_update_trigger")
+	sqlText = db.GetSQL("create_field_mappings_update_trigger")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -659,7 +686,7 @@ func (db *PostgreSQLConfig) ValidateSchema() error {
 }
 func (db *PostgreSQLConfig) TableExists(tableName string) (bool, error) {
 	sqlDB := db.GetDB()
-	query := sqlCommandLoader(db.GetType(), "check_table_exists")
+	query := db.GetSQL("check_table_exists")
 	var count int
 	err := sqlDB.QueryRow(query, tableName).Scan(&count)
 	if err != nil {
@@ -673,7 +700,7 @@ func (db *PostgreSQLConfig) TableExists(tableName string) (bool, error) {
 
 func (db *PostgreSQLConfig) ViewExists(viewName string) (bool, error) {
 	sqlDB := db.GetDB()
-	query := sqlCommandLoader(db.GetType(), "check_view_exists")
+	query := db.GetSQL("check_view_exists")
 	var count int
 	err := sqlDB.QueryRow(query, viewName).Scan(&count)
 	if err != nil {
@@ -687,7 +714,7 @@ func (db *PostgreSQLConfig) ViewExists(viewName string) (bool, error) {
 
 func (db *PostgreSQLConfig) ProcedureExists(procedureName string) (bool, error) {
 	sqlDB := db.GetDB()
-	query := sqlCommandLoader(db.GetType(), "check_procedure_exists")
+	query := db.GetSQL("check_procedure_exists")
 	var count int
 	err := sqlDB.QueryRow(query, procedureName).Scan(&count)
 	if err != nil {
@@ -701,7 +728,7 @@ func (db *PostgreSQLConfig) ProcedureExists(procedureName string) (bool, error) 
 
 func (db *PostgreSQLConfig) TriggerExists(triggerName string) (bool, error) {
 	sqlDB := db.GetDB()
-	query := sqlCommandLoader(db.GetType(), "check_trigger_exists")
+	query := db.GetSQL("check_trigger_exists")
 	var count int
 	err := sqlDB.QueryRow(query, triggerName).Scan(&count)
 	if err != nil {
@@ -715,7 +742,7 @@ func (db *PostgreSQLConfig) TriggerExists(triggerName string) (bool, error) {
 func (db *PostgreSQLConfig) GetType() string {
 	return "postgres"
 }
-func (db *PostgreSQLConfig) GetDatabaseSettings() error {
+func (db *PostgreSQLConfig) LoadConfig() error {
 	db.Host = viper.GetString("DB_HOST")
 	db.Port = viper.GetInt("DB_PORT")
 	db.Database = viper.GetString("DB_NAME")
@@ -728,7 +755,7 @@ func (db *PostgreSQLConfig) GetDatabaseSettings() error {
 func (db *PostgreSQLConfig) GetUsername() string {
 	return db.Username
 }
-func (db *PostgreSQLConfig) SetDatabaseSettings() error {
+func (db *PostgreSQLConfig) SaveConfig() error {
 	viper.Set("DB_HOST", db.Host)
 	viper.Set("DB_PORT", db.Port)
 	viper.Set("DB_NAME", db.Database)
@@ -782,6 +809,15 @@ type MSSQLConfig struct {
 	Password string `mapstructure:"DB_PASSWORD"`
 }
 
+func (db *MSSQLConfig) GetSQL(command string) string {
+	path := fmt.Sprintf("mssql/%s.sql", command)
+	data, err := mssqlFS.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
 func (db *MSSQLConfig) Connect() error {
 	var err error
 	db.db, err = sql.Open("mssql", db.DatabaseConnection())
@@ -804,7 +840,7 @@ func (db *MSSQLConfig) GetDB() *sql.DB {
 
 func (db *MSSQLConfig) GetTableColumns(tableName string) ([]string, error) {
 	sqlDB := db.GetDB()
-	query := sqlCommandLoader(db.GetType(), "get_table_columns")
+	query := db.GetSQL("get_table_columns")
 
 	rows, err := sqlDB.Query(query, tableName)
 	if err != nil {
@@ -831,7 +867,7 @@ func (db *MSSQLConfig) EnforceSchema() error {
 			fmt.Printf("Creating table: %s... ", tableName)
 		}
 		createCmd := createCommandForTable(tableName)
-		sqlText := sqlCommandLoader(db.GetType(), createCmd)
+		sqlText := db.GetSQL(createCmd)
 		if sqlText == "" {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 				fmt.Println(color.RedString("ERROR"))
@@ -860,7 +896,7 @@ func (db *MSSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Inserting initial data for FieldMaps... ")
 	}
-	sqlText := sqlCommandLoader(db.GetType(), "insert_field_maps")
+	sqlText := db.GetSQL("insert_field_maps")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -877,7 +913,7 @@ func (db *MSSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Inserting initial data for Configurations... ")
 	}
-	sqlText = sqlCommandLoader(db.GetType(), "insert_configurations")
+	sqlText = db.GetSQL("insert_configurations")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -894,7 +930,7 @@ func (db *MSSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Creating procedure: AccountsWithLabelsView... ")
 	}
-	sqlText = sqlCommandLoader(db.GetType(), "create_accounts_with_labels_view")
+	sqlText = db.GetSQL("create_accounts_with_labels_view")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -925,7 +961,7 @@ func (db *MSSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Creating trigger: datasets_update_trigger... ")
 	}
-	sqlText = sqlCommandLoader(db.GetType(), "create_datasets_update_trigger")
+	sqlText = db.GetSQL("create_datasets_update_trigger")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -942,7 +978,7 @@ func (db *MSSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Creating procedure: update_field_maps_from_datasets... ")
 	}
-	sqlText = sqlCommandLoader(db.GetType(), "update_field_maps_from_datasets")
+	sqlText = db.GetSQL("update_field_maps_from_datasets")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -959,7 +995,7 @@ func (db *MSSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Creating trigger: datasets_field_maps_update_trigger... ")
 	}
-	sqlText = sqlCommandLoader(db.GetType(), "create_field_maps_update_trigger")
+	sqlText = db.GetSQL("create_field_maps_update_trigger")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -1060,43 +1096,43 @@ func (db *MSSQLConfig) ValidateSchema() error {
 		return fmt.Errorf("error checking if procedure update_field_maps_from_datasets exists: %w", err)
 	}
 	if !procExists {
-			if db.state.Verbose && !db.state.Quiet {
-				fmt.Println(color.RedString("MISSING"))
-			}
-			return fmt.Errorf("required procedure update_field_maps_from_datasets does not exist")
-		}
 		if db.state.Verbose && !db.state.Quiet {
-			fmt.Println(color.GreenString("OK"))
+			fmt.Println(color.RedString("MISSING"))
 		}
+		return fmt.Errorf("required procedure update_field_maps_from_datasets does not exist")
+	}
+	if db.state.Verbose && !db.state.Quiet {
+		fmt.Println(color.GreenString("OK"))
+	}
 
+	if db.state.Verbose && !db.state.Quiet {
+		fmt.Printf("Checking trigger: datasets_update_trigger... ")
+	}
+	triggerExists, err := db.TriggerExists("datasets_update_trigger")
+	if err != nil {
 		if db.state.Verbose && !db.state.Quiet {
-			fmt.Printf("Checking trigger: datasets_update_trigger... ")
+			fmt.Println(color.RedString("ERROR"))
 		}
-		triggerExists, err := db.TriggerExists("datasets_update_trigger")
-		if err != nil {
-			if db.state.Verbose && !db.state.Quiet {
-				fmt.Println(color.RedString("ERROR"))
-			}
-			if db.state.Debug {
-				fmt.Printf("ValidateSchema error: %v\n", err)
-			}
-			return fmt.Errorf("error checking if trigger datasets_update_trigger exists: %w", err)
+		if db.state.Debug {
+			fmt.Printf("ValidateSchema error: %v\n", err)
 		}
-		if !triggerExists {
-			if db.state.Verbose && !db.state.Quiet {
-				fmt.Println(color.RedString("MISSING"))
-			}
-			return fmt.Errorf("required trigger datasets_update_trigger does not exist")
-		}
+		return fmt.Errorf("error checking if trigger datasets_update_trigger exists: %w", err)
+	}
+	if !triggerExists {
 		if db.state.Verbose && !db.state.Quiet {
-			fmt.Println(color.GreenString("OK"))
+			fmt.Println(color.RedString("MISSING"))
 		}
+		return fmt.Errorf("required trigger datasets_update_trigger does not exist")
+	}
+	if db.state.Verbose && !db.state.Quiet {
+		fmt.Println(color.GreenString("OK"))
+	}
 
-		return nil
+	return nil
 }
 func (db *MSSQLConfig) TableExists(tableName string) (bool, error) {
 	sqlDB := db.GetDB()
-	query := sqlCommandLoader(db.GetType(), "check_table_exists")
+	query := db.GetSQL("check_table_exists")
 	if db.state.Debug {
 		fmt.Printf("DEBUG: Executing query: %s with arg: %s\n", query, tableName)
 	}
@@ -1117,7 +1153,7 @@ func (db *MSSQLConfig) TableExists(tableName string) (bool, error) {
 
 func (db *MSSQLConfig) ViewExists(viewName string) (bool, error) {
 	sqlDB := db.GetDB()
-	query := sqlCommandLoader(db.GetType(), "check_view_exists")
+	query := db.GetSQL("check_view_exists")
 	var count int
 	err := sqlDB.QueryRow(query, viewName).Scan(&count)
 	if err != nil {
@@ -1131,7 +1167,7 @@ func (db *MSSQLConfig) ViewExists(viewName string) (bool, error) {
 
 func (db *MSSQLConfig) ProcedureExists(procedureName string) (bool, error) {
 	sqlDB := db.GetDB()
-	query := sqlCommandLoader(db.GetType(), "check_procedure_exists")
+	query := db.GetSQL("check_procedure_exists")
 	var count int
 	err := sqlDB.QueryRow(query, procedureName).Scan(&count)
 	if err != nil {
@@ -1145,7 +1181,7 @@ func (db *MSSQLConfig) ProcedureExists(procedureName string) (bool, error) {
 
 func (db *MSSQLConfig) TriggerExists(triggerName string) (bool, error) {
 	sqlDB := db.GetDB()
-	query := sqlCommandLoader(db.GetType(), "check_trigger_exists")
+	query := db.GetSQL("check_trigger_exists")
 	var count int
 	err := sqlDB.QueryRow(query, triggerName).Scan(&count)
 	if err != nil {
@@ -1160,7 +1196,7 @@ func (db *MSSQLConfig) TriggerExists(triggerName string) (bool, error) {
 func (db *MSSQLConfig) GetType() string {
 	return "mssql"
 }
-func (db *MSSQLConfig) GetDatabaseSettings() error {
+func (db *MSSQLConfig) LoadConfig() error {
 	db.Host = viper.GetString("DB_HOST")
 	db.Port = viper.GetInt("DB_PORT")
 	db.Database = viper.GetString("DB_NAME")
@@ -1172,7 +1208,7 @@ func (db *MSSQLConfig) GetDatabaseSettings() error {
 func (db *MSSQLConfig) GetUsername() string {
 	return db.Username
 }
-func (db *MSSQLConfig) SetDatabaseSettings() error {
+func (db *MSSQLConfig) SaveConfig() error {
 	viper.Set("DB_HOST", db.Host)
 	viper.Set("DB_PORT", db.Port)
 	viper.Set("DB_NAME", db.Database)
@@ -1239,9 +1275,41 @@ func (db *MSSQLConfig) DropAllTables() error {
 	return nil
 }
 
+// NewDBFromConfig creates a new DB instance from a config struct.
+func NewDB(dbType string, s *state.State) (DB, error) {
+	var db DB
+	switch dbType {
+	case "sqlite3":
+		db = &SQLiteConfig{
+			state: s,
+		}
+	case "postgres":
+		db = &PostgreSQLConfig{
+			state: s,
+		}
+	case "mssql":
+		db = &MSSQLConfig{
+			state: s,
+		}
+	default:
+		db = &SQLiteConfig{
+			state: s,
+		}
+	}
+
+	db.LoadConfig()
+
+	if err := db.Connect(); err != nil {
+		return nil, fmt.Errorf("error connecting to database: %w", err)
+	}
+
+	return db, nil
+}
+
 // LoadDatabaseSettings loads database settings based on the database type
 func LoadDatabaseSettings(s *state.State) (DB, error) {
-	dbType := viper.GetString("DB_TYPE")
+	dbType := viper.Get("DB_Type")
+
 	if dbType == "" {
 		dbType = "sqlite3" // Default
 	}
@@ -1264,12 +1332,8 @@ func LoadDatabaseSettings(s *state.State) (DB, error) {
 		return nil, fmt.Errorf("unsupported database type: %s", dbType)
 	}
 
-	if err := viper.Unmarshal(db); err != nil {
-		return nil, fmt.Errorf("error unmarshalling database config: %w", err)
-	}
-
 	// Run GetDatabaseSettings to set defaults if values are missing
-	if err := db.GetDatabaseSettings(); err != nil {
+	if err := db.LoadConfig(); err != nil {
 		return nil, err
 	}
 
@@ -1310,17 +1374,8 @@ func createCommandForTable(tableName string) string {
 	return "create_" + toSnakeCase(tableName) + "_table"
 }
 
-func sqlCommandLoader(dbType, command string) string {
-	path := fmt.Sprintf("database/%s/%s.sql", dbType, command)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	return string(data)
-}
-
 func RunCommand(db DB, command string, args ...any) error {
-	sqlText := sqlCommandLoader(db.GetType(), command)
+	sqlText := db.GetSQL(command)
 	if sqlText == "" {
 		return fmt.Errorf("unknown or unavailable SQL command: %s", command)
 	}

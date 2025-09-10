@@ -50,7 +50,7 @@ func TestPushAccountsCmd(t *testing.T) {
 	}
 
 	app.DB = db
-	app.API = api.NewAPIClient("test--key", server.URL)
+	app.API = api.NewAPIClient()
 
 	cmd := PushCmd(app)
 	cmd.SetArgs([]string{"accounts"})
@@ -95,7 +95,7 @@ func TestPushCheckinsCmd(t *testing.T) {
 	}
 
 	app.DB = db
-	app.API = api.NewAPIClient("test--key", server.URL)
+	app.API = api.NewAPIClient()
 
 	cmd := PushCmd(app)
 	cmd.SetArgs([]string{"checkins"})

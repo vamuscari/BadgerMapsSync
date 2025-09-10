@@ -6,7 +6,7 @@ import (
 )
 
 func GetAccountByID(db DB, accountID int) (*api.Account, error) {
-	sqlText := sqlCommandLoader(db.GetType(), "get_account_by_id")
+	sqlText := db.GetSQL("get_account_by_id")
 	if sqlText == "" {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: get_account_by_id")
 	}
@@ -42,7 +42,7 @@ func GetAccountByID(db DB, accountID int) (*api.Account, error) {
 }
 
 func GetCheckinByID(db DB, checkinID int) (*api.Checkin, error) {
-	sqlText := sqlCommandLoader(db.GetType(), "get_checkin_by_id")
+	sqlText := db.GetSQL("get_checkin_by_id")
 	if sqlText == "" {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: get_checkin_by_id")
 	}
@@ -61,7 +61,7 @@ func GetCheckinByID(db DB, checkinID int) (*api.Checkin, error) {
 }
 
 func GetRouteByID(db DB, routeID int) (*api.Route, error) {
-	sqlText := sqlCommandLoader(db.GetType(), "get_route_by_id")
+	sqlText := db.GetSQL("get_route_by_id")
 	if sqlText == "" {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: get_route_by_id")
 	}
@@ -80,7 +80,7 @@ func GetRouteByID(db DB, routeID int) (*api.Route, error) {
 }
 
 func GetProfile(db DB) (*api.UserProfile, error) {
-	sqlText := sqlCommandLoader(db.GetType(), "get_profile")
+	sqlText := db.GetSQL("get_profile")
 	if sqlText == "" {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: get_profile")
 	}
@@ -103,7 +103,7 @@ func GetProfile(db DB) (*api.UserProfile, error) {
 }
 
 func GetAllAccountIDs(db DB) ([]int, error) {
-	sqlText := sqlCommandLoader(db.GetType(), "get_all_account_ids")
+	sqlText := db.GetSQL("get_all_account_ids")
 	if sqlText == "" {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: get_all_account_ids")
 	}

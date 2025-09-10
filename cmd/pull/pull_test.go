@@ -41,7 +41,7 @@ func TestPullAccountCmd(t *testing.T) {
 	}
 
 	app.DB = db
-	app.API = api.NewAPIClient("test-api-key", server.URL)
+	app.API = api.NewAPIClient()
 
 	cmd := pullAccountCmd(app)
 	cmd.SetArgs([]string{"123"})

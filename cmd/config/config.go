@@ -28,12 +28,12 @@ func ConfigCmd(a *app.App) *cobra.Command {
 						fmt.Fprintf(os.Stderr, "Error creating config file: %v\n", err)
 						os.Exit(1)
 					}
-				file.Close()
+					file.Close()
 				}
 			}
 
 			fmt.Println(color.CyanString("Starting interactive setup..."))
-			if app.InteractiveSetup(a, cmd) {
+			if app.InteractiveSetup(a) {
 				fmt.Println(color.GreenString("Setup completed successfully."))
 			} else {
 				fmt.Println(color.RedString("Setup did not complete successfully."))

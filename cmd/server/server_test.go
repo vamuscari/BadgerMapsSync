@@ -35,7 +35,7 @@ func TestHandleAccountCreateWebhook(t *testing.T) {
 	}
 
 	app.DB = db
-	app.API = api.NewAPIClient("test-api-key", "")
+	app.API = api.NewAPIClient()
 
 	s := &server{App: app}
 	account := map[string]interface{}{

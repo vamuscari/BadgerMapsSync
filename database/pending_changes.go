@@ -27,7 +27,7 @@ type CheckinPendingChange struct {
 }
 
 func GetPendingAccountChanges(db DB) ([]AccountPendingChange, error) {
-	sqlText := sqlCommandLoader(db.GetType(), "get_pending_account_changes")
+	sqlText := db.GetSQL("get_pending_account_changes")
 	if sqlText == "" {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: get_pending_account_changes")
 	}
@@ -51,7 +51,7 @@ func GetPendingAccountChanges(db DB) ([]AccountPendingChange, error) {
 }
 
 func GetPendingCheckinChanges(db DB) ([]CheckinPendingChange, error) {
-	sqlText := sqlCommandLoader(db.GetType(), "get_pending_checkin_changes")
+	sqlText := db.GetSQL("get_pending_checkin_changes")
 	if sqlText == "" {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: get_pending_checkin_changes")
 	}
@@ -75,7 +75,7 @@ func GetPendingCheckinChanges(db DB) ([]CheckinPendingChange, error) {
 }
 
 func UpdatePendingChangeStatus(db DB, table string, changeId int, status string) error {
-	sqlText := fmt.Sprintf(sqlCommandLoader(db.GetType(), "update_pending_change_status"), table)
+	sqlText := fmt.Sprintf(db.GetSQL("update_pending_change_status"), table)
 	if sqlText == "" {
 		return fmt.Errorf("unknown or unavailable SQL command: update_pending_change_status")
 	}

@@ -9,12 +9,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 // InteractiveSetup guides the user through setting up the configuration
-func InteractiveSetup(App *App, cmd *cobra.Command) bool {
+func InteractiveSetup(a *App) bool {
 	reader := bufio.NewReader(os.Stdin)
 
 	fmt.Println(utils.Colors.Blue("=== BadgerMaps CLI Setup ==="))
@@ -25,9 +24,7 @@ func InteractiveSetup(App *App, cmd *cobra.Command) bool {
 	setupChoice := utils.PromptChoice(reader, "Select setup type", setupOptions)
 
 	if setupChoice == "Advanced Setup" {
-		configFlag := cmd.PersistentFlags().Lookup("config")
-		envFlag := cmd.PersistentFlags().Lookup("env")
-		userSpecifiedFile := (configFlag != nil && configFlag.Changed) || (envFlag != nil && envFlag.Changed)
+		userSpecifiedFile := (a.State.EnvFile != nil) || (a.State.ConfigFile != nil)
 
 		if !userSpecifiedFile {
 			configOptions := []string{"config.yaml (in user config directory)", ".env file (in executable's directory)"}
@@ -38,9 +35,9 @@ func InteractiveSetup(App *App, cmd *cobra.Command) bool {
 					fmt.Println(utils.Colors.Red("Error getting executable path: %v", err))
 					return false
 				}
-				App.LoadedConfigFile = filepath.Join(filepath.Dir(exe), ".env")
+				a.LoadedConfigFile = filepath.Join(filepath.Dir(exe), ".env")
 			} else {
-				App.LoadedConfigFile = utils.GetConfigDirFile("config.yaml")
+				a.LoadedConfigFile = utils.GetConfigDirFile("config.yaml")
 			}
 		}
 	}
@@ -54,7 +51,8 @@ func InteractiveSetup(App *App, cmd *cobra.Command) bool {
 
 	// Database Settings
 	fmt.Println(utils.Colors.Blue("--- Database Settings ---"))
-	currentDB, err := database.LoadDatabaseSettings(App.State)
+
+	currentDB, err := database.LoadDatabaseSettings(a.State)
 	if err != nil {
 		fmt.Println(utils.Colors.Yellow("Could not load current database configuration: %v", err))
 	}
@@ -72,33 +70,21 @@ func InteractiveSetup(App *App, cmd *cobra.Command) bool {
 	dbType := utils.PromptChoice(reader, "Select database type", dbOptions)
 	viper.Set("DB_TYPE", dbType)
 
-	if currentDB == nil || currentDB.GetType() != dbType {
-		newDB, err := database.LoadDatabaseSettings(App.State)
-		if err != nil {
-			fmt.Println(utils.Colors.Red("Error creating new database configuration: %v", err))
-			return false
-		}
-		App.DB = newDB
-	}
-
-	App.DB.PromptDatabaseSettings()
-	if err := App.DB.SetDatabaseSettings(); err != nil {
+	a.DB.PromptDatabaseSettings()
+	if err := a.DB.SaveConfig(); err != nil {
 		fmt.Println(utils.Colors.Red("Error saving database settings: %v", err))
 		return false
 	}
 
-	// Reload the database with the new settings before proceeding
-	reloadedDB, err := database.LoadDatabaseSettings(App.State)
 	if err != nil {
 		fmt.Println(utils.Colors.Red("Error reloading database with new settings: %v", err))
 		return false
 	}
-	App.DB = reloadedDB
 
 	// Test the new connection before proceeding
 	fmt.Println()
 	fmt.Println(utils.Colors.Cyan("Testing database connection..."))
-	if err := App.DB.TestConnection(); err != nil {
+	if err := a.DB.TestConnection(); err != nil {
 		fmt.Println(utils.Colors.Red("Database connection failed: %v", err))
 		fmt.Println(utils.Colors.Yellow("Please check your database settings and try again."))
 		return false
@@ -122,7 +108,7 @@ func InteractiveSetup(App *App, cmd *cobra.Command) bool {
 	}
 
 	// Save configuration
-	configFile := App.LoadedConfigFile
+	configFile := a.LoadedConfigFile
 	if configFile == "" {
 		configFile = utils.GetConfigDirFile("config.yaml")
 	}
@@ -143,16 +129,16 @@ func InteractiveSetup(App *App, cmd *cobra.Command) bool {
 	fmt.Println(utils.Colors.Green("Configuration saved to: %s", configFile))
 
 	// Check if the database schema is valid
-	if err := App.DB.ValidateSchema(); err == nil {
+	if err := a.DB.ValidateSchema(); err == nil {
 		fmt.Println(utils.Colors.Yellow("Database schema already exists and is valid."))
 		reinitialize := utils.PromptBool(reader, "Do you want to reinitialize the database? (This will delete all existing data)", false)
 		if reinitialize {
 			fmt.Println(utils.Colors.Yellow("Reinitializing database..."))
-			if err := App.DB.DropAllTables(); err != nil {
+			if err := a.DB.DropAllTables(); err != nil {
 				fmt.Println(utils.Colors.Red("Error dropping tables: %v", err))
 				return false
 			}
-			if err := App.DB.EnforceSchema(); err != nil {
+			if err := a.DB.EnforceSchema(); err != nil {
 				fmt.Println(utils.Colors.Red("Error enforcing schema: %v", err))
 				return false
 			}
@@ -164,7 +150,7 @@ func InteractiveSetup(App *App, cmd *cobra.Command) bool {
 		enforce := utils.PromptBool(reader, "Do you want to create/update the database schema now?", true)
 		if enforce {
 			fmt.Println(utils.Colors.Yellow("Enforcing schema..."))
-			if err := App.DB.EnforceSchema(); err != nil {
+			if err := a.DB.EnforceSchema(); err != nil {
 				fmt.Println(utils.Colors.Red("Error enforcing schema: %v", err))
 				return false
 			}

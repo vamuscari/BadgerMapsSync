@@ -20,21 +20,21 @@ type App struct {
 	CfgFile          string
 	LoadedConfigFile string
 
-	State          *state.State
-	DB             database.DB
-	API            *api.APIClient
-	AdvancedConfig *AdvancedConfig
+	State *state.State
+	DB    database.DB
+	API   *api.APIClient
+
+	MaxConcurrentRequests int
 }
 
 func NewApplication() *App {
 	return &App{
-		State:          state.NewState(),
-		AdvancedConfig: &AdvancedConfig{MaxConcurrentRequests: 10},
+		State: state.NewState(),
 	}
 }
 
-func (a *App) LoadConfiguration(cmd *cobra.Command) error {
-	path, ok, err := a.GetConfigFilePath(cmd)
+func (a *App) LoadConfig() error {
+	path, ok, err := a.GetConfigFilePath()
 	if err != nil {
 		return err
 	}
@@ -50,11 +50,7 @@ func (a *App) LoadConfiguration(cmd *cobra.Command) error {
 		}
 	}
 
-	var apiClient api.APIClient
-	if err := viper.Unmarshal(&apiClient); err != nil {
-		return fmt.Errorf("error unmarshalling API config: %w", err)
-	}
-	a.API = api.NewAPIClient(apiClient.APIKey, apiClient.BaseURL)
+	a.API = api.NewAPIClient()
 
 	var dbErr error
 	a.DB, dbErr = database.LoadDatabaseSettings(a.State)
@@ -62,16 +58,21 @@ func (a *App) LoadConfiguration(cmd *cobra.Command) error {
 		return dbErr
 	}
 
-	var advancedConfig AdvancedConfig
-	if err := viper.Unmarshal(&advancedConfig); err != nil {
-		return fmt.Errorf("error unmarshalling advanced config: %w", err)
+	a.MaxConcurrentRequests = viper.GetInt("MAX_CONCURRENT_REQUESTS")
+
+	// Limit between
+	if a.MaxConcurrentRequests < 1 || a.MaxConcurrentRequests > 10 {
+		a.MaxConcurrentRequests = 5
 	}
-	if advancedConfig.MaxConcurrentRequests == 0 {
-		advancedConfig.MaxConcurrentRequests = 10
-	}
-	a.AdvancedConfig = &advancedConfig
 
 	return nil
+}
+
+func (a *App) SaveConfig() {
+	a.API.SaveConfig()
+	a.DB.SaveConfig()
+	viper.Set("MAX_CONCURRENT_REQUESTS", a.MaxConcurrentRequests)
+
 }
 
 func (a *App) VerifySetupOrExit(cmd *cobra.Command) bool {
@@ -79,7 +80,7 @@ func (a *App) VerifySetupOrExit(cmd *cobra.Command) bool {
 		color.NoColor = true
 	}
 
-	path, ok, err := a.GetConfigFilePath(cmd)
+	path, ok, err := a.GetConfigFilePath()
 	if err != nil {
 		fmt.Println(color.RedString("Error getting config file path: %v", err))
 		os.Exit(1)
@@ -89,7 +90,7 @@ func (a *App) VerifySetupOrExit(cmd *cobra.Command) bool {
 		if a.State.Verbose || a.State.Debug {
 			fmt.Println(color.GreenString("Configuration detected: %s", path))
 		}
-		if err := a.LoadConfiguration(cmd); err != nil {
+		if err := a.LoadConfig(); err != nil {
 			fmt.Println(color.RedString("Error loading configuration: %v", err))
 		} else {
 			if (a.State.Verbose || a.State.Debug) && a.API != nil {
@@ -109,8 +110,8 @@ func (a *App) VerifySetupOrExit(cmd *cobra.Command) bool {
 	}
 
 	if promptForSetup() {
-		if InteractiveSetup(a, cmd) {
-			if err := a.LoadConfiguration(cmd); err != nil {
+		if InteractiveSetup(a) {
+			if err := a.LoadConfig(); err != nil {
 				fmt.Println(color.RedString("Error reloading configuration after setup: %v", err))
 				os.Exit(1)
 			}
@@ -123,29 +124,22 @@ func (a *App) VerifySetupOrExit(cmd *cobra.Command) bool {
 	return false
 }
 
-func (a *App) GetConfigFilePath(cmd *cobra.Command) (string, bool, error) {
-	// Highest precedence: --config flag from App struct
-	if a.CfgFile != "" {
-		absPath, err := filepath.Abs(a.CfgFile)
+func (a *App) GetConfigFilePath() (string, bool, error) {
+
+	// Highest precedence: --env flag
+	if a.State.EnvFile != nil && *a.State.EnvFile != "" {
+		absPath, err := filepath.Abs(*a.State.EnvFile)
 		if err != nil {
-			return "", false, fmt.Errorf("error getting absolute path for %s: %w", a.CfgFile, err)
+			return "", false, fmt.Errorf("error getting absolute path for %s: %w", *a.State.EnvFile, err)
 		}
 		return absPath, true, nil
 	}
 
-	// Second precedence: --env flag
-	envFile, _ := cmd.Flags().GetString("env")
-	if cmd.Flags().Changed("env") {
-		if strings.TrimSpace(envFile) == "" {
-			exe, err := os.Executable()
-			if err != nil {
-				return "", false, fmt.Errorf("error getting executable path: %w", err)
-			}
-			return filepath.Join(filepath.Dir(exe), ".env"), true, nil
-		}
-		absPath, err := filepath.Abs(envFile)
+	// Second precedence: --config flag
+	if a.State.ConfigFile != nil && *a.State.ConfigFile != "" {
+		absPath, err := filepath.Abs(*a.State.ConfigFile)
 		if err != nil {
-			return "", false, fmt.Errorf("error getting absolute path for %s: %w", envFile, err)
+			return "", false, fmt.Errorf("error getting absolute path for %s: %w", *a.State.ConfigFile, err)
 		}
 		return absPath, true, nil
 	}
@@ -174,4 +168,13 @@ func promptForSetup() bool {
 	response, _ := reader.ReadString('\n')
 	response = strings.TrimSpace(strings.ToLower(response))
 	return response == "y" || response == "yes"
+}
+
+// WriteConfig saves the current viper configuration to the loaded config file.
+func (a *App) WriteConfig() error {
+	if a.LoadedConfigFile == "" {
+		return fmt.Errorf("no configuration file loaded, cannot save")
+	}
+
+	return viper.WriteConfigAs(a.LoadedConfigFile)
 }

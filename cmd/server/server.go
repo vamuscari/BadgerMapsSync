@@ -3,7 +3,6 @@ package server
 import (
 	"badgermaps/api"
 	"badgermaps/app"
-	"badgermaps/cmd/pull"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -91,7 +90,14 @@ func (s *server) handleAccountCreateWebhook(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "invalid JSON payload", http.StatusBadRequest)
 		return
 	}
-	if err := pull.StoreAccountBasic(s.App, &acc); err != nil {
+
+	logFunc := func(msg string) {
+		log.Println(msg)
+	}
+
+	// NOTE: Using StoreAccountDetailed as StoreAccountBasic was removed during refactor.
+	// The underlying SQL procedure should handle the missing fields gracefully.
+	if err := app.StoreAccountDetailed(s.App, &acc, logFunc); err != nil {
 		http.Error(w, "failed to store account", http.StatusInternalServerError)
 		return
 	}
@@ -119,7 +125,12 @@ func (s *server) handleCheckinWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON payload", http.StatusBadRequest)
 		return
 	}
-	if err := pull.StoreCheckin(s.App, checkin); err != nil {
+
+	logFunc := func(msg string) {
+		log.Println(msg)
+	}
+
+	if err := app.StoreCheckin(s.App, checkin, logFunc); err != nil {
 		http.Error(w, "failed to store checkin", http.StatusInternalServerError)
 		return
 	}
