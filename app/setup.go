@@ -1,17 +1,20 @@
 package app
 
 import (
+	"badgermaps/api"
 	"badgermaps/database"
 	"badgermaps/utils"
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 
+	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 // InteractiveSetup guides the user through setting up the configuration
-func InteractiveSetup(App *App) bool {
+func InteractiveSetup(App *App, cmd *cobra.Command) bool {
 	reader := bufio.NewReader(os.Stdin)
 
 	fmt.Println(utils.Colors.Blue("=== BadgerMaps CLI Setup ==="))
@@ -21,11 +24,32 @@ func InteractiveSetup(App *App) bool {
 	setupOptions := []string{"Quick Setup", "Advanced Setup"}
 	setupChoice := utils.PromptChoice(reader, "Select setup type", setupOptions)
 
+	if setupChoice == "Advanced Setup" {
+		configFlag := cmd.PersistentFlags().Lookup("config")
+		envFlag := cmd.PersistentFlags().Lookup("env")
+		userSpecifiedFile := (configFlag != nil && configFlag.Changed) || (envFlag != nil && envFlag.Changed)
+
+		if !userSpecifiedFile {
+			configOptions := []string{"config.yaml (in user config directory)", ".env file (in executable's directory)"}
+			configChoice := utils.PromptChoice(reader, "Select configuration file type to save to", configOptions)
+			if configChoice == configOptions[1] {
+				exe, err := os.Executable()
+				if err != nil {
+					fmt.Println(utils.Colors.Red("Error getting executable path: %v", err))
+					return false
+				}
+				App.LoadedConfigFile = filepath.Join(filepath.Dir(exe), ".env")
+			} else {
+				App.LoadedConfigFile = utils.GetConfigDirFile("config.yaml")
+			}
+		}
+	}
+
 	// API Settings
 	fmt.Println(utils.Colors.Blue("--- API Settings ---"))
 	apiKey := utils.PromptString(reader, "API Key", viper.GetString("API_KEY"))
 	viper.Set("API_KEY", apiKey)
-	apiURL := utils.PromptString(reader, "API URL", viper.GetString("API_URL"))
+	apiURL := utils.PromptString(reader, "API URL", api.DefaultApiBaseURL)
 	viper.Set("API_URL", apiURL)
 
 	// Database Settings
@@ -63,6 +87,24 @@ func InteractiveSetup(App *App) bool {
 		return false
 	}
 
+	// Reload the database with the new settings before proceeding
+	reloadedDB, err := database.LoadDatabaseSettings(App.State)
+	if err != nil {
+		fmt.Println(utils.Colors.Red("Error reloading database with new settings: %v", err))
+		return false
+	}
+	App.DB = reloadedDB
+
+	// Test the new connection before proceeding
+	fmt.Println()
+	fmt.Println(utils.Colors.Cyan("Testing database connection..."))
+	if err := App.DB.TestConnection(); err != nil {
+		fmt.Println(utils.Colors.Red("Database connection failed: %v", err))
+		fmt.Println(utils.Colors.Yellow("Please check your database settings and try again."))
+		return false
+	}
+	fmt.Println(utils.Colors.Green("Database connection successful."))
+
 	if setupChoice == "Advanced Setup" {
 		// Server Settings
 		fmt.Println(utils.Colors.Blue("--- Server Settings ---"))
@@ -80,7 +122,17 @@ func InteractiveSetup(App *App) bool {
 	}
 
 	// Save configuration
-	configFile := utils.GetConfigDirFile("config.yaml")
+	configFile := App.LoadedConfigFile
+	if configFile == "" {
+		configFile = utils.GetConfigDirFile("config.yaml")
+	}
+
+	configType := "yaml"
+	if filepath.Ext(configFile) == ".env" || filepath.Base(configFile) == ".env" {
+		configType = "env"
+	}
+	viper.SetConfigType(configType)
+
 	if err := viper.WriteConfigAs(configFile); err != nil {
 		fmt.Println(utils.Colors.Red("Error saving config file: %v", err))
 		return false

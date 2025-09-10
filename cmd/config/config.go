@@ -3,6 +3,7 @@ package config
 import (
 	"badgermaps/app"
 	"fmt"
+	"os"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -15,13 +16,30 @@ func ConfigCmd(a *app.App) *cobra.Command {
 		Short: "Run the interactive configuration setup",
 		Long:  `Run the interactive setup to configure the BadgerMaps CLI application.`,
 		Run: func(cmd *cobra.Command, args []string) {
+			// The configuration is already loaded by the PersistentPreRun in main.go
+			// We just need to run the interactive setup.
+
+			// If a config file was specified and doesn't exist, create it.
+			if a.LoadedConfigFile != "" {
+				if _, err := os.Stat(a.LoadedConfigFile); os.IsNotExist(err) {
+					fmt.Println(color.YellowString("Creating config file at %s", a.LoadedConfigFile))
+					file, err := os.Create(a.LoadedConfigFile)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "Error creating config file: %v\n", err)
+						os.Exit(1)
+					}
+				file.Close()
+				}
+			}
+
 			fmt.Println(color.CyanString("Starting interactive setup..."))
-			if app.InteractiveSetup(a) {
+			if app.InteractiveSetup(a, cmd) {
 				fmt.Println(color.GreenString("Setup completed successfully."))
 			} else {
 				fmt.Println(color.RedString("Setup did not complete successfully."))
 			}
 		},
 	}
+
 	return cmd
 }

@@ -26,6 +26,13 @@ var rootCmd = &cobra.Command{
 	Short: "BadgerMaps CLI - Command line interface for BadgerMaps",
 	Long: `BadgerMaps CLI is a command line interface for interacting with the BadgerMaps API.
 It allows you to push and pull data, run in server mode, and perform various utility operations.`,
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		// Don't load config for version command
+		if cmd.Name() == "version" || cmd.Name() == "help" {
+			return
+		}
+		App.VerifySetupOrExit(cmd)
+	},
 }
 
 func bind() {
@@ -53,6 +60,8 @@ func bind() {
 	rootCmd.PersistentFlags().BoolVar(&App.State.Debug, "debug", false, "Enable debug mode with maximum verbosity")
 	rootCmd.PersistentFlags().BoolVar(&App.State.NoColor, "no-color", false, "Disable colored output")
 	rootCmd.PersistentFlags().StringVar(&App.CfgFile, "config", "", "Config file (default is $HOME/.badgermaps.yaml)")
+	rootCmd.PersistentFlags().String("env", "", "Load configuration from a .env file. If no path is specified, uses .env in the executable's directory.")
+	rootCmd.Flag("env").NoOptDefVal = " " // A space indicates that the flag is present but has no value
 }
 
 func main() {

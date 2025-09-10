@@ -22,12 +22,13 @@ import (
 
 // ServerCmd creates a new server command
 func ServerCmd(App *app.App) *cobra.Command {
-	App.VerifySetupOrExit()
-
 	serverCmd := &cobra.Command{
 		Use:   "server",
 		Short: "Run in server mode",
 		Long:  `Run the BadgerMaps CLI in server mode, listening for incoming webhooks.`,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			App.VerifySetupOrExit(cmd)
+		},
 		Run: func(cmd *cobra.Command, args []string) {
 			var serverConfig ServerConfig
 			if err := viper.Unmarshal(&serverConfig); err != nil {

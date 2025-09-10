@@ -12,12 +12,13 @@ import (
 
 // PullCmd creates a new pull command
 func PullCmd(App *app.App) *cobra.Command {
-	App.VerifySetupOrExit()
-
 	pullCmd := &cobra.Command{
 		Use:   "pull",
 		Short: "Retrieve data from BadgerMaps API",
 		Long:  `Pull data from the BadgerMaps API to your local database.`,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			App.VerifySetupOrExit(cmd)
+		},
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Println("Please specify a data type to pull (account, checkin, route, profile, all)")
 			os.Exit(1)

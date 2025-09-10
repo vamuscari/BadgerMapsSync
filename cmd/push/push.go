@@ -13,12 +13,13 @@ import (
 
 // PushCmd creates a new push command
 func PushCmd(App *app.App) *cobra.Command {
-	App.VerifySetupOrExit()
-
 	pushCmd := &cobra.Command{
 		Use:   "push",
 		Short: "Send data to BadgerMaps API",
 		Long:  `Push data from your local database to the BadgerMaps API.`,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			App.VerifySetupOrExit(cmd)
+		},
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Println("Please specify a data type to push (accounts, checkins, all)")
 			os.Exit(1)

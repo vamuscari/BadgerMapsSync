@@ -27,12 +27,13 @@ type EndpointTestResult struct {
 
 // TestCmd creates a new test command
 func TestCmd(App *app.App) *cobra.Command {
-	App.VerifySetupOrExit()
-
 	testCmd := &cobra.Command{
 		Use:   "test",
 		Short: "Run tests and diagnostics",
 		Long:  `Test the BadgerMaps CLI functionality, including API connectivity and database functionality.`,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			App.VerifySetupOrExit(cmd)
+		},
 		Run: func(cmd *cobra.Command, args []string) {
 			runTests(App)
 		},
