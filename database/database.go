@@ -113,6 +113,10 @@ func (db *SQLiteConfig) GetTableColumns(tableName string) ([]string, error) {
 }
 
 func (db *SQLiteConfig) EnforceSchema() error {
+	if err := db.DropAllTables(); err != nil {
+		return err
+	}
+
 	sqlDB := db.GetDB()
 
 	for _, tableName := range RequiredTables() {

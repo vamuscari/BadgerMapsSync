@@ -67,7 +67,7 @@ It allows you to push and pull data, run in server mode, and perform various uti
 
 func main() {
 	// Initialize the core application
-	App = app.NewApplication()
+	App = app.NewApp()
 	if App.DB != nil {
 		defer App.DB.Close()
 	}
