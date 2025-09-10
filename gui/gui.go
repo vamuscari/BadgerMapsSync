@@ -45,7 +45,7 @@ func Launch(a *app.App, icon fyne.Resource) {
 	}
 
 	window.SetContent(ui.createContent())
-	window.Resize(fyne.NewSize(800, 600))
+	window.Resize(fyne.NewSize(1280, 720))
 	window.ShowAndRun()
 }
 
