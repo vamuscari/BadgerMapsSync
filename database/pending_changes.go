@@ -19,6 +19,7 @@ type AccountPendingChange struct {
 type CheckinPendingChange struct {
 	ChangeId    int
 	CheckinId   int
+	AccountId   int
 	ChangeType  string
 	Changes     string
 	Status      string
@@ -66,7 +67,7 @@ func GetPendingCheckinChanges(db DB) ([]CheckinPendingChange, error) {
 	var changes []CheckinPendingChange
 	for rows.Next() {
 		var change CheckinPendingChange
-		if err := rows.Scan(&change.ChangeId, &change.CheckinId, &change.ChangeType, &change.Changes, &change.Status, &change.CreatedAt, &change.ProcessedAt); err != nil {
+		if err := rows.Scan(&change.ChangeId, &change.CheckinId, &change.AccountId, &change.ChangeType, &change.Changes, &change.Status, &change.CreatedAt, &change.ProcessedAt); err != nil {
 			return nil, err
 		}
 		changes = append(changes, change)

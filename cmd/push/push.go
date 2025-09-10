@@ -28,6 +28,7 @@ func PushCmd(App *app.App) *cobra.Command {
 	pushCmd.AddCommand(pushAccountsCmd(App))
 	pushCmd.AddCommand(pushCheckinsCmd(App))
 	pushCmd.AddCommand(pushAllCmd(App))
+	pushCmd.AddCommand(listCmd(App))
 	return pushCmd
 }
 

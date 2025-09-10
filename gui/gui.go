@@ -7,13 +7,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"fyne.io/fyne/v2"
 	fapp "fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-	"github.com/spf13/viper"
 )
 
 // Gui struct holds all the UI components and application state
@@ -143,13 +143,105 @@ func (ui *Gui) createPushTab() fyne.CanvasObject {
 	pushCheckinsButton := widget.NewButtonWithIcon("Push Check-in Changes", theme.UploadIcon(), func() { go ui.runPushCheckins() })
 	pushAllButton := widget.NewButtonWithIcon("Push All Changes", theme.ViewRefreshIcon(), func() { go ui.runPushAll() })
 
+	tableContainer := container.NewVBox()
+	entityType := "accounts" // Default view
+
+	radio := widget.NewRadioGroup([]string{"accounts", "checkins"}, func(selected string) {
+		entityType = selected
+		tableContainer.Objects = []fyne.CanvasObject{ui.createPendingChangesTable(entityType)}
+		tableContainer.Refresh()
+	})
+	radio.SetSelected("accounts")
+
+	tableContainer.Objects = []fyne.CanvasObject{ui.createPendingChangesTable(entityType)}
+
 	return container.NewVBox(
 		widget.NewLabelWithStyle("Push Pending Changes", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		pushAccountsButton,
 		pushCheckinsButton,
 		widget.NewSeparator(),
 		pushAllButton,
+		widget.NewSeparator(),
+		widget.NewLabelWithStyle("View Pending Changes", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		radio,
+		tableContainer,
 	)
+}
+
+func (ui *Gui) createPendingChangesTable(entityType string) fyne.CanvasObject {
+	options := app.PushFilterOptions{
+		Status:  "pending",
+		OrderBy: "date_desc",
+	}
+
+	results, err := app.GetFilteredPendingChanges(ui.app, entityType, options)
+	if err != nil {
+		return widget.NewLabel(fmt.Sprintf("Error fetching changes: %v", err))
+	}
+
+	var headers []string
+	var data [][]string
+
+	switch entityType {
+	case "accounts":
+		headers = []string{"ID", "Account ID", "Type", "Status", "Created At", "Changes"}
+		changes, ok := results.([]database.AccountPendingChange)
+		if !ok {
+			return widget.NewLabel("Error: Could not load account changes.")
+		}
+		for _, c := range changes {
+			data = append(data, []string{
+				fmt.Sprintf("%d", c.ChangeId),
+				fmt.Sprintf("%d", c.AccountId),
+				c.ChangeType,
+				c.Status,
+				c.CreatedAt.Format(time.RFC3339),
+				c.Changes,
+			})
+		}
+	case "checkins":
+		headers = []string{"ID", "Checkin ID", "Account ID", "Type", "Status", "Created At", "Changes"}
+		changes, ok := results.([]database.CheckinPendingChange)
+		if !ok {
+			return widget.NewLabel("Error: Could not load check-in changes.")
+		}
+		for _, c := range changes {
+			data = append(data, []string{
+				fmt.Sprintf("%d", c.ChangeId),
+				fmt.Sprintf("%d", c.CheckinId),
+				fmt.Sprintf("%d", c.AccountId),
+				c.ChangeType,
+				c.Status,
+				c.CreatedAt.Format(time.RFC3339),
+				c.Changes,
+			})
+		}
+	}
+
+	if len(data) == 0 {
+		return widget.NewLabel(fmt.Sprintf("No pending %s changes found.", entityType))
+	}
+
+	table := widget.NewTable(
+		func() (int, int) {
+			return len(data) + 1, len(headers)
+		},
+		func() fyne.CanvasObject {
+			return widget.NewLabel("template")
+		},
+		func(i widget.TableCellID, o fyne.CanvasObject) {
+			label := o.(*widget.Label)
+			if i.Row == 0 {
+				label.SetText(headers[i.Col])
+				label.TextStyle = fyne.TextStyle{Bold: true}
+			} else {
+				label.SetText(data[i.Row-1][i.Col])
+				label.TextStyle = fyne.TextStyle{}
+			}
+		},
+	)
+
+	return table
 }
 
 // createConfigTab returns the config tab content
@@ -395,14 +487,14 @@ func (ui *Gui) saveConfig(apiKey, baseURL, dbType, dbPath, dbHost, dbPortStr, db
 		tempDb = &database.MSSQLConfig{
 			Host: dbHost, Port: port, Username: dbUser, Password: dbPass, Database: dbName,
 		}
-default:
+	default:
 		ui.log(fmt.Sprintf("Unknown database type for saving: %s", dbType))
 		return
 	}
 	tempDb.SaveConfig()
 
 	// Explicitly set DB_TYPE as it's not part of the DB object's SaveConfig
-	viper.Set("DB_TYPE", dbType)
+	ui.app.DB.SaveConfig()
 
 	// Write the accumulated viper config to file
 	if err := ui.app.WriteConfig(); err != nil {
@@ -458,7 +550,7 @@ func (ui *Gui) testDBConnection(button *widget.Button, dbType, dbPath, dbHost, d
 		db = &database.MSSQLConfig{
 			Host: dbHost, Port: port, Username: dbUser, Password: dbPass, Database: dbName,
 		}
-default:
+	default:
 		ui.log(fmt.Sprintf("Unknown database type for testing: %s", dbType))
 		button.SetText("Test Failed")
 		return
