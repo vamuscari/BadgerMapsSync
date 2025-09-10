@@ -4,8 +4,8 @@ CREATE TABLE Routes (
     Name NVARCHAR(255),
     RouteDate DATE,
     Duration INT,
-    StartAddress NTEXT,
-    DestinationAddress NTEXT,
+    StartAddress NVARCHAR(MAX),
+    DestinationAddress NVARCHAR(MAX),
     StartTime TIME,
     CreatedAt DATETIME2 DEFAULT GETDATE(),
     UpdatedAt DATETIME2 DEFAULT GETDATE()
