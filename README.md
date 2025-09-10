@@ -4,7 +4,7 @@ A command line interface for interacting with the BadgerMaps API.
 
 ## Overview
 
-BadgerMaps CLI allows you to push and pull data, run in server mode, and perform various utility operations with the BadgerMaps API. It provides a powerful interface for managing customer accounts, routes, check-ins, and user profiles.
+The BadgerMaps CLI allows you to synchronize data between the BadgerMaps API and a local database. It provides a powerful interface for managing customer accounts, routes, check-ins, and user profiles. The CLI supports `sqlite3`, `postgres`, and `mssql` as database backends and features a dynamic schema that adapts to your BadgerMaps data.
 
 ## Installation
 
@@ -12,54 +12,54 @@ BadgerMaps CLI allows you to push and pull data, run in server mode, and perform
 # Clone the repository
 git clone https://github.com/vamuscari/BadgerMaps_CLI.git
 
-# Build the application
+# Navigate to the project directory
 cd BadgerMaps_CLI
+
+# Build the application
 go build -o badgermaps
 ```
 
-## Main Commands
-
-- `push`: Send data to BadgerMaps API
-- `pull`: Retrieve data from BadgerMaps API
-- `server`: Run in server mode
-- `test`: Run tests and diagnostics
-- `version`: Display version information
-
 ## Getting Started
 
-1. Authenticate with the API:
-   ```bash
-   badgermaps auth
-   ```
+The first time you run the CLI, you should use the interactive `config` command to set up your API key and database connection.
 
-2. Pull data from the API:
-   ```bash
-   badgermaps pull accounts
-   ```
+```bash
+./badgermaps config
+```
 
-3. Push data to the API:
-   ```bash
-   badgermaps push account 123456
-   ```
+This will guide you through the process of configuring the CLI and creating the necessary database schema.
 
-## Configuration
+## Main Commands
 
-Configuration can be managed through:
-- Command-line flags
-- Environment variables
-- Configuration file (.env)
+- `config`: Run the interactive setup to configure the CLI.
+- `pull`: Retrieve data from the BadgerMaps API and store it in your local database.
+  - `pull account [id]`: Pull a single account.
+  - `pull accounts`: Pull all accounts.
+  - `pull checkin [id]`: Pull a single checkin.
+  - `pull checkins`: Pull all checkins.
+  - `pull route [id]`: Pull a single route.
+  - `pull routes`: Pull all routes.
+  - `pull profile`: Pull your user profile.
+  - `pull all`: Pull all data (accounts, checkins, routes, and profile).
+- `push`: Push data from your local database to the BadgerMaps API.
+- `server`: Run in server mode to listen for webhooks from the BadgerMaps API.
+- `version`: Display the version of the CLI.
 
-For more details on configuration options, see the [Configuration Documentation](docs/configuration.md).
+## Database
 
-## Documentation
+The CLI uses a local database to store the data pulled from the BadgerMaps API. The database schema is created and managed automatically by the CLI.
 
-For more detailed information, please refer to the documentation in the `docs` folder:
+### Dynamic Schema
 
-- [API Integration](docs/api-integration.md)
-- [Command Reference](docs/command-reference.md)
-- [Configuration](docs/configuration.md)
-- [Data Types](docs/data-types.md)
-- [Server Mode](docs/server-mode.md)
+The database features a dynamic schema that adapts to your BadgerMaps data. The `AccountsWithLabels` view is dynamically created based on the `DataSets` in your BadgerMaps account, providing a convenient way to view your accounts with custom labels.
+
+Triggers are used to keep the `AccountsWithLabels` view and other parts of the schema up-to-date when the `DataSets` table is modified.
+
+### Supported Databases
+
+- `sqlite3`
+- `postgres`
+- `mssql`
 
 ## License
 
