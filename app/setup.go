@@ -90,5 +90,35 @@ func InteractiveSetup(App *App) bool {
 	fmt.Println(utils.Colors.Green("✓ Setup completed successfully!"))
 	fmt.Println(utils.Colors.Green("Configuration saved to: %s", configFile))
 
+	// Check if the database schema is valid
+	if err := App.DB.ValidateSchema(); err == nil {
+		fmt.Println(utils.Colors.Yellow("Database schema already exists and is valid."))
+		reinitialize := utils.PromptBool(reader, "Do you want to reinitialize the database? (This will delete all existing data)", false)
+		if reinitialize {
+			fmt.Println(utils.Colors.Yellow("Reinitializing database..."))
+			if err := App.DB.DropAllTables(); err != nil {
+				fmt.Println(utils.Colors.Red("Error dropping tables: %v", err))
+				return false
+			}
+			if err := App.DB.EnforceSchema(); err != nil {
+				fmt.Println(utils.Colors.Red("Error enforcing schema: %v", err))
+				return false
+			}
+			fmt.Println(utils.Colors.Green("Database reinitialized successfully."))
+		}
+	} else {
+		// Schema is invalid or does not exist
+		fmt.Println(utils.Colors.Yellow("Database schema is invalid or missing."))
+		enforce := utils.PromptBool(reader, "Do you want to create/update the database schema now?", true)
+		if enforce {
+			fmt.Println(utils.Colors.Yellow("Enforcing schema..."))
+			if err := App.DB.EnforceSchema(); err != nil {
+				fmt.Println(utils.Colors.Red("Error enforcing schema: %v", err))
+				return false
+			}
+			fmt.Println(utils.Colors.Green("Database schema created/updated successfully."))
+		}
+	}
+
 	return true
 }

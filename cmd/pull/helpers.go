@@ -191,6 +191,23 @@ func StoreProfile(App *app.App, profile *api.UserProfile) error {
 		return err
 	}
 
+	// Update Configurations table
+	if err := database.UpdateConfiguration(App.DB, "ApiProfileId", fmt.Sprintf("%d", profile.ProfileId.Int64)); err != nil {
+		return err
+	}
+	if err := database.UpdateConfiguration(App.DB, "ApiProfileName", fmt.Sprintf("%s %s", profile.FirstName.String, profile.LastName.String)); err != nil {
+		return err
+	}
+	if err := database.UpdateConfiguration(App.DB, "CompanyId", fmt.Sprintf("%d", profile.Company.Id.Int64)); err != nil {
+		return err
+	}
+	if err := database.UpdateConfiguration(App.DB, "CompanyName", profile.Company.Name.String); err != nil {
+		return err
+	}
+	if err := database.UpdateConfiguration(App.DB, "SqlDbUserName", App.DB.GetUsername()); err != nil {
+		return err
+	}
+
 	if err := database.RunCommand(App.DB, "delete_data_set_values", profile.ProfileId); err != nil {
 		return err
 	}

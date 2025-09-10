@@ -1,0 +1,2 @@
+-- SQLite does not support stored procedures.
+-- This logic must be handled at the application level.

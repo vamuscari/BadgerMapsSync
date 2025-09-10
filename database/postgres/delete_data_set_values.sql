@@ -1,1 +1,1 @@
-DELETE FROM "DataSetValues" WHERE "ProfileId" = $1;
+DELETE FROM "DataSetValues" WHERE "ProfileId" = ?;

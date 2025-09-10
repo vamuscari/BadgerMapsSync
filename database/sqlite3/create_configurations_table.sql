@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS Configurations (
+    SettingKey TEXT PRIMARY KEY,
+    SettingValue TEXT,
+    LastModified DATETIME DEFAULT CURRENT_TIMESTAMP
+);
