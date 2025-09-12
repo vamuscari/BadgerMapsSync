@@ -10,13 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/spf13/viper"
 )
 
 func TestPushAccountsCmd(t *testing.T) {
-	viper.Reset()
-	viper.AutomaticEnv()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Type", "application/json")
@@ -62,8 +58,6 @@ func TestPushAccountsCmd(t *testing.T) {
 }
 
 func TestPushCheckinsCmd(t *testing.T) {
-	viper.Reset()
-	viper.AutomaticEnv()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		w.Header().Set("Content-Type", "application/json")

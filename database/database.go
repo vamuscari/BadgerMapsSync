@@ -48,6 +48,9 @@ type DB interface {
 	Close() error
 	GetDB() *sql.DB
 	GetSQL(command string) string
+	RunFunction(functionName string) error
+	GetTables() ([]string, error)
+	ExecuteQuery(query string) (*sql.Rows, error)
 }
 
 // SQLiteConfig represents a SQLite database configuration
@@ -353,6 +356,36 @@ func (db *SQLiteConfig) DropAllTables() error {
 		}
 	}
 	return nil
+}
+
+func (db *SQLiteConfig) RunFunction(functionName string) error {
+	// SQLite does not have stored procedures, so we'll just log a message
+	if db.state.Verbose || db.state.Debug {
+		fmt.Printf("SQLite does not support stored procedures. Function '%s' was not executed.\n", functionName)
+	}
+	return nil
+}
+
+func (db *SQLiteConfig) GetTables() ([]string, error) {
+	rows, err := db.db.Query("SELECT name FROM sqlite_master WHERE type='table'")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		tables = append(tables, name)
+	}
+	return tables, nil
+}
+
+func (db *SQLiteConfig) ExecuteQuery(query string) (*sql.Rows, error) {
+	return db.db.Query(query)
 }
 
 // PostgreSQLConfig represents a PostgreSQL database configuration
@@ -800,6 +833,35 @@ func (db *PostgreSQLConfig) DropAllTables() error {
 		}
 	}
 	return nil
+}
+
+func (db *PostgreSQLConfig) RunFunction(functionName string) error {
+	sqlDB := db.GetDB()
+	query := fmt.Sprintf("SELECT %s()", functionName)
+	_, err := sqlDB.Exec(query)
+	return err
+}
+
+func (db *PostgreSQLConfig) GetTables() ([]string, error) {
+	rows, err := db.db.Query("SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname != 'pg_catalog' AND schemaname != 'information_schema'")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		tables = append(tables, name)
+	}
+	return tables, nil
+}
+
+func (db *PostgreSQLConfig) ExecuteQuery(query string) (*sql.Rows, error) {
+	return db.db.Query(query)
 }
 
 // MSSQLConfig represents a Microsoft SQL Server database configuration
@@ -1279,6 +1341,35 @@ func (db *MSSQLConfig) DropAllTables() error {
 	return nil
 }
 
+func (db *MSSQLConfig) RunFunction(functionName string) error {
+	sqlDB := db.GetDB()
+	query := fmt.Sprintf("EXEC %s", functionName)
+	_, err := sqlDB.Exec(query)
+	return err
+}
+
+func (db *MSSQLConfig) GetTables() ([]string, error) {
+	rows, err := db.db.Query("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		tables = append(tables, name)
+	}
+	return tables, nil
+}
+
+func (db *MSSQLConfig) ExecuteQuery(query string) (*sql.Rows, error) {
+	return db.db.Query(query)
+}
+
 // NewDBFromConfig creates a new DB instance from a config struct.
 func NewDB(dbType string, s *state.State) (DB, error) {
 	var db DB
@@ -1290,10 +1381,12 @@ func NewDB(dbType string, s *state.State) (DB, error) {
 	case "postgres":
 		db = &PostgreSQLConfig{
 			state: s,
+			Port:  5432,
 		}
 	case "mssql":
 		db = &MSSQLConfig{
 			state: s,
+			Port:  1433,
 		}
 	default:
 		db = &SQLiteConfig{
@@ -1312,6 +1405,7 @@ func NewDB(dbType string, s *state.State) (DB, error) {
 
 // LoadDatabaseSettings loads database settings based on the database type
 func LoadDatabaseSettings(s *state.State) (DB, error) {
+	viper.AutomaticEnv()
 	dbType := viper.Get("DB_Type")
 
 	if dbType == "" {
@@ -1456,3 +1550,4 @@ func GetExpectedSchema() map[string][]string {
 		},
 	}
 }
+

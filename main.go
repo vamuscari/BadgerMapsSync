@@ -6,6 +6,7 @@ import (
 
 	"badgermaps/app"
 	"badgermaps/cmd/config"
+	"badgermaps/cmd/events"
 	"badgermaps/cmd/pull"
 	"badgermaps/cmd/push"
 	"badgermaps/cmd/server"
@@ -28,19 +29,28 @@ var (
 	App *app.App
 )
 
+var guiFlag bool
+
 // createRootCmd configures and returns the root cobra command
 func createRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "badgermaps",
 		Short: "BadgerMaps CLI - Command line interface for BadgerMaps",
 		Long: `BadgerMaps CLI is a command line interface for interacting with the BadgerMaps API.
-It allows you to push and pull data, run in server mode, and perform various utility operations.`,
+It allows you to push and pull data, run in server mode, and perform various utility operations.`, 
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			// Don't load config for version or help commands
 			if cmd.Name() == "version" || cmd.Name() == "help" {
 				return
 			}
 			App.VerifySetupOrExit(cmd)
+		},
+		Run: func(cmd *cobra.Command, args []string) {
+			if guiFlag {
+				runGUI()
+			} else {
+				cmd.Help()
+			}
 		},
 	}
 
@@ -51,8 +61,9 @@ It allows you to push and pull data, run in server mode, and perform various uti
 	testCmd := test.TestCmd(App)
 	configCmd := config.ConfigCmd(App)
 	versionCmd := version.VersionCmd()
+	eventsCmd := events.EventsCmd(App)
 
-	rootCmd.AddCommand(pushCmd, pullCmd, serverCmd, testCmd, configCmd, versionCmd)
+	rootCmd.AddCommand(pushCmd, pullCmd, serverCmd, testCmd, configCmd, versionCmd, eventsCmd)
 
 	// Global flags
 	rootCmd.PersistentFlags().BoolVarP(&App.State.Verbose, "verbose", "v", false, "Enable verbose output with additional details")
@@ -61,6 +72,7 @@ It allows you to push and pull data, run in server mode, and perform various uti
 	rootCmd.PersistentFlags().BoolVar(&App.State.NoColor, "no-color", false, "Disable colored output")
 	rootCmd.PersistentFlags().StringVar(App.State.ConfigFile, "config", "", "Config file (default is $HOME/.badgermaps.yaml)")
 	rootCmd.PersistentFlags().StringVar(App.State.EnvFile, "env", "", "Env file (default is $PWD/.env).")
+	rootCmd.Flags().BoolVar(&guiFlag, "gui", false, "Launch the graphical user interface")
 
 	return rootCmd
 }
@@ -72,18 +84,6 @@ func main() {
 		defer App.DB.Close()
 	}
 
-	// Check if the app should run in GUI or CLI mode
-	// os.Args[0] is the program name, so len > 1 means subcommands were passed
-	if len(os.Args) > 1 {
-		// CLI Mode
-		runCLI()
-	} else {
-		// GUI Mode
-		runGUI()
-	}
-}
-
-func runCLI() {
 	rootCmd := createRootCmd()
 	if err := rootCmd.Execute(); err != nil {
 		if App.State.Debug {

@@ -44,6 +44,25 @@ func Launch(a *app.App, icon fyne.Resource) {
 		terminalVisible: true,
 	}
 
+	// Subscribe to events to refresh the events tab
+	eventListener := func(e app.Event) {
+		if ui.app.State.Debug {
+			ui.log(fmt.Sprintf("GUI received event: %s", e.Type.String()))
+		}
+		if ui.tabs != nil {
+			for _, tab := range ui.tabs.Items {
+				if tab.Text == "Events" {
+					// Re-create the content of the events tab
+					tab.Content = ui.createEventsTab()
+					ui.tabs.Refresh()
+					break
+				}
+			}
+		}
+	}
+	a.Events.Subscribe(app.EventCreate, eventListener)
+	a.Events.Subscribe(app.EventDelete, eventListener)
+
 	window.SetContent(ui.createContent())
 	window.Resize(fyne.NewSize(1280, 720))
 	window.ShowAndRun()
@@ -57,11 +76,19 @@ func (ui *Gui) createContent() fyne.CanvasObject {
 // createMainContent builds the main layout with toolbar, tabs, and log view
 func (ui *Gui) createMainContent() fyne.CanvasObject {
 	ui.configTab = ui.buildConfigTab()
-	ui.tabs = container.NewAppTabs(
+	abs := []*container.TabItem{
 		container.NewTabItemWithIcon("Pull", theme.DownloadIcon(), ui.createPullTab()),
 		container.NewTabItemWithIcon("Push", theme.UploadIcon(), ui.createPushTab()),
+		container.NewTabItemWithIcon("Events", theme.ListIcon(), ui.createEventsTab()),
+		container.NewTabItemWithIcon("Explorer", theme.FolderIcon(), ui.createExplorerTab()),
 		container.NewTabItemWithIcon("Configuration", theme.SettingsIcon(), ui.createConfigTab()),
-	)
+	}
+
+	if ui.app.State.Debug {
+		abs = append(abs, container.NewTabItemWithIcon("Debug", theme.WarningIcon(), ui.createDebugTab()))
+	}
+
+	ui.tabs = container.NewAppTabs(abs...)
 
 	toolbar := widget.NewToolbar(
 		widget.NewToolbarSpacer(),
@@ -77,14 +104,14 @@ func (ui *Gui) createMainContent() fyne.CanvasObject {
 
 	if ui.terminalVisible {
 		ui.logView = widget.NewList(
-			func() int {
-				return len(ui.logData)
-			},
+			func() int { return len(ui.logData) },
 			func() fyne.CanvasObject {
-				return widget.NewLabel("template")
+				entry := widget.NewMultiLineEntry()
+				entry.Disable()
+				return entry
 			},
 			func(i widget.ListItemID, o fyne.CanvasObject) {
-				o.(*widget.Label).SetText(ui.logData[i])
+				o.(*widget.Entry).SetText(ui.logData[i])
 			},
 		)
 		split := container.NewHSplit(mainContent, ui.logView)
@@ -223,12 +250,8 @@ func (ui *Gui) createPendingChangesTable(entityType string) fyne.CanvasObject {
 	}
 
 	table := widget.NewTable(
-		func() (int, int) {
-			return len(data) + 1, len(headers)
-		},
-		func() fyne.CanvasObject {
-			return widget.NewLabel("template")
-		},
+		func() (int, int) { return len(data) + 1, len(headers) },
+		func() fyne.CanvasObject { return widget.NewLabel("template") },
 		func(i widget.TableCellID, o fyne.CanvasObject) {
 			label := o.(*widget.Label)
 			if i.Row == 0 {
@@ -242,6 +265,238 @@ func (ui *Gui) createPendingChangesTable(entityType string) fyne.CanvasObject {
 	)
 
 	return table
+}
+
+// createEventsTab creates the content for the "Events" tab
+func (ui *Gui) createEventsTab() fyne.CanvasObject {
+	eventsContent := container.NewVBox()
+
+	// Function to refresh the events list
+	var refreshEvents func()
+	refreshEvents = func() {
+		eventsContent.Objects = nil
+		eventActions := ui.app.GetEventActions()
+
+		// Create a sorted list of event names for consistent order
+		var sortedEvents []string
+		for eventName := range eventActions {
+			sortedEvents = append(sortedEvents, eventName)
+		}
+
+		for _, eventName := range sortedEvents {
+			actions := eventActions[eventName]
+
+			eventLabel := widget.NewLabelWithStyle(eventName, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+			eventsContent.Add(eventLabel)
+
+			for _, action := range actions {
+				actionLabel := widget.NewLabel(action)
+				// Use function closure to capture the correct eventName and action
+				currentEvent := eventName
+				currentAction := action
+				removeButton := widget.NewButtonWithIcon("", theme.DeleteIcon(), func() {
+					err := ui.app.RemoveEventAction(currentEvent, currentAction)
+					if err != nil {
+						ui.log(fmt.Sprintf("Error removing event action: %v", err))
+						return
+					}
+					ui.log(fmt.Sprintf("Removed action '%s' from event '%s'", currentAction, currentEvent))
+				})
+				actionBox := container.NewHBox(removeButton, actionLabel)
+				eventsContent.Add(actionBox)
+			}
+		}
+		eventsContent.Refresh()
+	}
+
+	// Initial population
+	refreshEvents()
+
+	// Form for adding new event actions
+	eventSelect := widget.NewSelect(app.AllEventTypes(), nil)
+	actionEntry := widget.NewEntry()
+	actionEntry.SetPlaceHolder("Enter shell command or db:function")
+
+	addButton := widget.NewButtonWithIcon("Add Action", theme.ContentAddIcon(), func() {
+		event := eventSelect.Selected
+		action := actionEntry.Text
+
+		if event == "" {
+			ui.log("Please select an event.")
+			return
+		}
+		if action == "" {
+			ui.log("Please enter an action.")
+			return
+		}
+
+		err := ui.app.AddEventAction(event, action)
+		if err != nil {
+			ui.log(fmt.Sprintf("Error adding event action: %v", err))
+			return
+		}
+
+		ui.log(fmt.Sprintf("Added action '%s' to event '%s'", action, event))
+		actionEntry.SetText("")
+	})
+
+	addForm := container.NewVBox(
+		widget.NewLabelWithStyle("Add New Event Action", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		eventSelect,
+		actionEntry,
+		addButton,
+	)
+
+	return container.NewBorder(nil, addForm, nil, nil, container.NewScroll(eventsContent))
+}
+
+// createExplorerTab creates the content for the "Explorer" tab
+func (ui *Gui) createExplorerTab() fyne.CanvasObject {
+	tableContainer := container.NewMax() // Use NewMax to fill available space
+	tableSelect := widget.NewSelect([]string{}, func(tableName string) {
+		ui.log(fmt.Sprintf("Explorer: Loading table '%s'", tableName))
+		if tableName == "" {
+			tableContainer.Objects = nil
+			tableContainer.Refresh()
+			return
+		}
+
+		query := fmt.Sprintf("SELECT * FROM %s", tableName)
+
+	
+rows, err := ui.app.DB.ExecuteQuery(query)
+		if err != nil {
+			ui.log(fmt.Sprintf("Error executing query: %v", err))
+			tableContainer.Objects = []fyne.CanvasObject{widget.NewLabel(fmt.Sprintf("Error: %v", err))}
+			tableContainer.Refresh()
+			return
+		}
+		defer rows.Close()
+
+		columns, err := rows.Columns()
+		if err != nil {
+			ui.log(fmt.Sprintf("Error getting columns: %v", err))
+			tableContainer.Objects = []fyne.CanvasObject{widget.NewLabel(fmt.Sprintf("Error: %v", err))}
+			tableContainer.Refresh()
+			return
+		}
+		ui.log(fmt.Sprintf("Explorer: Found %d columns in '%s'", len(columns), tableName))
+
+		var data [][]string
+		for rows.Next() {
+			row := make([]interface{}, len(columns))
+			rowData := make([]string, len(columns))
+			for i := range row {
+				row[i] = new(interface{})
+			}
+			if err := rows.Scan(row...); err != nil {
+				ui.log(fmt.Sprintf("Error scanning row: %v", err))
+				continue
+			}
+			for i, val := range row {
+				if val == nil {
+					rowData[i] = "NULL"
+				} else {
+					v := val.(*interface{})
+					if b, ok := (*v).([]byte); ok {
+						rowData[i] = string(b)
+					} else {
+						rowData[i] = fmt.Sprintf("%v", *v)
+					}
+				}
+			}
+			data = append(data, rowData)
+		}
+		ui.log(fmt.Sprintf("Explorer: Found %d rows in '%s'", len(data), tableName))
+
+		if len(data) == 0 {
+			tableContainer.Objects = []fyne.CanvasObject{widget.NewLabel("No rows in this table.")}
+			tableContainer.Refresh()
+			return
+		}
+
+		// Calculate column widths
+		colWidths := make([]float32, len(columns))
+		for i, colName := range columns {
+			headerSize := fyne.MeasureText(colName, theme.TextSize(), fyne.TextStyle{Bold: true})
+			maxWidth := headerSize.Width
+
+			for _, rowData := range data {
+				if i < len(rowData) {
+					cellSize := fyne.MeasureText(rowData[i], theme.TextSize(), fyne.TextStyle{})
+					if cellSize.Width > maxWidth {
+						maxWidth = cellSize.Width
+					}
+				}
+			}
+			colWidths[i] = maxWidth + 10 // Add some padding
+		}
+
+		dataTable := widget.NewTable(
+			func() (int, int) { return len(data) + 1, len(columns) },
+			func() fyne.CanvasObject { return widget.NewLabel("template") },
+			func(i widget.TableCellID, o fyne.CanvasObject) {
+				label := o.(*widget.Label)
+				if i.Row == 0 {
+					label.SetText(columns[i.Col])
+					label.TextStyle = fyne.TextStyle{Bold: true}
+				} else {
+					label.SetText(data[i.Row-1][i.Col])
+					label.TextStyle = fyne.TextStyle{}
+				}
+			},
+		)
+
+		for i, width := range colWidths {
+			dataTable.SetColumnWidth(i, width)
+		}
+
+		tableContainer.Objects = []fyne.CanvasObject{dataTable}
+		tableContainer.Refresh()
+	})
+
+	refreshButton := widget.NewButtonWithIcon("Refresh", theme.ViewRefreshIcon(), func() {
+		go func() {
+			tables, err := ui.app.DB.GetTables()
+			if err != nil {
+				ui.log(fmt.Sprintf("Error getting tables: %v", err))
+				return
+			}
+			tableSelect.Options = tables
+			tableSelect.ClearSelected()
+			tableSelect.Refresh()
+			tableContainer.Objects = nil
+			tableContainer.Refresh()
+		}()
+	})
+
+	// Initial load
+	go func() {
+		tables, err := ui.app.DB.GetTables()
+		if err != nil {
+			ui.log(fmt.Sprintf("Error getting tables: %v", err))
+			return
+		}
+		tableSelect.Options = tables
+		tableSelect.Refresh()
+	}()
+
+	topContent := container.NewVBox(
+		widget.NewLabelWithStyle("Database Explorer", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		container.NewHBox(tableSelect, refreshButton),
+	)
+
+	return container.NewBorder(topContent, nil, nil, nil, tableContainer)
+}
+
+// createDebugTab creates the content for the "Debug" tab
+func (ui *Gui) createDebugTab() fyne.CanvasObject {
+	return container.NewVBox(
+		widget.NewLabelWithStyle("Debug Information", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabel(fmt.Sprintf("Debug Mode: %v", ui.app.State.Debug)),
+		widget.NewLabel(fmt.Sprintf("Verbose Mode: %v", ui.app.State.Verbose)),
+		widget.NewLabel(fmt.Sprintf("Config File: %s", ui.app.LoadedConfigFile)),
+	)
 }
 
 // createConfigTab returns the config tab content

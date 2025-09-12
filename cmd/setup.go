@@ -1,7 +1,8 @@
-package app
+package cmd
 
 import (
 	"badgermaps/api"
+	"badgermaps/app"
 	"badgermaps/database"
 	"badgermaps/utils"
 	"bufio"
@@ -9,11 +10,61 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
+func (a *app.App) VerifySetupOrExit(cmd *cobra.Command) bool {
+	if a.State.NoColor {
+		a.color.NoColor = true
+	}
+
+	path, ok, err := a.GetConfigFilePath()
+	if err != nil {
+		fmt.Println(color.RedString("Error getting config file path: %v", err))
+		os.Exit(1)
+	}
+
+	if ok {
+		if a.State.Verbose || a.State.Debug {
+			fmt.Println(color.GreenString("Configuration detected: %s", path))
+		}
+		if err := a.LoadConfig(); err != nil {
+			fmt.Println(color.RedString("Error loading configuration: %v", err))
+		} else {
+			if (a.State.Verbose || a.State.Debug) && a.API != nil {
+				apiKeyStatus := "not set"
+				if a.API.APIKey != "" {
+					apiKeyStatus = "set"
+				}
+				dbType := a.DB.GetType()
+				fmt.Println(color.CyanString("Setup OK: DB_TYPE=%s, API_KEY=%s", dbType, apiKeyStatus))
+			}
+			return true
+		}
+	}
+
+	if a.State.Verbose || a.State.Debug {
+		fmt.Println(color.YellowString("No configuration file found (.env or config.yaml)."))
+	}
+
+	if promptForSetup() {
+		if InteractiveSetup(a) {
+			if err := a.LoadConfig(); err != nil {
+				fmt.Println(color.RedString("Error reloading configuration after setup: %v", err))
+				os.Exit(1)
+			}
+			return true
+		}
+	}
+
+	fmt.Println(color.YellowString("Setup is required to use this command. Exiting."))
+	os.Exit(0)
+	return false
+}
+
 // InteractiveSetup guides the user through setting up the configuration
-func InteractiveSetup(a *App) bool {
+func InteractiveSetup(a *app.App) bool {
 	reader := bufio.NewReader(os.Stdin)
 
 	fmt.Println(utils.Colors.Blue("=== BadgerMaps CLI Setup ==="))
@@ -35,11 +86,15 @@ func InteractiveSetup(a *App) bool {
 					fmt.Println(utils.Colors.Red("Error getting executable path: %v", err))
 					return false
 				}
-				a.LoadedConfigFile = filepath.Join(filepath.Dir(exe), ".env")
+				a.ConfigFile = filepath.Join(filepath.Dir(exe), ".env")
 			} else {
-				a.LoadedConfigFile = utils.GetConfigDirFile("config.yaml")
+				a.ConfigFile = utils.GetConfigDirFile("config.yaml")
 			}
 		}
+	} else {
+		// file := utils.GetConfigDirFile()
+		// a.ConfigFile
+
 	}
 
 	// API Settings
@@ -67,8 +122,16 @@ func InteractiveSetup(a *App) bool {
 			}
 		}
 	}
+
 	dbType := utils.PromptChoice(reader, "Select database type", dbOptions)
 	viper.Set("DB_TYPE", dbType)
+
+	if currentDB == nil {
+		a.DB, err = database.NewDB(dbType, a.State)
+		if err != nil {
+			fmt.Println(utils.Colors.Red("Failed to init new DB: %v", err))
+		}
+	}
 
 	a.DB.PromptDatabaseSettings()
 	if err := a.DB.SaveConfig(); err != nil {
@@ -76,7 +139,7 @@ func InteractiveSetup(a *App) bool {
 		return false
 	}
 
-	if err != nil {
+	if err := a.DB.LoadConfig(); err != nil {
 		fmt.Println(utils.Colors.Red("Error reloading database with new settings: %v", err))
 		return false
 	}
@@ -108,7 +171,7 @@ func InteractiveSetup(a *App) bool {
 	}
 
 	// Save configuration
-	configFile := a.LoadedConfigFile
+	configFile := a.ConfigFile
 	if configFile == "" {
 		configFile = utils.GetConfigDirFile("config.yaml")
 	}

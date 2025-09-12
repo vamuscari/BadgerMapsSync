@@ -11,8 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/spf13/viper"
 )
 
 func TestHandleAccountCreateWebhook(t *testing.T) {
@@ -20,9 +18,9 @@ func TestHandleAccountCreateWebhook(t *testing.T) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "test.db")
 
-	// Set viper values for the test
-	viper.Set("DB_TYPE", "sqlite3")
-	viper.Set("DB_PATH", dbPath)
+	// Set os env values for the test
+	os.Setenv("DB_TYPE", "sqlite3")
+	os.Setenv("DB_PATH", dbPath)
 
 	app := app.NewApp()
 

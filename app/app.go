@@ -5,20 +5,15 @@ import (
 	"badgermaps/app/state"
 	"badgermaps/database"
 	"badgermaps/utils"
-	"bufio"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/fatih/color"
-	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 type App struct {
-	CfgFile          string
-	LoadedConfigFile string
+	ConfigFile string
 
 	State  *state.State
 	DB     database.DB
@@ -29,10 +24,11 @@ type App struct {
 }
 
 func NewApp() *App {
-	return &App{
-		State:  state.NewState(),
-		Events: NewEventDispatcher(),
+	a := &App{
+		State: state.NewState(),
 	}
+	a.Events = NewEventDispatcher(a)
+	return a
 }
 
 func (a *App) LoadConfig() error {
@@ -42,7 +38,7 @@ func (a *App) LoadConfig() error {
 	}
 
 	if ok {
-		a.LoadedConfigFile = path
+		a.ConfigFile = path
 		viper.SetConfigFile(path)
 		if err := viper.ReadInConfig(); err != nil {
 			// Ignore if file is empty, it will be written to later
@@ -60,8 +56,6 @@ func (a *App) LoadConfig() error {
 		return dbErr
 	}
 
-	a.MaxConcurrentRequests = viper.GetInt("MAX_CONCURRENT_REQUESTS")
-
 	// Limit between
 	if a.MaxConcurrentRequests < 1 || a.MaxConcurrentRequests > 10 {
 		a.MaxConcurrentRequests = 5
@@ -75,55 +69,6 @@ func (a *App) SaveConfig() {
 	a.DB.SaveConfig()
 	viper.Set("MAX_CONCURRENT_REQUESTS", a.MaxConcurrentRequests)
 
-}
-
-func (a *App) VerifySetupOrExit(cmd *cobra.Command) bool {
-	if a.State.NoColor {
-		color.NoColor = true
-	}
-
-	path, ok, err := a.GetConfigFilePath()
-	if err != nil {
-		fmt.Println(color.RedString("Error getting config file path: %v", err))
-		os.Exit(1)
-	}
-
-	if ok {
-		if a.State.Verbose || a.State.Debug {
-			fmt.Println(color.GreenString("Configuration detected: %s", path))
-		}
-		if err := a.LoadConfig(); err != nil {
-			fmt.Println(color.RedString("Error loading configuration: %v", err))
-		} else {
-			if (a.State.Verbose || a.State.Debug) && a.API != nil {
-				apiKeyStatus := "not set"
-				if a.API.APIKey != "" {
-					apiKeyStatus = "set"
-				}
-				dbType := a.DB.GetType()
-				fmt.Println(color.CyanString("Setup OK: DB_TYPE=%s, API_KEY=%s", dbType, apiKeyStatus))
-			}
-			return true
-		}
-	}
-
-	if a.State.Verbose || a.State.Debug {
-		fmt.Println(color.YellowString("No configuration file found (.env or config.yaml)."))
-	}
-
-	if promptForSetup() {
-		if InteractiveSetup(a) {
-			if err := a.LoadConfig(); err != nil {
-				fmt.Println(color.RedString("Error reloading configuration after setup: %v", err))
-				os.Exit(1)
-			}
-			return true
-		}
-	}
-
-	fmt.Println(color.YellowString("Setup is required to use this command. Exiting."))
-	os.Exit(0)
-	return false
 }
 
 func (a *App) GetConfigFilePath() (string, bool, error) {
@@ -164,19 +109,65 @@ func (a *App) GetConfigFilePath() (string, bool, error) {
 	return "", false, nil
 }
 
-func promptForSetup() bool {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print(color.YellowString("BadgerMaps CLI is not set up. Would you like to run setup now? [y/N]: "))
-	response, _ := reader.ReadString('\n')
-	response = strings.TrimSpace(strings.ToLower(response))
-	return response == "y" || response == "yes"
-}
-
 // WriteConfig saves the current viper configuration to the loaded config file.
 func (a *App) WriteConfig() error {
-	if a.LoadedConfigFile == "" {
+	if a.ConfigFile == "" {
 		return fmt.Errorf("no configuration file loaded, cannot save")
 	}
 
-	return viper.WriteConfigAs(a.LoadedConfigFile)
+	return viper.WriteConfigAs(a.ConfigFile)
+}
+
+func (a *App) AddEventAction(event string, action string) error {
+	key := fmt.Sprintf("events.on_%s", event)
+	actions := viper.GetStringSlice(key)
+	actions = append(actions, action)
+	viper.Set(key, actions)
+	err := a.WriteConfig()
+	if err == nil {
+		a.Events.Dispatch(Event{Type: EventCreate, Source: "events", Payload: map[string]string{"event": event, "action": action}})
+	}
+	return err
+}
+
+func (a *App) GetEventActions() map[string][]string {
+	eventActions := make(map[string][]string)
+	settings := viper.AllSettings()
+	events, ok := settings["events"].(map[string]interface{})
+	if !ok {
+		return eventActions
+	}
+
+	for key, val := range events {
+		if strings.HasPrefix(key, "on_") {
+			eventName := strings.TrimPrefix(key, "on_")
+			actions, ok := val.([]interface{})
+			if !ok {
+				continue
+			}
+			var actionStrings []string
+			for _, act := range actions {
+				actionStrings = append(actionStrings, fmt.Sprintf("%v", act))
+			}
+			eventActions[eventName] = actionStrings
+		}
+	}
+	return eventActions
+}
+
+func (a *App) RemoveEventAction(event string, actionToRemove string) error {
+	key := fmt.Sprintf("events.on_%s", event)
+	actions := viper.GetStringSlice(key)
+	var newActions []string
+	for _, action := range actions {
+		if action != actionToRemove {
+			newActions = append(newActions, action)
+		}
+	}
+	viper.Set(key, newActions)
+	err := a.WriteConfig()
+	if err == nil {
+		a.Events.Dispatch(Event{Type: EventDelete, Source: "events", Payload: map[string]string{"event": event, "action": actionToRemove}})
+	}
+	return err
 }

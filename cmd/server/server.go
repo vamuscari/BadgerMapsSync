@@ -16,7 +16,6 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 // ServerCmd creates a new server command
@@ -29,9 +28,10 @@ func ServerCmd(App *app.App) *cobra.Command {
 			App.VerifySetupOrExit(cmd)
 		},
 		Run: func(cmd *cobra.Command, args []string) {
-			var serverConfig ServerConfig
-			if err := viper.Unmarshal(&serverConfig); err != nil {
-				log.Fatalf("Error unmarshalling server config: %v", err)
+			serverConfig := ServerConfig{
+				Host:         App.State.ServerHost,
+				Port:         App.State.ServerPort,
+				WebhookToken: App.State.WebhookToken,
 			}
 			runServer(App, &serverConfig)
 		},
