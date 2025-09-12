@@ -70,3 +70,15 @@ func AllEventTypes() []string {
 	}
 	return types
 }
+
+// StringToEventType converts a string to an EventType.
+// It returns the corresponding EventType and true if the string is a valid event type,
+// otherwise it returns 0 and false.
+func StringToEventType(s string) (EventType, bool) {
+	for i := 0; i <= int(EventDelete); i++ {
+		if EventType(i).String() == s {
+			return EventType(i), true
+		}
+	}
+	return 0, false
+}

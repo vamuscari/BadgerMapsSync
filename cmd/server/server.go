@@ -24,9 +24,6 @@ func ServerCmd(App *app.App) *cobra.Command {
 		Use:   "server",
 		Short: "Run in server mode",
 		Long:  `Run the BadgerMaps CLI in server mode, listening for incoming webhooks.`,
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			App.VerifySetupOrExit(cmd)
-		},
 		Run: func(cmd *cobra.Command, args []string) {
 			serverConfig := ServerConfig{
 				Host:         App.State.ServerHost,

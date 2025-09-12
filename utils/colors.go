@@ -1,8 +1,8 @@
 package utils
 
 import (
+	"badgermaps/app/state"
 	"github.com/fatih/color"
-	"github.com/spf13/viper"
 )
 
 // ColorPrinter provides color printing functions that respect the --no-color flag
@@ -18,9 +18,8 @@ type ColorPrinter struct {
 }
 
 // NewColorPrinter creates a new ColorPrinter that respects the --no-color flag
-func NewColorPrinter() *ColorPrinter {
+func NewColorPrinter(noColor bool) *ColorPrinter {
 	// Check if colors should be disabled
-	noColor := viper.GetBool("no-color")
 	if noColor {
 		// If colors are disabled, return a printer with no colors
 		return &ColorPrinter{
@@ -47,10 +46,10 @@ func NewColorPrinter() *ColorPrinter {
 }
 
 // Global instance for easy access
-var Colors = NewColorPrinter()
+var Colors = NewColorPrinter(false)
 
 // InitColors initializes the global Colors instance
 // This should be called after viper is initialized
-func InitColors() {
-	Colors = NewColorPrinter()
+func InitColors(s *state.State) {
+	Colors = NewColorPrinter(s.NoColor)
 }

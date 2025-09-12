@@ -44,5 +44,5 @@ func interactiveServerSetup(a *app.App) error {
 
 	a.State.WebhookToken = utils.PromptString(reader, "Webhook Secret", a.State.WebhookToken)
 
-	return a.WriteConfig()
+	return a.SaveConfig()
 }

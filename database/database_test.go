@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/spf13/viper"
 )
 
 func TestMain(m *testing.M) {
@@ -138,11 +136,14 @@ func TestSQLFiles(t *testing.T) {
 func TestEnforceSchema(t *testing.T) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "test.db")
-	viper.Set("DB_TYPE", "sqlite3")
-	viper.Set("DB_PATH", dbPath)
+
+	config := &DBConfig{
+		Type: "sqlite3",
+		Path: dbPath,
+	}
 
 	s := state.NewState()
-	db, err := LoadDatabaseSettings(s)
+	db, err := LoadDatabaseSettings(config, s)
 	if err != nil {
 		t.Fatalf("Failed to load database settings: %v", err)
 	}

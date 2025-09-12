@@ -7,6 +7,7 @@ import (
 // RunPullAll orchestrates the process of pulling all data from the BadgerMaps API.
 // It accepts a logger function to provide real-time feedback to the caller (CLI or GUI).
 func RunPullAll(a *App, log func(string)) error {
+	a.Events.Dispatch(Event{Type: PullStart, Source: "all data"})
 	log("Pulling all data...")
 
 	log("Pulling accounts...")
@@ -46,6 +47,7 @@ func RunPullAll(a *App, log func(string)) error {
 
 // RunPullAccount orchestrates pulling a single account from the API.
 func RunPullAccount(a *App, accountID int, log func(string)) error {
+	a.Events.Dispatch(Event{Type: PullStart, Source: "account"})
 	log(fmt.Sprintf("Pulling account with ID: %d", accountID))
 
 	account, err := a.API.GetAccountDetailed(accountID)
@@ -63,6 +65,7 @@ func RunPullAccount(a *App, accountID int, log func(string)) error {
 
 // RunPullAccounts orchestrates pulling all accounts from the API.
 func RunPullAccounts(a *App, log func(string)) error {
+	a.Events.Dispatch(Event{Type: PullStart, Source: "accounts"})
 	log("Pulling all accounts...")
 	if err := PullAllAccounts(a, 0, log); err != nil {
 		log(fmt.Sprintf("Error pulling accounts: %v", err))
@@ -74,6 +77,7 @@ func RunPullAccounts(a *App, log func(string)) error {
 
 // RunPullCheckin orchestrates pulling a single checkin from the API.
 func RunPullCheckin(a *App, checkinID int, log func(string)) error {
+	a.Events.Dispatch(Event{Type: PullStart, Source: "check-in"})
 	log(fmt.Sprintf("Pulling checkin with ID: %d", checkinID))
 
 	checkin, err := a.API.GetCheckin(checkinID)
@@ -91,6 +95,7 @@ func RunPullCheckin(a *App, checkinID int, log func(string)) error {
 
 // RunPullCheckins orchestrates pulling all checkins from the API.
 func RunPullCheckins(a *App, log func(string)) error {
+	a.Events.Dispatch(Event{Type: PullStart, Source: "check-ins"})
 	log("Pulling all checkins...")
 	if err := PullAllCheckins(a, log); err != nil {
 		log(fmt.Sprintf("Error pulling checkins: %v", err))
@@ -102,6 +107,7 @@ func RunPullCheckins(a *App, log func(string)) error {
 
 // RunPullRoute orchestrates pulling a single route from the API.
 func RunPullRoute(a *App, routeID int, log func(string)) error {
+	a.Events.Dispatch(Event{Type: PullStart, Source: "route"})
 	log(fmt.Sprintf("Pulling route with ID: %d", routeID))
 
 	route, err := a.API.GetRoute(routeID)
@@ -119,6 +125,7 @@ func RunPullRoute(a *App, routeID int, log func(string)) error {
 
 // RunPullRoutes orchestrates pulling all routes from the API.
 func RunPullRoutes(a *App, log func(string)) error {
+	a.Events.Dispatch(Event{Type: PullStart, Source: "routes"})
 	log("Pulling all routes...")
 	if err := PullAllRoutes(a, log); err != nil {
 		log(fmt.Sprintf("Error pulling routes: %v", err))
@@ -130,6 +137,7 @@ func RunPullRoutes(a *App, log func(string)) error {
 
 // RunPullProfile orchestrates pulling the user profile from the API.
 func RunPullProfile(a *App, log func(string)) error {
+	a.Events.Dispatch(Event{Type: PullStart, Source: "user profile"})
 	log("Pulling user profile...")
 	profile, err := a.API.GetUserProfile()
 	if err != nil {

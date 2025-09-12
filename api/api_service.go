@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/guregu/null/v6"
-	"github.com/spf13/viper"
 	"io"
 	"net/http"
 	"strings"
@@ -14,6 +13,11 @@ import (
 const (
 	DefaultApiBaseURL = "https://badgerapis.badgermapping.com/api/2"
 )
+
+type APIConfig struct {
+	BaseURL string `yaml:"api_url"`
+	APIKey  string `yaml:"api_key"`
+}
 
 // APIClient handles BadgerMaps API interactions
 type APIClient struct {
@@ -25,29 +29,17 @@ type APIClient struct {
 }
 
 // NewAPIClient creates a new BadgerMaps API client
-func NewAPIClient() *APIClient {
+func NewAPIClient(config *APIConfig) *APIClient {
 	client := &APIClient{
-		BaseURL:   DefaultApiBaseURL,
-		APIKey:    "New",
+		BaseURL:   config.BaseURL,
+		APIKey:    config.APIKey,
 		client:    &http.Client{Timeout: 30 * time.Second},
-		endpoints: NewEndpoints(DefaultApiBaseURL),
+		endpoints: NewEndpoints(config.BaseURL),
 	}
-
-	client.LoadConfig()
 
 	return client
 }
 
-func (api *APIClient) LoadConfig() {
-	api.BaseURL = viper.GetString("API_URL")
-	api.APIKey = viper.GetString("API_KEY")
-}
-
-func (api *APIClient) SaveConfig() {
-	viper.Set("API_URL", api.BaseURL)
-	viper.Set("API_KEY", api.APIKey)
-
-}
 
 // All other API method receivers need to be updated from `api.apiKey` to `api.APIKey`
 // Example for GetAccounts:

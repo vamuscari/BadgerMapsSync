@@ -16,8 +16,18 @@ import (
 	_ "github.com/lib/pq"               // PostgreSQL driver
 	_ "github.com/mattn/go-sqlite3"     // SQLite driver
 	_ "github.com/microsoft/go-mssqldb" // SQL Server driver
-	"github.com/spf13/viper"
 )
+
+type DBConfig struct {
+	Type     string `yaml:"type"`
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	Database string `yaml:"database"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+	SSLMode  string `yaml:"ssl_mode"`
+	Path     string `yaml:"path"`
+}
 
 //go:embed mssql/*.sql
 var mssqlFS embed.FS
@@ -31,9 +41,9 @@ var sqlite3FS embed.FS
 type DB interface {
 	GetType() string
 	DatabaseConnection() string
-	LoadConfig() error
+	LoadConfig(config *DBConfig) error
 	GetUsername() string
-	SaveConfig() error
+	SaveConfig(config *DBConfig) error
 	PromptDatabaseSettings()
 	TableExists(tableName string) (bool, error)
 	ViewExists(viewName string) (bool, error)
@@ -322,19 +332,18 @@ func (db *SQLiteConfig) GetType() string {
 	return "sqlite3"
 }
 
-func (db *SQLiteConfig) LoadConfig() error {
-	if db.Path == "" {
-		db.Path = utils.GetConfigDirFile("badgermaps.db")
-	}
+func (db *SQLiteConfig) LoadConfig(config *DBConfig) error {
+	db.Path = config.Path
+	return nil
+}
+
+func (db *SQLiteConfig) SaveConfig(config *DBConfig) error {
+	config.Path = db.Path
 	return nil
 }
 
 func (db *SQLiteConfig) GetUsername() string {
 	return ""
-}
-
-func (db *SQLiteConfig) SaveConfig() error {
-	return nil
 }
 
 func (db *SQLiteConfig) DatabaseConnection() string {
@@ -779,27 +788,29 @@ func (db *PostgreSQLConfig) TriggerExists(triggerName string) (bool, error) {
 func (db *PostgreSQLConfig) GetType() string {
 	return "postgres"
 }
-func (db *PostgreSQLConfig) LoadConfig() error {
-	db.Host = viper.GetString("DB_HOST")
-	db.Port = viper.GetInt("DB_PORT")
-	db.Database = viper.GetString("DB_NAME")
-	db.Username = viper.GetString("DB_USER")
-	db.Password = viper.GetString("DB_PASSWORD")
-	db.SSLMode = viper.GetString("DB_SSL_MODE")
+
+func (db *PostgreSQLConfig) LoadConfig(config *DBConfig) error {
+	db.Host = config.Host
+	db.Port = config.Port
+	db.Database = config.Database
+	db.Username = config.Username
+	db.Password = config.Password
+	db.SSLMode = config.SSLMode
+	return nil
+}
+
+func (db *PostgreSQLConfig) SaveConfig(config *DBConfig) error {
+	config.Host = db.Host
+	config.Port = db.Port
+	config.Database = db.Database
+	config.Username = db.Username
+	config.Password = db.Password
+	config.SSLMode = db.SSLMode
 	return nil
 }
 
 func (db *PostgreSQLConfig) GetUsername() string {
 	return db.Username
-}
-func (db *PostgreSQLConfig) SaveConfig() error {
-	viper.Set("DB_HOST", db.Host)
-	viper.Set("DB_PORT", db.Port)
-	viper.Set("DB_NAME", db.Database)
-	viper.Set("DB_USER", db.Username)
-	viper.Set("DB_PASSWORD", db.Password)
-	viper.Set("DB_SSL_MODE", db.SSLMode)
-	return nil
 }
 func (db *PostgreSQLConfig) DatabaseConnection() string {
 	u := &url.URL{
@@ -1262,25 +1273,27 @@ func (db *MSSQLConfig) TriggerExists(triggerName string) (bool, error) {
 func (db *MSSQLConfig) GetType() string {
 	return "mssql"
 }
-func (db *MSSQLConfig) LoadConfig() error {
-	db.Host = viper.GetString("DB_HOST")
-	db.Port = viper.GetInt("DB_PORT")
-	db.Database = viper.GetString("DB_NAME")
-	db.Username = viper.GetString("DB_USER")
-	db.Password = viper.GetString("DB_PASSWORD")
+
+func (db *MSSQLConfig) LoadConfig(config *DBConfig) error {
+	db.Host = config.Host
+	db.Port = config.Port
+	db.Database = config.Database
+	db.Username = config.Username
+	db.Password = config.Password
+	return nil
+}
+
+func (db *MSSQLConfig) SaveConfig(config *DBConfig) error {
+	config.Host = db.Host
+	config.Port = config.Port
+	config.Database = db.Database
+	config.Username = db.Username
+	config.Password = db.Password
 	return nil
 }
 
 func (db *MSSQLConfig) GetUsername() string {
 	return db.Username
-}
-func (db *MSSQLConfig) SaveConfig() error {
-	viper.Set("DB_HOST", db.Host)
-	viper.Set("DB_PORT", db.Port)
-	viper.Set("DB_NAME", db.Database)
-	viper.Set("DB_USER", db.Username)
-	viper.Set("DB_PASSWORD", db.Password)
-	return nil
 }
 func (db *MSSQLConfig) DatabaseConnection() string {
 	u := &url.URL{
@@ -1371,9 +1384,9 @@ func (db *MSSQLConfig) ExecuteQuery(query string) (*sql.Rows, error) {
 }
 
 // NewDBFromConfig creates a new DB instance from a config struct.
-func NewDB(dbType string, s *state.State) (DB, error) {
+func NewDB(config *DBConfig, s *state.State) (DB, error) {
 	var db DB
-	switch dbType {
+	switch config.Type {
 	case "sqlite3":
 		db = &SQLiteConfig{
 			state: s,
@@ -1394,46 +1407,7 @@ func NewDB(dbType string, s *state.State) (DB, error) {
 		}
 	}
 
-	db.LoadConfig()
-
-	if err := db.Connect(); err != nil {
-		return nil, fmt.Errorf("error connecting to database: %w", err)
-	}
-
-	return db, nil
-}
-
-// LoadDatabaseSettings loads database settings based on the database type
-func LoadDatabaseSettings(s *state.State) (DB, error) {
-	viper.AutomaticEnv()
-	dbType := viper.Get("DB_Type")
-
-	if dbType == "" {
-		dbType = "sqlite3" // Default
-	}
-
-	var db DB
-	switch dbType {
-	case "sqlite3":
-		db = &SQLiteConfig{
-			state: s,
-		}
-	case "postgres":
-		db = &PostgreSQLConfig{
-			state: s,
-		}
-	case "mssql":
-		db = &MSSQLConfig{
-			state: s,
-		}
-	default:
-		return nil, fmt.Errorf("unsupported database type: %s", dbType)
-	}
-
-	// Run GetDatabaseSettings to set defaults if values are missing
-	if err := db.LoadConfig(); err != nil {
-		return nil, err
-	}
+	db.LoadConfig(config)
 
 	if err := db.Connect(); err != nil {
 		return nil, fmt.Errorf("error connecting to database: %w", err)

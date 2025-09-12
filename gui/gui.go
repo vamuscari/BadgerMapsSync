@@ -25,6 +25,8 @@ type Gui struct {
 	logMutex        sync.Mutex
 	logData         []string
 	logView         *widget.List
+	detailsView     fyne.CanvasObject
+	rightPane       *fyne.Container
 	configTab       fyne.CanvasObject
 	terminalVisible bool
 	tabs            *container.AppTabs // Hold a reference to the tabs container
@@ -34,6 +36,7 @@ type Gui struct {
 func Launch(a *app.App, icon fyne.Resource) {
 	fyneApp := fapp.New()
 	fyneApp.SetIcon(icon)
+	fyneApp.Settings().SetTheme(newModernTheme())
 	window := fyneApp.NewWindow("BadgerMaps CLI")
 
 	ui := &Gui{
@@ -41,7 +44,7 @@ func Launch(a *app.App, icon fyne.Resource) {
 		fyneApp:         fyneApp,
 		window:          window,
 		logData:         []string{"Welcome to BadgerMaps CLI GUI!"},
-		terminalVisible: true,
+		terminalVisible: false, // Default to details view
 	}
 
 	// Subscribe to events to refresh the events tab
@@ -63,6 +66,14 @@ func Launch(a *app.App, icon fyne.Resource) {
 	a.Events.Subscribe(app.EventCreate, eventListener)
 	a.Events.Subscribe(app.EventDelete, eventListener)
 
+	// Subscribe to pull events to show notifications
+	pullNotificationListener := func(e app.Event) {
+		if e.Type == app.PullStart {
+			ui.showToast(fmt.Sprintf("Pulling %s from API...", e.Source))
+		}
+	}
+	a.Events.Subscribe(app.PullStart, pullNotificationListener)
+
 	window.SetContent(ui.createContent())
 	window.Resize(fyne.NewSize(1280, 720))
 	window.ShowAndRun()
@@ -76,7 +87,7 @@ func (ui *Gui) createContent() fyne.CanvasObject {
 // createMainContent builds the main layout with toolbar, tabs, and log view
 func (ui *Gui) createMainContent() fyne.CanvasObject {
 	ui.configTab = ui.buildConfigTab()
-	abs := []*container.TabItem{
+	tabs := []*container.TabItem{
 		container.NewTabItemWithIcon("Pull", theme.DownloadIcon(), ui.createPullTab()),
 		container.NewTabItemWithIcon("Push", theme.UploadIcon(), ui.createPushTab()),
 		container.NewTabItemWithIcon("Events", theme.ListIcon(), ui.createEventsTab()),
@@ -85,41 +96,62 @@ func (ui *Gui) createMainContent() fyne.CanvasObject {
 	}
 
 	if ui.app.State.Debug {
-		abs = append(abs, container.NewTabItemWithIcon("Debug", theme.WarningIcon(), ui.createDebugTab()))
+		tabs = append(tabs, container.NewTabItemWithIcon("Debug", theme.WarningIcon(), ui.createDebugTab()))
 	}
 
-	ui.tabs = container.NewAppTabs(abs...)
+	ui.tabs = container.NewAppTabs(tabs...)
 
-	toolbar := widget.NewToolbar(
-		widget.NewToolbarSpacer(),
-		widget.NewToolbarAction(theme.ComputerIcon(), func() {
-			ui.terminalVisible = !ui.terminalVisible
-			ui.window.SetContent(ui.createMainContent())
-		}),
+	mainContent := container.NewBorder(nil, nil, nil, nil, ui.tabs)
+
+	// Initialize log view
+	ui.logView = widget.NewList(
+		func() int { return len(ui.logData) },
+		func() fyne.CanvasObject {
+			label := widget.NewLabel("template")
+			label.Wrapping = fyne.TextWrapBreak
+			return label
+		},
+		func(i widget.ListItemID, o fyne.CanvasObject) {
+			o.(*widget.Label).SetText(ui.logData[i])
+		},
 	)
 
-	mainContent := container.NewBorder(
-		toolbar, nil, nil, nil, ui.tabs,
+	// Initialize details view
+	ui.detailsView = container.NewCenter(widget.NewLabel("Select an item to see details"))
+
+	rightPaneContent := container.NewBorder(
+		ui.createRightPaneHeader(), nil, nil, nil,
+		ui.detailsView,
 	)
+	ui.rightPane = rightPaneContent
 
-	if ui.terminalVisible {
-		ui.logView = widget.NewList(
-			func() int { return len(ui.logData) },
-			func() fyne.CanvasObject {
-				entry := widget.NewMultiLineEntry()
-				entry.Disable()
-				return entry
-			},
-			func(i widget.ListItemID, o fyne.CanvasObject) {
-				o.(*widget.Entry).SetText(ui.logData[i])
-			},
-		)
-		split := container.NewHSplit(mainContent, ui.logView)
-		split.Offset = 0.7
-		return split
-	}
+	split := container.NewHSplit(mainContent, ui.rightPane)
+	split.Offset = 0.7
+	return split
+}
 
-	return mainContent
+func (ui *Gui) createRightPaneHeader() fyne.CanvasObject {
+	detailsButton := widget.NewButtonWithIcon("Details", theme.InfoIcon(), func() {
+		ui.terminalVisible = false
+		ui.rightPane.Objects[1] = ui.detailsView
+		ui.rightPane.Refresh()
+	})
+
+	terminalButton := widget.NewButtonWithIcon("Terminal", theme.ComputerIcon(), func() {
+		ui.terminalVisible = true
+		ui.rightPane.Objects[1] = ui.logView
+		ui.rightPane.Refresh()
+	})
+
+	return container.NewHBox(detailsButton, terminalButton)
+}
+
+// showDetails updates the right-hand pane to show the provided details object.
+func (ui *Gui) showDetails(details fyne.CanvasObject) {
+	ui.detailsView = details
+	ui.terminalVisible = false
+	ui.rightPane.Objects[1] = ui.detailsView
+	ui.rightPane.Refresh()
 }
 
 // createPullTab creates the content for the "Pull" tab
@@ -142,24 +174,29 @@ func (ui *Gui) createPullTab() fyne.CanvasObject {
 		go ui.runPullRoute(routeIDEntry.Text)
 	})
 
+	singlePullCard := widget.NewCard("Pull Single Item by ID", "", container.NewVBox(
+		container.NewGridWithColumns(2, accountIDEntry, pullAccountButton),
+		container.NewGridWithColumns(2, checkinIDEntry, pullCheckinButton),
+		container.NewGridWithColumns(2, routeIDEntry, pullRouteButton),
+	))
+
 	pullAccountsButton := widget.NewButtonWithIcon("Pull All Accounts", theme.DownloadIcon(), func() { go ui.runPullAccounts() })
 	pullCheckinsButton := widget.NewButtonWithIcon("Pull All Check-ins", theme.DownloadIcon(), func() { go ui.runPullCheckins() })
 	pullRoutesButton := widget.NewButtonWithIcon("Pull All Routes", theme.DownloadIcon(), func() { go ui.runPullRoutes() })
 	pullProfileButton := widget.NewButtonWithIcon("Pull User Profile", theme.AccountIcon(), func() { go ui.runPullProfile() })
-	pullAllButton := widget.NewButtonWithIcon("Run Full Pull (All Data)", theme.ViewRefreshIcon(), func() { go ui.runPullAll() })
 
-	return container.NewVBox(
-		widget.NewLabelWithStyle("Pull Single Item by ID", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		container.NewGridWithColumns(2, accountIDEntry, pullAccountButton),
-		container.NewGridWithColumns(2, checkinIDEntry, pullCheckinButton),
-		container.NewGridWithColumns(2, routeIDEntry, pullRouteButton),
-		widget.NewSeparator(),
-		widget.NewLabelWithStyle("Pull Data Sets", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+	bulkPullCard := widget.NewCard("Pull Data Sets", "", container.NewVBox(
 		pullAccountsButton,
 		pullCheckinsButton,
 		pullRoutesButton,
 		pullProfileButton,
-		widget.NewSeparator(),
+	))
+
+	pullAllButton := widget.NewButtonWithIcon("Run Full Pull (All Data)", theme.ViewRefreshIcon(), func() { go ui.runPullAll() })
+
+	return container.NewVBox(
+		singlePullCard,
+		bulkPullCard,
 		pullAllButton,
 	)
 }
@@ -169,6 +206,13 @@ func (ui *Gui) createPushTab() fyne.CanvasObject {
 	pushAccountsButton := widget.NewButtonWithIcon("Push Account Changes", theme.UploadIcon(), func() { go ui.runPushAccounts() })
 	pushCheckinsButton := widget.NewButtonWithIcon("Push Check-in Changes", theme.UploadIcon(), func() { go ui.runPushCheckins() })
 	pushAllButton := widget.NewButtonWithIcon("Push All Changes", theme.ViewRefreshIcon(), func() { go ui.runPushAll() })
+
+	pushCard := widget.NewCard("Push Pending Changes", "", container.NewVBox(
+		pushAccountsButton,
+		pushCheckinsButton,
+		widget.NewSeparator(),
+		pushAllButton,
+	))
 
 	tableContainer := container.NewVBox()
 	entityType := "accounts" // Default view
@@ -182,16 +226,14 @@ func (ui *Gui) createPushTab() fyne.CanvasObject {
 
 	tableContainer.Objects = []fyne.CanvasObject{ui.createPendingChangesTable(entityType)}
 
-	return container.NewVBox(
-		widget.NewLabelWithStyle("Push Pending Changes", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		pushAccountsButton,
-		pushCheckinsButton,
-		widget.NewSeparator(),
-		pushAllButton,
-		widget.NewSeparator(),
-		widget.NewLabelWithStyle("View Pending Changes", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+	changesCard := widget.NewCard("View Pending Changes", "", container.NewVBox(
 		radio,
 		tableContainer,
+	))
+
+	return container.NewVBox(
+		pushCard,
+		changesCard,
 	)
 }
 
@@ -264,6 +306,25 @@ func (ui *Gui) createPendingChangesTable(entityType string) fyne.CanvasObject {
 		},
 	)
 
+	table.OnSelected = func(id widget.TableCellID) {
+		if id.Row == 0 { // It's the header
+			table.Unselect(id)
+			return
+		}
+		selectedData := data[id.Row-1] // -1 for header
+
+		// Format the data for display
+		var details strings.Builder
+		for i, header := range headers {
+			details.WriteString(fmt.Sprintf("%s: %s\n", header, selectedData[i]))
+		}
+
+		detailsLabel := widget.NewLabel(details.String())
+		detailsLabel.Wrapping = fyne.TextWrapWord
+
+		ui.showDetails(container.NewScroll(detailsLabel))
+	}
+
 	return table
 }
 
@@ -302,7 +363,16 @@ func (ui *Gui) createEventsTab() fyne.CanvasObject {
 					}
 					ui.log(fmt.Sprintf("Removed action '%s' from event '%s'", currentAction, currentEvent))
 				})
-				actionBox := container.NewHBox(removeButton, actionLabel)
+				runButton := widget.NewButtonWithIcon("", theme.MediaPlayIcon(), func() {
+					ui.log(fmt.Sprintf("Manually triggering action: %s", currentAction))
+					if err := ui.app.TriggerEventAction(currentAction); err != nil {
+						ui.log(fmt.Sprintf("Error triggering action: %v", err))
+						ui.showToast(fmt.Sprintf("Error: Failed to trigger action: %v", err))
+					} else {
+						ui.showToast(fmt.Sprintf("Success: Action '%s' triggered.", currentAction))
+					}
+				})
+				actionBox := container.NewHBox(removeButton, runButton, actionLabel)
 				eventsContent.Add(actionBox)
 			}
 		}
@@ -314,11 +384,14 @@ func (ui *Gui) createEventsTab() fyne.CanvasObject {
 
 	// Form for adding new event actions
 	eventSelect := widget.NewSelect(app.AllEventTypes(), nil)
+	actionTypeSelect := widget.NewSelect([]string{"exec", "db", "api"}, nil)
+	actionTypeSelect.SetSelected("exec")
 	actionEntry := widget.NewEntry()
-	actionEntry.SetPlaceHolder("Enter shell command or db:function")
+	actionEntry.SetPlaceHolder("Enter command, function, or endpoint")
 
 	addButton := widget.NewButtonWithIcon("Add Action", theme.ContentAddIcon(), func() {
 		event := eventSelect.Selected
+		actionType := actionTypeSelect.Selected
 		action := actionEntry.Text
 
 		if event == "" {
@@ -330,22 +403,24 @@ func (ui *Gui) createEventsTab() fyne.CanvasObject {
 			return
 		}
 
-		err := ui.app.AddEventAction(event, action)
+		fullAction := fmt.Sprintf("%s:%s", actionType, action)
+
+		err := ui.app.AddEventAction(event, fullAction)
 		if err != nil {
 			ui.log(fmt.Sprintf("Error adding event action: %v", err))
 			return
 		}
 
-		ui.log(fmt.Sprintf("Added action '%s' to event '%s'", action, event))
+		ui.log(fmt.Sprintf("Added action '%s' to event '%s'", fullAction, event))
 		actionEntry.SetText("")
 	})
 
-	addForm := container.NewVBox(
-		widget.NewLabelWithStyle("Add New Event Action", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+	addForm := widget.NewCard("Add New Event Action", "", container.NewVBox(
 		eventSelect,
+		actionTypeSelect,
 		actionEntry,
 		addButton,
-	)
+	))
 
 	return container.NewBorder(nil, addForm, nil, nil, container.NewScroll(eventsContent))
 }
@@ -437,7 +512,7 @@ rows, err := ui.app.DB.ExecuteQuery(query)
 			func() fyne.CanvasObject { return widget.NewLabel("template") },
 			func(i widget.TableCellID, o fyne.CanvasObject) {
 				label := o.(*widget.Label)
-				if i.Row == 0 {
+				if i.Row == 0 { // Header
 					label.SetText(columns[i.Col])
 					label.TextStyle = fyne.TextStyle{Bold: true}
 				} else {
@@ -446,6 +521,23 @@ rows, err := ui.app.DB.ExecuteQuery(query)
 				}
 			},
 		)
+
+		dataTable.OnSelected = func(id widget.TableCellID) {
+			if id.Row == 0 { // Header
+				dataTable.Unselect(id)
+				return
+			}
+			selectedData := data[id.Row-1]
+
+			var details strings.Builder
+			for i, header := range columns {
+				details.WriteString(fmt.Sprintf("%s: %s\n", header, selectedData[i]))
+			}
+
+			detailsLabel := widget.NewLabel(details.String())
+			detailsLabel.Wrapping = fyne.TextWrapWord
+			ui.showDetails(container.NewScroll(detailsLabel))
+		}
 
 		for i, width := range colWidths {
 			dataTable.SetColumnWidth(i, width)
@@ -495,7 +587,7 @@ func (ui *Gui) createDebugTab() fyne.CanvasObject {
 		widget.NewLabelWithStyle("Debug Information", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		widget.NewLabel(fmt.Sprintf("Debug Mode: %v", ui.app.State.Debug)),
 		widget.NewLabel(fmt.Sprintf("Verbose Mode: %v", ui.app.State.Verbose)),
-		widget.NewLabel(fmt.Sprintf("Config File: %s", ui.app.LoadedConfigFile)),
+		widget.NewLabel(fmt.Sprintf("Config File: %s", ui.app.ConfigFile)),
 	)
 }
 
@@ -511,10 +603,10 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 	apiKeyEntry.SetText(ui.app.API.APIKey)
 	baseURLEntry := widget.NewEntry()
 	baseURLEntry.SetText(ui.app.API.BaseURL)
-	apiForm := widget.NewForm(
+	apiCard := widget.NewCard("API Configuration", "", widget.NewForm(
 		widget.NewFormItem("API Key", apiKeyEntry),
 		widget.NewFormItem("Base URL", baseURLEntry),
-	)
+	))
 
 	// Database Settings
 	dbPathEntry := widget.NewEntry()
@@ -565,9 +657,15 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 	}
 	dbTypeSelect.SetSelected(ui.app.DB.GetType())
 
+	dbCard := widget.NewCard("Database Configuration", "", container.NewVBox(
+		container.NewGridWithColumns(2, widget.NewLabel("Database Type"), dbTypeSelect),
+		dbForm,
+	))
+
 	// Other Settings
 	verboseCheck := widget.NewCheck("Verbose Logging", func(b bool) { ui.app.State.Verbose = b })
 	verboseCheck.SetChecked(ui.app.State.Verbose)
+	otherCard := widget.NewCard("Other Settings", "", verboseCheck)
 
 	// Buttons
 	testButton := widget.NewButtonWithIcon("Test Connection", theme.HelpIcon(), nil)
@@ -586,15 +684,9 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 	})
 
 	return container.NewVBox(
-		widget.NewLabelWithStyle("API Configuration", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		apiForm,
-		widget.NewSeparator(),
-		widget.NewLabelWithStyle("Database Configuration", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		container.NewGridWithColumns(2, widget.NewLabel("Database Type"), dbTypeSelect),
-		dbForm,
-		widget.NewSeparator(),
-		verboseCheck,
-		widget.NewSeparator(),
+		apiCard,
+		dbCard,
+		otherCard,
 		container.NewGridWithColumns(2, testButton, saveButton),
 	)
 }
@@ -611,13 +703,38 @@ func (ui *Gui) log(message string) {
 	}
 }
 
+// showToast displays a transient popup message in the bottom right of the window.
+func (ui *Gui) showToast(content string) {
+	toastContent := container.NewPadded(widget.NewLabel(content))
+	popup := widget.NewPopUp(toastContent, ui.window.Canvas())
+
+	// Position the toast at the bottom right
+	go func() {
+		// We need a short delay to allow the popup to be sized
+		time.Sleep(10 * time.Millisecond)
+		winSize := ui.window.Canvas().Size()
+		popupSize := popup.MinSize()
+		popup.Move(fyne.NewPos(winSize.Width-popupSize.Width-theme.Padding(), winSize.Height-popupSize.Height-theme.Padding()))
+	}()
+
+	popup.Show()
+
+	// Hide the popup after a short duration
+	go func() {
+		time.Sleep(3 * time.Second)
+		popup.Hide()
+	}()
+}
+
 // --- Pull Functions ---
 func (ui *Gui) runPullAll() {
 	ui.log("Starting full data pull...")
 	if err := app.RunPullAll(ui.app, ui.log); err != nil {
 		ui.log(fmt.Sprintf("ERROR: %v", err))
+		ui.showToast("Error: The data pull failed.")
+		return
 	}
-	ui.log("Pull process finished.")
+	ui.showToast("Success: Full data pull complete.")
 }
 
 func (ui *Gui) runPullAccount(idStr string) {
@@ -629,16 +746,20 @@ func (ui *Gui) runPullAccount(idStr string) {
 	ui.log(fmt.Sprintf("Starting pull for account ID: %d...", id))
 	if err := app.RunPullAccount(ui.app, id, ui.log); err != nil {
 		ui.log(fmt.Sprintf("ERROR: %v", err))
+		ui.showToast(fmt.Sprintf("Error: Failed to pull account %d.", id))
+		return
 	}
-	ui.log("Pull process finished.")
+	ui.showToast(fmt.Sprintf("Success: Pulled account %d.", id))
 }
 
 func (ui *Gui) runPullAccounts() {
 	ui.log("Starting pull for all accounts...")
 	if err := app.RunPullAccounts(ui.app, ui.log); err != nil {
 		ui.log(fmt.Sprintf("ERROR: %v", err))
+		ui.showToast("Error: Failed to pull all accounts.")
+		return
 	}
-	ui.log("Pull process finished.")
+	ui.showToast("Success: Pulled all accounts.")
 }
 
 func (ui *Gui) runPullCheckin(idStr string) {
@@ -650,16 +771,20 @@ func (ui *Gui) runPullCheckin(idStr string) {
 	ui.log(fmt.Sprintf("Starting pull for check-in ID: %d...", id))
 	if err := app.RunPullCheckin(ui.app, id, ui.log); err != nil {
 		ui.log(fmt.Sprintf("ERROR: %v", err))
+		ui.showToast(fmt.Sprintf("Error: Failed to pull check-in %d.", id))
+		return
 	}
-	ui.log("Pull process finished.")
+	ui.showToast(fmt.Sprintf("Success: Pulled check-in %d.", id))
 }
 
 func (ui *Gui) runPullCheckins() {
 	ui.log("Starting pull for all check-ins...")
 	if err := app.RunPullCheckins(ui.app, ui.log); err != nil {
 		ui.log(fmt.Sprintf("ERROR: %v", err))
+		ui.showToast("Error: Failed to pull all check-ins.")
+		return
 	}
-	ui.log("Pull process finished.")
+	ui.showToast("Success: Pulled all check-ins.")
 }
 
 func (ui *Gui) runPullRoute(idStr string) {
@@ -671,24 +796,30 @@ func (ui *Gui) runPullRoute(idStr string) {
 	ui.log(fmt.Sprintf("Starting pull for route ID: %d...", id))
 	if err := app.RunPullRoute(ui.app, id, ui.log); err != nil {
 		ui.log(fmt.Sprintf("ERROR: %v", err))
+		ui.showToast(fmt.Sprintf("Error: Failed to pull route %d.", id))
+		return
 	}
-	ui.log("Pull process finished.")
+	ui.showToast(fmt.Sprintf("Success: Pulled route %d.", id))
 }
 
 func (ui *Gui) runPullRoutes() {
 	ui.log("Starting pull for all routes...")
 	if err := app.RunPullRoutes(ui.app, ui.log); err != nil {
 		ui.log(fmt.Sprintf("ERROR: %v", err))
+		ui.showToast("Error: Failed to pull all routes.")
+		return
 	}
-	ui.log("Pull process finished.")
+	ui.showToast("Success: Pulled all routes.")
 }
 
 func (ui *Gui) runPullProfile() {
 	ui.log("Starting pull for user profile...")
 	if err := app.RunPullProfile(ui.app, ui.log); err != nil {
 		ui.log(fmt.Sprintf("ERROR: %v", err))
+		ui.showToast("Error: Failed to pull user profile.")
+		return
 	}
-	ui.log("Pull process finished.")
+	ui.showToast("Success: Pulled user profile.")
 }
 
 // --- Push Functions ---
@@ -696,16 +827,20 @@ func (ui *Gui) runPushAccounts() {
 	ui.log("Starting push for account changes...")
 	if err := app.RunPushAccounts(ui.app, ui.log); err != nil {
 		ui.log(fmt.Sprintf("ERROR: %v", err))
+		ui.showToast("Error: Failed to push account changes.")
+		return
 	}
-	ui.log("Push process finished.")
+	ui.showToast("Success: Account changes pushed.")
 }
 
 func (ui *Gui) runPushCheckins() {
 	ui.log("Starting push for check-in changes...")
 	if err := app.RunPushCheckins(ui.app, ui.log); err != nil {
 		ui.log(fmt.Sprintf("ERROR: %v", err))
+		ui.showToast("Error: Failed to push check-in changes.")
+		return
 	}
-	ui.log("Push process finished.")
+	ui.showToast("Success: Check-in changes pushed.")
 }
 
 func (ui *Gui) runPushAll() {
@@ -716,54 +851,52 @@ func (ui *Gui) runPushAll() {
 	if err := app.RunPushCheckins(ui.app, ui.log); err != nil {
 		ui.log(fmt.Sprintf("ERROR during check-in push: %v", err))
 	}
-	ui.log("Push process finished.")
+	ui.showToast("Success: All pending changes pushed.")
 }
 
 // --- Config Functions ---
 func (ui *Gui) saveConfig(apiKey, baseURL, dbType, dbPath, dbHost, dbPortStr, dbUser, dbPass, dbName string) {
 	ui.log("Saving configuration...")
 
-	// Update API config in memory and tell API module to save (which uses viper)
+	// Update API config in memory
 	ui.app.API.APIKey = apiKey
 	ui.app.API.BaseURL = baseURL
-	ui.app.API.SaveConfig()
 
-	// Create a temporary DB object of the chosen type to save its config
 	port, _ := strconv.Atoi(dbPortStr)
-	var tempDb database.DB
+	ui.app.Config.DB.Type = dbType
 	switch dbType {
 	case "sqlite3":
-		tempDb = &database.SQLiteConfig{Path: dbPath}
+		ui.app.Config.DB.Path = dbPath
 	case "postgres":
-		tempDb = &database.PostgreSQLConfig{
-			Host: dbHost, Port: port, Username: dbUser, Password: dbPass, Database: dbName, SSLMode: "disable",
-		}
+		ui.app.Config.DB.Host = dbHost
+		ui.app.Config.DB.Port = port
+		ui.app.Config.DB.Username = dbUser
+		ui.app.Config.DB.Password = dbPass
+		ui.app.Config.DB.Database = dbName
+		ui.app.Config.DB.SSLMode = "disable"
 	case "mssql":
-		tempDb = &database.MSSQLConfig{
-			Host: dbHost, Port: port, Username: dbUser, Password: dbPass, Database: dbName,
-		}
-	default:
-		ui.log(fmt.Sprintf("Unknown database type for saving: %s", dbType))
-		return
+		ui.app.Config.DB.Host = dbHost
+		ui.app.Config.DB.Port = port
+		ui.app.Config.DB.Username = dbUser
+		ui.app.Config.DB.Password = dbPass
+		ui.app.Config.DB.Database = dbName
 	}
-	tempDb.SaveConfig()
-
-	// Explicitly set DB_TYPE as it's not part of the DB object's SaveConfig
-	ui.app.DB.SaveConfig()
 
 	// Write the accumulated viper config to file
-	if err := ui.app.WriteConfig(); err != nil {
+	if err := ui.app.SaveConfig(); err != nil {
 		ui.log(fmt.Sprintf("ERROR saving config file: %v", err))
+		ui.showToast("Error: Failed to save configuration.")
 		return
 	}
 
 	// Reload the application with the new config
 	if err := ui.app.LoadConfig(); err != nil {
 		ui.log(fmt.Sprintf("ERROR reloading config: %v", err))
+		ui.showToast("Error: Failed to reload new configuration.")
 		return
 	}
 
-	ui.log("Configuration saved successfully.")
+	ui.showToast("Success: Configuration saved successfully.")
 	ui.refreshConfigTab()
 }
 

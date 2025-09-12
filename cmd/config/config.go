@@ -20,10 +20,10 @@ func ConfigCmd(a *app.App) *cobra.Command {
 			// We just need to run the interactive setup.
 
 			// If a config file was specified and doesn't exist, create it.
-			if a.LoadedConfigFile != "" {
-				if _, err := os.Stat(a.LoadedConfigFile); os.IsNotExist(err) {
-					fmt.Println(color.YellowString("Creating config file at %s", a.LoadedConfigFile))
-					file, err := os.Create(a.LoadedConfigFile)
+			if a.ConfigFile != "" {
+				if _, err := os.Stat(a.ConfigFile); os.IsNotExist(err) {
+					fmt.Println(color.YellowString("Creating config file at %s", a.ConfigFile))
+					file, err := os.Create(a.ConfigFile)
 					if err != nil {
 						fmt.Fprintf(os.Stderr, "Error creating config file: %v\n", err)
 						os.Exit(1)
@@ -33,7 +33,7 @@ func ConfigCmd(a *app.App) *cobra.Command {
 			}
 
 			fmt.Println(color.CyanString("Starting interactive setup..."))
-			if app.InteractiveSetup(a) {
+			if a.InteractiveSetup() {
 				fmt.Println(color.GreenString("Setup completed successfully."))
 			} else {
 				fmt.Println(color.RedString("Setup did not complete successfully."))

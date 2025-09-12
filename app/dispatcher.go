@@ -5,8 +5,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-
-	"github.com/spf13/viper"
 )
 
 // EventDispatcher manages listeners and dispatches events.
@@ -40,23 +38,36 @@ func (d *EventDispatcher) Dispatch(e Event) {
 		fmt.Printf("Dispatching event: %s (Source: %s)\n", e.Type.String(), e.Source)
 	}
 
-	key := fmt.Sprintf("events.on_%s", e.Type.String())
-	actions := viper.GetStringSlice(key)
+	key := fmt.Sprintf("on_%s", e.Type.String())
+	actions := d.app.Config.Events[key]
 	for _, action := range actions {
+		parts := strings.SplitN(action, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		actionType := parts[0]
+		actionValue := parts[1]
 
-		if strings.HasPrefix(action, "db:") {
-			go func(action string) {
-					functionName := strings.TrimPrefix(action, "db:")
+		switch actionType {
+		case "db":
+			go func(functionName string) {
 					if err := d.app.DB.RunFunction(functionName); err != nil {
 						// Handle error appropriately, e.g., log it
 						fmt.Printf("Error executing db function '%s': %v\n", functionName, err)
 					}
-			}(action)
-		} else {
-			go func(action string) {
-					cmd := exec.Command("sh", "-c", action)
+			}(actionValue)
+		case "api":
+			go func(endpoint string) {
+					if _, err := d.app.API.GetRaw(endpoint); err != nil {
+						// Handle error appropriately, e.g., log it
+						fmt.Printf("Error executing api action '%s': %v\n", endpoint, err)
+					}
+			}(actionValue)
+		case "exec":
+			go func(command string) {
+					cmd := exec.Command("sh", "-c", command)
 					cmd.Run()
-				}(action)
+				}(actionValue)
 		}
 	}
 
