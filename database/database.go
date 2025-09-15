@@ -101,7 +101,7 @@ func (db *SQLiteConfig) GetDB() *sql.DB {
 
 func (db *SQLiteConfig) GetTableColumns(tableName string) ([]string, error) {
 	sqlDB := db.GetDB()
-	query := db.GetSQL("get_table_columns")
+	query := db.GetSQL("GetTableColumns")
 
 	rows, err := sqlDB.Query(query, tableName)
 	if err != nil {
@@ -136,7 +136,7 @@ func (db *SQLiteConfig) EnforceSchema() error {
 		if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 			fmt.Printf("Creating table: %s... ", tableName)
 		}
-		createCmd := createCommandForTable(tableName)
+		createCmd := CreateCommandForTable(tableName)
 		sqlText := db.GetSQL(createCmd)
 		if sqlText == "" {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -166,7 +166,7 @@ func (db *SQLiteConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Inserting initial data for FieldMaps... ")
 	}
-	sqlText := db.GetSQL("insert_field_maps")
+	sqlText := db.GetSQL("InsertFieldMaps")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -183,7 +183,7 @@ func (db *SQLiteConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Inserting initial data for Configurations... ")
 	}
-	sqlText = db.GetSQL("insert_configurations")
+	sqlText = db.GetSQL("InsertConfigurations")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -200,7 +200,7 @@ func (db *SQLiteConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Creating view: AccountsWithLabels... ")
 	}
-	sqlText = db.GetSQL("create_accounts_with_labels_view")
+	sqlText = db.GetSQL("CreateAccountsWithLabelsView")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -294,7 +294,7 @@ func (db *SQLiteConfig) ValidateSchema() error {
 
 func (db *SQLiteConfig) TableExists(tableName string) (bool, error) {
 	sqlDB := db.GetDB()
-	query := db.GetSQL("check_table_exists")
+	query := db.GetSQL("CheckTableExists")
 	var count int
 	err := sqlDB.QueryRow(query, tableName).Scan(&count)
 	if err != nil {
@@ -308,7 +308,7 @@ func (db *SQLiteConfig) TableExists(tableName string) (bool, error) {
 
 func (db *SQLiteConfig) ViewExists(viewName string) (bool, error) {
 	sqlDB := db.GetDB()
-	query := db.GetSQL("check_view_exists")
+	query := db.GetSQL("CheckViewExists")
 	var count int
 	err := sqlDB.QueryRow(query, viewName).Scan(&count)
 	if err != nil {
@@ -440,7 +440,7 @@ func (db *PostgreSQLConfig) GetDB() *sql.DB {
 
 func (db *PostgreSQLConfig) GetTableColumns(tableName string) ([]string, error) {
 	sqlDB := db.GetDB()
-	query := db.GetSQL("get_table_columns")
+	query := db.GetSQL("GetTableColumns")
 
 	rows, err := sqlDB.Query(query, tableName)
 	if err != nil {
@@ -466,7 +466,7 @@ func (db *PostgreSQLConfig) EnforceSchema() error {
 		if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 			fmt.Printf("Creating table: %s... ", tableName)
 		}
-		createCmd := createCommandForTable(tableName)
+		createCmd := CreateCommandForTable(tableName)
 		sqlText := db.GetSQL(createCmd)
 		if sqlText == "" {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -496,7 +496,7 @@ func (db *PostgreSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Inserting initial data for FieldMaps... ")
 	}
-	sqlText := db.GetSQL("insert_field_maps")
+	sqlText := db.GetSQL("InsertFieldMaps")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -513,7 +513,7 @@ func (db *PostgreSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Inserting initial data for Configurations... ")
 	}
-	sqlText = db.GetSQL("insert_configurations")
+	sqlText = db.GetSQL("InsertConfigurations")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -530,7 +530,7 @@ func (db *PostgreSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Creating function: AccountsWithLabelsView... ")
 	}
-	sqlText = db.GetSQL("create_accounts_with_labels_view")
+	sqlText = db.GetSQL("CreateAccountsWithLabelsView")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -561,7 +561,7 @@ func (db *PostgreSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Creating trigger: datasets_update_trigger... ")
 	}
-	sqlText = db.GetSQL("create_datasets_update_trigger")
+	sqlText = db.GetSQL("CreateDatasetsUpdateTrigger")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -732,7 +732,7 @@ func (db *PostgreSQLConfig) ValidateSchema() error {
 }
 func (db *PostgreSQLConfig) TableExists(tableName string) (bool, error) {
 	sqlDB := db.GetDB()
-	query := db.GetSQL("check_table_exists")
+	query := db.GetSQL("CheckTableExists")
 	var count int
 	err := sqlDB.QueryRow(query, tableName).Scan(&count)
 	if err != nil {
@@ -746,7 +746,7 @@ func (db *PostgreSQLConfig) TableExists(tableName string) (bool, error) {
 
 func (db *PostgreSQLConfig) ViewExists(viewName string) (bool, error) {
 	sqlDB := db.GetDB()
-	query := db.GetSQL("check_view_exists")
+	query := db.GetSQL("CheckViewExists")
 	var count int
 	err := sqlDB.QueryRow(query, viewName).Scan(&count)
 	if err != nil {
@@ -760,7 +760,7 @@ func (db *PostgreSQLConfig) ViewExists(viewName string) (bool, error) {
 
 func (db *PostgreSQLConfig) ProcedureExists(procedureName string) (bool, error) {
 	sqlDB := db.GetDB()
-	query := db.GetSQL("check_procedure_exists")
+	query := db.GetSQL("CheckProcedureExists")
 	var count int
 	err := sqlDB.QueryRow(query, procedureName).Scan(&count)
 	if err != nil {
@@ -774,7 +774,7 @@ func (db *PostgreSQLConfig) ProcedureExists(procedureName string) (bool, error) 
 
 func (db *PostgreSQLConfig) TriggerExists(triggerName string) (bool, error) {
 	sqlDB := db.GetDB()
-	query := db.GetSQL("check_trigger_exists")
+	query := db.GetSQL("CheckTriggerExists")
 	var count int
 	err := sqlDB.QueryRow(query, triggerName).Scan(&count)
 	if err != nil {
@@ -917,7 +917,7 @@ func (db *MSSQLConfig) GetDB() *sql.DB {
 
 func (db *MSSQLConfig) GetTableColumns(tableName string) ([]string, error) {
 	sqlDB := db.GetDB()
-	query := db.GetSQL("get_table_columns")
+	query := db.GetSQL("GetTableColumns")
 
 	rows, err := sqlDB.Query(query, tableName)
 	if err != nil {
@@ -943,7 +943,7 @@ func (db *MSSQLConfig) EnforceSchema() error {
 		if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 			fmt.Printf("Creating table: %s... ", tableName)
 		}
-		createCmd := createCommandForTable(tableName)
+		createCmd := CreateCommandForTable(tableName)
 		sqlText := db.GetSQL(createCmd)
 		if sqlText == "" {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -973,7 +973,7 @@ func (db *MSSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Inserting initial data for FieldMaps... ")
 	}
-	sqlText := db.GetSQL("insert_field_maps")
+	sqlText := db.GetSQL("InsertFieldMaps")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -990,7 +990,7 @@ func (db *MSSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Inserting initial data for Configurations... ")
 	}
-	sqlText = db.GetSQL("insert_configurations")
+	sqlText = db.GetSQL("InsertConfigurations")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -1007,7 +1007,7 @@ func (db *MSSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Creating procedure: AccountsWithLabelsView... ")
 	}
-	sqlText = db.GetSQL("create_accounts_with_labels_view")
+	sqlText = db.GetSQL("CreateAccountsWithLabelsView")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -1038,7 +1038,7 @@ func (db *MSSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Creating trigger: datasets_update_trigger... ")
 	}
-	sqlText = db.GetSQL("create_datasets_update_trigger")
+	sqlText = db.GetSQL("CreateDatasetsUpdateTrigger")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -1055,7 +1055,7 @@ func (db *MSSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Creating procedure: update_field_maps_from_datasets... ")
 	}
-	sqlText = db.GetSQL("update_field_maps_from_datasets")
+	sqlText = db.GetSQL("UpdateFieldMapsFromDatasets")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -1072,7 +1072,7 @@ func (db *MSSQLConfig) EnforceSchema() error {
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 		fmt.Printf("Creating trigger: datasets_field_maps_update_trigger... ")
 	}
-	sqlText = db.GetSQL("create_field_maps_update_trigger")
+	sqlText = db.GetSQL("CreateFieldMapsUpdateTrigger")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -1209,7 +1209,7 @@ func (db *MSSQLConfig) ValidateSchema() error {
 }
 func (db *MSSQLConfig) TableExists(tableName string) (bool, error) {
 	sqlDB := db.GetDB()
-	query := db.GetSQL("check_table_exists")
+	query := db.GetSQL("CheckTableExists")
 	if db.state.Debug {
 		fmt.Printf("DEBUG: Executing query: %s with arg: %s\n", query, tableName)
 	}
@@ -1230,7 +1230,7 @@ func (db *MSSQLConfig) TableExists(tableName string) (bool, error) {
 
 func (db *MSSQLConfig) ViewExists(viewName string) (bool, error) {
 	sqlDB := db.GetDB()
-	query := db.GetSQL("check_view_exists")
+	query := db.GetSQL("CheckViewExists")
 	var count int
 	err := sqlDB.QueryRow(query, viewName).Scan(&count)
 	if err != nil {
@@ -1244,7 +1244,7 @@ func (db *MSSQLConfig) ViewExists(viewName string) (bool, error) {
 
 func (db *MSSQLConfig) ProcedureExists(procedureName string) (bool, error) {
 	sqlDB := db.GetDB()
-	query := db.GetSQL("check_procedure_exists")
+	query := db.GetSQL("CheckProcedureExists")
 	var count int
 	err := sqlDB.QueryRow(query, procedureName).Scan(&count)
 	if err != nil {
@@ -1258,7 +1258,7 @@ func (db *MSSQLConfig) ProcedureExists(procedureName string) (bool, error) {
 
 func (db *MSSQLConfig) TriggerExists(triggerName string) (bool, error) {
 	sqlDB := db.GetDB()
-	query := db.GetSQL("check_trigger_exists")
+	query := db.GetSQL("CheckTriggerExists")
 	var count int
 	err := sqlDB.QueryRow(query, triggerName).Scan(&count)
 	if err != nil {
@@ -1443,8 +1443,14 @@ func toSnakeCase(str string) string {
 	return strings.ToLower(snake)
 }
 
-func createCommandForTable(tableName string) string {
-	return "create_" + toSnakeCase(tableName) + "_table"
+func ToPascalCase(str string) string {
+	str = strings.ReplaceAll(str, "_", " ")
+	str = strings.Title(str)
+	return strings.ReplaceAll(str, " ", "")
+}
+
+func CreateCommandForTable(tableName string) string {
+	return "Create" + ToPascalCase(tableName) + "Table"
 }
 
 func RunCommand(db DB, command string, args ...any) error {
@@ -1458,7 +1464,7 @@ func RunCommand(db DB, command string, args ...any) error {
 }
 
 func UpdateConfiguration(db DB, key string, value string) error {
-	return RunCommand(db, "update_configuration", value, key)
+	return RunCommand(db, "UpdateConfiguration", value, key)
 }
 
 func LogCommand(db DB, command string, args []string, success bool, errorMessage string) error {

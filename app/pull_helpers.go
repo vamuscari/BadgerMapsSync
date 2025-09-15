@@ -192,7 +192,7 @@ func StoreAccountDetailed(a *App, acc *api.Account, log func(string)) error {
 	if a.State.Verbose {
 		log(fmt.Sprintf("Storing account: %s", acc.FullName.String))
 	}
-	return database.RunCommand(a.DB, "merge_accounts_detailed",
+	return database.RunCommand(a.DB, "MergeAccountsDetailed",
 		acc.AccountId, acc.FirstName, acc.LastName, acc.FullName, acc.PhoneNumber, acc.Email, acc.CustomerId, acc.Notes,
 		acc.OriginalAddress, acc.CrmId, acc.AccountOwner, acc.DaysSinceLastCheckin, acc.LastCheckinDate,
 		acc.LastModifiedDate, acc.FollowUpDate, acc.CustomNumeric, acc.CustomText, acc.CustomNumeric2,
@@ -215,7 +215,7 @@ func StoreCheckin(a *App, checkin api.Checkin, log func(string)) error {
 	if a.State.Verbose {
 		log(fmt.Sprintf("Storing checkin: %d", checkin.CheckinId.Int64))
 	}
-	return database.RunCommand(a.DB, "merge_account_checkins",
+	return database.RunCommand(a.DB, "MergeAccountCheckins",
 		checkin.CheckinId, checkin.CrmId, checkin.AccountId, checkin.LogDatetime, checkin.Type, checkin.Comments,
 		checkin.ExtraFields, checkin.CreatedBy,
 	)
@@ -225,7 +225,7 @@ func StoreRoute(a *App, route api.Route, log func(string)) error {
 	if a.State.Verbose {
 		log(fmt.Sprintf("Storing route: %s", route.Name.String))
 	}
-	return database.RunCommand(a.DB, "merge_routes",
+	return database.RunCommand(a.DB, "MergeRoutes",
 		route.RouteId, route.Name, route.RouteDate, route.Duration, route.StartAddress, route.DestinationAddress,
 		route.StartTime,
 	)
@@ -244,7 +244,7 @@ func StoreProfile(a *App, profile *api.UserProfile, log func(string)) error {
 	}
 	crmEditableFieldsListStr := strings.Join(crmFields, ",")
 
-	err := database.RunCommand(a.DB, "merge_user_profiles",
+	err := database.RunCommand(a.DB, "MergeUserProfiles",
 		profile.ProfileId, profile.Email, profile.FirstName, profile.LastName, profile.IsManager,
 		profile.IsHideReferralIOSBanner, profile.MarkerIcon, profile.Manager, crmEditableFieldsListStr,
 		profile.CRMBaseURL, profile.CRMType, profile.ReferralURL, profile.MapStartZoom, profile.MapStart,
@@ -273,15 +273,15 @@ func StoreProfile(a *App, profile *api.UserProfile, log func(string)) error {
 		return err
 	}
 
-	if err := database.RunCommand(a.DB, "delete_data_set_values", profile.ProfileId); err != nil {
+	if err := database.RunCommand(a.DB, "DeleteDataSetValues", profile.ProfileId); err != nil {
 		return err
 	}
-	if err := database.RunCommand(a.DB, "delete_data_sets", profile.ProfileId); err != nil {
+	if err := database.RunCommand(a.DB, "DeleteDataSets", profile.ProfileId); err != nil {
 		return err
 	}
 
 	for _, datafield := range profile.Datafields {
-		err := database.RunCommand(a.DB, "insert_data_sets",
+		err := database.RunCommand(a.DB, "InsertDataSets",
 			datafield.Name, profile.ProfileId, datafield.Filterable, datafield.Label, datafield.Position, datafield.Type,
 			datafield.HasData, datafield.IsUserCanAddNewTextValues, datafield.RawMin, datafield.Min, datafield.Max,
 			datafield.RawMax, datafield.AccountField,
@@ -290,7 +290,7 @@ func StoreProfile(a *App, profile *api.UserProfile, log func(string)) error {
 			return err
 		}
 		for _, value := range datafield.Values {
-			err := database.RunCommand(a.DB, "insert_data_set_values",
+			err := database.RunCommand(a.DB, "InsertDataSetValues",
 				datafield.Name, profile.ProfileId, value.Text, value.Value, datafield.Position,
 			)
 			if err != nil {
