@@ -27,7 +27,7 @@ mv fyne-cross/dist/linux-amd64/BadgerMapsSync.tar.xz build/BadgerMapsSync_linux_
 
 # Compile for Windows
 echo "Compiling for Windows..."
-fyne-cross windows -arch amd64 --app-id com.badgermapssync --app-build=1 -icon ./assets/icon.png -console -tags gui
+fyne-cross windows -arch amd64 --app-id com.badgermapssync --app-build=1 -icon ./assets/icon.png -tags gui
 
 # Create a temporary directory for packaging
 echo "Packaging Windows build with DLL..."

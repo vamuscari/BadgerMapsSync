@@ -4,6 +4,7 @@ import (
 	"badgermaps/app"
 	"badgermaps/database"
 	"fmt"
+	"fyne.io/fyne/v2/data/binding"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,18 +19,58 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
+type logEntry struct {
+	widget.BaseWidget
+	label *widget.Label
+}
+
+func newLogEntry() *logEntry {
+	e := &logEntry{
+		label: widget.NewLabel(""),
+	}
+	e.label.Wrapping = fyne.TextWrapWord
+	e.ExtendBaseWidget(e)
+	return e
+}
+
+func (e *logEntry) SetText(text string) {
+	lines := strings.Split(text, "\n")
+	if len(lines) > 3 {
+		text = strings.Join(lines[:3], "\n") + "..."
+	}
+	e.label.SetText(text)
+}
+
+func (e *logEntry) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(e.label)
+}
+
+func (e *logEntry) MinSize() fyne.Size {
+	min := e.label.MinSize()
+	if e.label.Text != "" {
+		lines := strings.Count(e.label.Text, "\n") + 1
+		if lines > 3 {
+			min.Height = e.label.MinSize().Height * 3
+		}
+	}
+	return min
+}
+
+
+
 // Gui struct holds all the UI components and application state
 type Gui struct {
-	app     *app.App
-	fyneApp fyne.App
-	window  fyne.Window
+	app      *app.App
+	fyneApp  fyne.App
+	window   fyne.Window
+	logMutex sync.Mutex
 
-	logMutex        sync.Mutex
-	logData         []string
-	logView         *widget.List
-	detailsView     fyne.CanvasObject
-	rightPane       *fyne.Container
-	configTab       fyne.CanvasObject
+	logBinding  binding.StringList
+	logView     *widget.List
+	detailsView fyne.CanvasObject
+	rightPane   *fyne.Container
+	configTab   fyne.CanvasObject
+
 	terminalVisible bool
 	tabs            *container.AppTabs // Hold a reference to the tabs container
 }
@@ -45,7 +86,7 @@ func Launch(a *app.App, icon fyne.Resource) {
 		app:             a,
 		fyneApp:         fyneApp,
 		window:          window,
-		logData:         []string{"Welcome to BadgerMaps CLI GUI!"},
+		logBinding:      binding.NewStringList(),
 		terminalVisible: false, // Default to details view
 	}
 
@@ -122,17 +163,22 @@ func (ui *Gui) createMainContent() fyne.CanvasObject {
 	mainContent := container.NewBorder(nil, nil, nil, nil, ui.tabs)
 
 	// Initialize log view
-	ui.logView = widget.NewList(
-		func() int { return len(ui.logData) },
+	ui.logView = widget.NewListWithData(ui.logBinding,
 		func() fyne.CanvasObject {
-			label := widget.NewLabel("template")
-			label.Wrapping = fyne.TextWrapBreak
-			return label
+			return newLogEntry()
 		},
-		func(i widget.ListItemID, o fyne.CanvasObject) {
-			o.(*widget.Label).SetText(ui.logData[i])
+		func(i binding.DataItem, o fyne.CanvasObject) {
+			text, _ := i.(binding.String).Get()
+			o.(*logEntry).SetText(text)
 		},
 	)
+	ui.logView.OnSelected = func(id widget.ListItemID) {
+		fullLog, _ := ui.logBinding.GetValue(id)
+		detailsLabel := widget.NewLabel(fullLog)
+		detailsLabel.Wrapping = fyne.TextWrapWord
+		ui.showDetails(container.NewScroll(detailsLabel))
+		ui.logView.Unselect(id)
+	}
 
 	// Initialize details view
 	ui.detailsView = container.NewCenter(widget.NewLabel("Select an item to see details"))
@@ -166,7 +212,17 @@ func (ui *Gui) createRightPaneHeader() fyne.CanvasObject {
 
 // showDetails updates the right-hand pane to show the provided details object.
 func (ui *Gui) showDetails(details fyne.CanvasObject) {
-	ui.detailsView = details
+	var content fyne.CanvasObject
+	if label, ok := details.(*widget.Label); ok {
+		entry := widget.NewMultiLineEntry()
+		entry.SetText(label.Text)
+		entry.Disable()
+		content = entry
+	} else {
+		content = details
+	}
+
+	ui.detailsView = container.NewScroll(content)
 	ui.terminalVisible = false
 	ui.rightPane.Objects[0] = ui.detailsView
 	ui.rightPane.Refresh()
@@ -232,7 +288,7 @@ func (ui *Gui) createPushTab() fyne.CanvasObject {
 		pushAllButton,
 	))
 
-	tableContainer := container.NewVBox()
+	tableContainer := container.NewMax()
 	entityType := "accounts" // Default view
 
 	radio := widget.NewRadioGroup([]string{"accounts", "checkins"}, func(selected string) {
@@ -244,15 +300,9 @@ func (ui *Gui) createPushTab() fyne.CanvasObject {
 
 	tableContainer.Objects = []fyne.CanvasObject{ui.createPendingChangesTable(entityType)}
 
-	changesCard := widget.NewCard("View Pending Changes", "", container.NewVBox(
-		radio,
-		tableContainer,
-	))
+	changesCard := widget.NewCard("View Pending Changes", "", container.NewBorder(radio, nil, nil, nil, tableContainer))
 
-	return container.NewVBox(
-		pushCard,
-		changesCard,
-	)
+	return container.NewBorder(pushCard, nil, nil, nil, changesCard)
 }
 
 func (ui *Gui) createPendingChangesTable(entityType string) fyne.CanvasObject {
@@ -337,10 +387,11 @@ func (ui *Gui) createPendingChangesTable(entityType string) fyne.CanvasObject {
 			details.WriteString(fmt.Sprintf("%s: %s\n", header, selectedData[i]))
 		}
 
-		detailsLabel := widget.NewLabel(details.String())
-		detailsLabel.Wrapping = fyne.TextWrapWord
+		detailsEntry := widget.NewMultiLineEntry()
+		detailsEntry.SetText(details.String())
+		detailsEntry.Disable()
 
-		ui.showDetails(container.NewScroll(detailsLabel))
+		ui.showDetails(detailsEntry)
 	}
 
 	return table
@@ -804,9 +855,10 @@ func (ui *Gui) log(message string) {
 	ui.logMutex.Lock()
 	defer ui.logMutex.Unlock()
 	lines := strings.Split(message, "\n")
-	ui.logData = append(ui.logData, lines...)
+	for _, line := range lines {
+		ui.logBinding.Append(line)
+	}
 	if ui.logView != nil {
-		ui.logView.Refresh()
 		ui.logView.ScrollToBottom()
 	}
 }
