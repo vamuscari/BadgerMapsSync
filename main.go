@@ -12,6 +12,7 @@ import (
 	"badgermaps/cmd/server"
 	"badgermaps/cmd/test"
 	"badgermaps/cmd/version"
+	"badgermaps/database"
 	"badgermaps/gui"
 	"badgermaps/utils"
 
@@ -51,6 +52,14 @@ It allows you to push and pull data, run in server mode, and perform various uti
 				runGUI()
 			} else {
 				cmd.Help()
+			}
+		},
+		PostRun: func(cmd *cobra.Command, args []string) {
+			if App.DB != nil {
+				err := database.LogCommand(App.DB, cmd.Name(), args, true, "")
+				if err != nil {
+					fmt.Printf("Error logging command: %v\n", err)
+				}
 			}
 		},
 	}

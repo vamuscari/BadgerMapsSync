@@ -77,6 +77,7 @@ func TestSQLFiles(t *testing.T) {
 		"create_configurations_table.sql",
 		"insert_configurations.sql",
 		"update_configuration.sql",
+		"create_command_log_table.sql",
 	}
 
 	postgresMssqlExtraFiles := []string{
@@ -143,7 +144,7 @@ func TestEnforceSchema(t *testing.T) {
 	}
 
 	s := state.NewState()
-	db, err := LoadDatabaseSettings(config, s)
+	db, err := NewDB(config, s)
 	if err != nil {
 		t.Fatalf("Failed to load database settings: %v", err)
 	}

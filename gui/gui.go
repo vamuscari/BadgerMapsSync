@@ -137,13 +137,13 @@ func (ui *Gui) createRightPaneHeader() fyne.CanvasObject {
 		ui.rightPane.Refresh()
 	})
 
-	terminalButton := widget.NewButtonWithIcon("Terminal", theme.ComputerIcon(), func() {
+	logButton := widget.NewButtonWithIcon("Log", theme.ComputerIcon(), func() {
 		ui.terminalVisible = true
 		ui.rightPane.Objects[1] = ui.logView
 		ui.rightPane.Refresh()
 	})
 
-	return container.NewHBox(detailsButton, terminalButton)
+	return container.NewHBox(detailsButton, logButton)
 }
 
 // showDetails updates the right-hand pane to show the provided details object.
@@ -523,21 +523,24 @@ rows, err := ui.app.DB.ExecuteQuery(query)
 		)
 
 		dataTable.OnSelected = func(id widget.TableCellID) {
-			if id.Row == 0 { // Header
-				dataTable.Unselect(id)
-				return
-			}
-			selectedData := data[id.Row-1]
+				if id.Row < 0 { // Deselection event
+					return
+				}
+				if id.Row == 0 { // Header
+					dataTable.Unselect(id)
+					return
+				}
+				selectedData := data[id.Row-1]
 
-			var details strings.Builder
-			for i, header := range columns {
-				details.WriteString(fmt.Sprintf("%s: %s\n", header, selectedData[i]))
-			}
+				var details strings.Builder
+				for i, header := range columns {
+					details.WriteString(fmt.Sprintf("%s: %s\n", header, selectedData[i]))
+				}
 
-			detailsLabel := widget.NewLabel(details.String())
-			detailsLabel.Wrapping = fyne.TextWrapWord
-			ui.showDetails(container.NewScroll(detailsLabel))
-		}
+				detailsLabel := widget.NewLabel(details.String())
+				detailsLabel.Wrapping = fyne.TextWrapWord
+				ui.showDetails(container.NewScroll(detailsLabel))
+			}
 
 		for i, width := range colWidths {
 			dataTable.SetColumnWidth(i, width)

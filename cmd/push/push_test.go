@@ -3,6 +3,7 @@ package push
 import (
 	"badgermaps/api"
 	"badgermaps/app"
+	"badgermaps/app/state"
 	"badgermaps/database"
 	"database/sql"
 	"net/http"
@@ -24,10 +25,11 @@ func TestPushAccountsCmd(t *testing.T) {
 	app.State.NoColor = true
 
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	os.Setenv("DB_TYPE", "sqlite3")
-	os.Setenv("DB_PATH", dbPath)
-
-	db, err := database.LoadDatabaseSettings(app.State)
+	
+	db, err := database.NewDB(&database.DBConfig{
+		Type: "sqlite3",
+		Path: dbPath,
+	}, &state.State{})
 	if err != nil {
 		t.Fatalf("Failed to create temporary database: %v", err)
 	}
@@ -48,7 +50,7 @@ func TestPushAccountsCmd(t *testing.T) {
 	}
 
 	app.DB = db
-	app.API = api.NewAPIClient()
+	app.API = api.NewAPIClient(&api.APIConfig{BaseURL: server.URL})
 
 	cmd := PushCmd(app)
 	cmd.SetArgs([]string{"accounts"})
@@ -69,10 +71,10 @@ func TestPushCheckinsCmd(t *testing.T) {
 	app.State.NoColor = true
 
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	os.Setenv("DB_TYPE", "sqlite3")
-	os.Setenv("DB_PATH", dbPath)
-
-	db, err := database.LoadDatabaseSettings(app.State)
+	db, err := database.NewDB(&database.DBConfig{
+		Type: "sqlite3",
+		Path: dbPath,
+	}, &state.State{})
 	if err != nil {
 		t.Fatalf("Failed to create temporary database: %v", err)
 	}
@@ -93,7 +95,7 @@ func TestPushCheckinsCmd(t *testing.T) {
 	}
 
 	app.DB = db
-	app.API = api.NewAPIClient()
+	app.API = api.NewAPIClient(&api.APIConfig{BaseURL: server.URL})
 
 	cmd := PushCmd(app)
 	cmd.SetArgs([]string{"checkins"})

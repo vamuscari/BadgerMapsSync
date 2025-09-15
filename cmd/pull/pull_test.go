@@ -1,7 +1,9 @@
 package pull
 
 import (
+	"badgermaps/api"
 	"badgermaps/app"
+	"badgermaps/app/state"
 	"badgermaps/database"
 	"encoding/json"
 	"net/http"
@@ -9,8 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"badgermaps/api"
 )
 
 func TestPullAccountCmd(t *testing.T) {
@@ -25,13 +25,12 @@ func TestPullAccountCmd(t *testing.T) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "test.db")
 
-	// Set os env values for the test
-	os.Setenv("DB_TYPE", "sqlite3")
-	os.Setenv("DB_PATH", dbPath)
-
 	app := app.NewApp()
 
-	db, err := database.LoadDatabaseSettings(app.State)
+	db, err := database.NewDB(&database.DBConfig{
+		Type: "sqlite3",
+		Path: dbPath,
+	}, &state.State{})
 	if err != nil {
 		t.Fatalf("Failed to create temporary database: %v", err)
 	}
@@ -40,7 +39,7 @@ func TestPullAccountCmd(t *testing.T) {
 	}
 
 	app.DB = db
-	app.API = api.NewAPIClient()
+	app.API = api.NewAPIClient(&api.APIConfig{BaseURL: server.URL})
 
 	cmd := pullAccountCmd(app)
 	cmd.SetArgs([]string{"123"})

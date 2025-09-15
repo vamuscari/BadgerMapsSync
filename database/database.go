@@ -1430,6 +1430,7 @@ func RequiredTables() []string {
 		"DataSetValues",
 		"FieldMaps",
 		"Configurations",
+		"CommandLog",
 	}
 }
 
@@ -1458,6 +1459,13 @@ func RunCommand(db DB, command string, args ...any) error {
 
 func UpdateConfiguration(db DB, key string, value string) error {
 	return RunCommand(db, "update_configuration", value, key)
+}
+
+func LogCommand(db DB, command string, args []string, success bool, errorMessage string) error {
+	sqlText := "INSERT INTO CommandLog (Command, Args, Success, ErrorMessage) VALUES (?, ?, ?, ?)"
+	sqlDB := db.GetDB()
+	_, err := sqlDB.Exec(sqlText, command, strings.Join(args, " "), success, errorMessage)
+	return err
 }
 
 func GetExpectedSchema() map[string][]string {

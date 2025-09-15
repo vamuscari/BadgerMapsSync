@@ -3,6 +3,7 @@ package server
 import (
 	"badgermaps/api"
 	"badgermaps/app"
+	"badgermaps/app/state"
 	"badgermaps/database"
 	"bytes"
 	"encoding/json"
@@ -18,13 +19,12 @@ func TestHandleAccountCreateWebhook(t *testing.T) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "test.db")
 
-	// Set os env values for the test
-	os.Setenv("DB_TYPE", "sqlite3")
-	os.Setenv("DB_PATH", dbPath)
-
 	app := app.NewApp()
 
-	db, err := database.LoadDatabaseSettings(app.State)
+	db, err := database.NewDB(&database.DBConfig{
+		Type: "sqlite3",
+		Path: dbPath,
+	}, &state.State{})
 	if err != nil {
 		t.Fatalf("Failed to create temporary database: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestHandleAccountCreateWebhook(t *testing.T) {
 	}
 
 	app.DB = db
-	app.API = api.NewAPIClient()
+	app.API = api.NewAPIClient(&api.APIConfig{})
 
 	s := &server{App: app}
 	account := map[string]interface{}{
