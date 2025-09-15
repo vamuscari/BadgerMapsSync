@@ -173,6 +173,15 @@ func (a *App) writeEnvFile(path string) error {
 	return utils.WriteEnvFile(path, settings)
 }
 
+func (a *App) ReloadDB() error {
+	if a.DB != nil {
+		a.DB.Close()
+	}
+	var err error
+	a.DB, err = database.NewDB(&a.Config.DB, a.State)
+	return err
+}
+
 func (a *App) GetConfigFilePath() (string, bool, error) {
 
 	// Highest precedence: --env flag

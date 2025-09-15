@@ -150,7 +150,7 @@ func (ui *Gui) createRightPaneHeader() fyne.CanvasObject {
 func (ui *Gui) showDetails(details fyne.CanvasObject) {
 	ui.detailsView = details
 	ui.terminalVisible = false
-	ui.rightPane.Objects[1] = ui.detailsView
+	ui.rightPane.Objects[0] = ui.detailsView
 	ui.rightPane.Refresh()
 }
 
@@ -438,8 +438,7 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 
 		query := fmt.Sprintf("SELECT * FROM %s", tableName)
 
-	
-rows, err := ui.app.DB.ExecuteQuery(query)
+		rows, err := ui.app.DB.ExecuteQuery(query)
 		if err != nil {
 			ui.log(fmt.Sprintf("Error executing query: %v", err))
 			tableContainer.Objects = []fyne.CanvasObject{widget.NewLabel(fmt.Sprintf("Error: %v", err))}
@@ -523,24 +522,24 @@ rows, err := ui.app.DB.ExecuteQuery(query)
 		)
 
 		dataTable.OnSelected = func(id widget.TableCellID) {
-				if id.Row < 0 { // Deselection event
-					return
-				}
-				if id.Row == 0 { // Header
-					dataTable.Unselect(id)
-					return
-				}
-				selectedData := data[id.Row-1]
-
-				var details strings.Builder
-				for i, header := range columns {
-					details.WriteString(fmt.Sprintf("%s: %s\n", header, selectedData[i]))
-				}
-
-				detailsLabel := widget.NewLabel(details.String())
-				detailsLabel.Wrapping = fyne.TextWrapWord
-				ui.showDetails(container.NewScroll(detailsLabel))
+			if id.Row < 0 { // Deselection event
+				return
 			}
+			if id.Row == 0 { // Header
+				dataTable.Unselect(id)
+				return
+			}
+			selectedData := data[id.Row-1]
+
+			var details strings.Builder
+			for i, header := range columns {
+				details.WriteString(fmt.Sprintf("%s: %s\n", header, selectedData[i]))
+			}
+
+			detailsLabel := widget.NewLabel(details.String())
+			detailsLabel.Wrapping = fyne.TextWrapWord
+			ui.showDetails(container.NewScroll(detailsLabel))
+		}
 
 		for i, width := range colWidths {
 			dataTable.SetColumnWidth(i, width)
@@ -866,6 +865,10 @@ func (ui *Gui) saveConfig(apiKey, baseURL, dbType, dbPath, dbHost, dbPortStr, db
 	ui.app.Config.API.BaseURL = baseURL
 
 	port, _ := strconv.Atoi(dbPortStr)
+
+	// Clear old DB config values
+	ui.app.Config.DB = database.DBConfig{}
+
 	ui.app.Config.DB.Type = dbType
 	switch dbType {
 	case "sqlite3":
@@ -896,6 +899,11 @@ func (ui *Gui) saveConfig(apiKey, baseURL, dbType, dbPath, dbHost, dbPortStr, db
 	if err := ui.app.LoadConfig(); err != nil {
 		ui.log(fmt.Sprintf("ERROR reloading config: %v", err))
 		ui.showToast("Error: Failed to reload new configuration.")
+		return
+	}
+	if err := ui.app.ReloadDB(); err != nil {
+		ui.log(fmt.Sprintf("ERROR reloading database: %v", err))
+		ui.showToast("Error: Failed to reload database.")
 		return
 	}
 
@@ -966,3 +974,4 @@ func (ui *Gui) testDBConnection(button *widget.Button, dbType, dbPath, dbHost, d
 	button.SetText("Connection Successful")
 	button.SetIcon(theme.ConfirmIcon())
 }
+

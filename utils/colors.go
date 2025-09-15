@@ -19,21 +19,10 @@ type ColorPrinter struct {
 
 // NewColorPrinter creates a new ColorPrinter that respects the --no-color flag
 func NewColorPrinter(noColor bool) *ColorPrinter {
-	// Check if colors should be disabled
-	if noColor {
-		// If colors are disabled, return a printer with no colors
-		return &ColorPrinter{
-			Green:     color.New().SprintfFunc(),
-			Yellow:    color.New().SprintfFunc(),
-			Red:       color.New().SprintfFunc(),
-			Blue:      color.New().SprintfFunc(),
-			Cyan:      color.New().SprintfFunc(),
-			Bold:      color.New().SprintfFunc(),
-			Underline: color.New().SprintfFunc(),
-		}
-	}
+	// Globally disable or enable colors in the fatih/color library
+	color.NoColor = noColor
 
-	// Otherwise, return a printer with colors
+	// Return a printer with the appropriate color functions
 	return &ColorPrinter{
 		Green:     color.New(color.FgGreen).SprintfFunc(),
 		Yellow:    color.New(color.FgYellow).SprintfFunc(),
