@@ -133,13 +133,13 @@ func (ui *Gui) createMainContent() fyne.CanvasObject {
 func (ui *Gui) createRightPaneHeader() fyne.CanvasObject {
 	detailsButton := widget.NewButtonWithIcon("Details", theme.InfoIcon(), func() {
 		ui.terminalVisible = false
-		ui.rightPane.Objects[1] = ui.detailsView
+		ui.rightPane.Objects[0] = ui.detailsView
 		ui.rightPane.Refresh()
 	})
 
 	logButton := widget.NewButtonWithIcon("Log", theme.ComputerIcon(), func() {
 		ui.terminalVisible = true
-		ui.rightPane.Objects[1] = ui.logView
+		ui.rightPane.Objects[0] = ui.logView
 		ui.rightPane.Refresh()
 	})
 
@@ -862,8 +862,8 @@ func (ui *Gui) saveConfig(apiKey, baseURL, dbType, dbPath, dbHost, dbPortStr, db
 	ui.log("Saving configuration...")
 
 	// Update API config in memory
-	ui.app.API.APIKey = apiKey
-	ui.app.API.BaseURL = baseURL
+	ui.app.Config.API.APIKey = apiKey
+	ui.app.Config.API.BaseURL = baseURL
 
 	port, _ := strconv.Atoi(dbPortStr)
 	ui.app.Config.DB.Type = dbType
