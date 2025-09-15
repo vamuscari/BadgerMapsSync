@@ -135,11 +135,14 @@ func (a *App) GetConfigFilePath() (string, bool, error) {
 	return "", false, nil
 }
 
-func (a *App) AddEventAction(event string, action string) error {
+func (a *App) AddEventAction(event, source, action string) error {
 	if a.Config.Events == nil {
 		a.Config.Events = make(map[string][]string)
 	}
 	key := fmt.Sprintf("on_%s", event)
+	if source != "" {
+		key = fmt.Sprintf("%s_%s", key, source)
+	}
 	a.Config.Events[key] = append(a.Config.Events[key], action)
 	err := a.SaveConfig()
 	if err == nil {
@@ -152,8 +155,11 @@ func (a *App) GetEventActions() map[string][]string {
 	return a.Config.Events
 }
 
-func (a *App) RemoveEventAction(event string, actionToRemove string) error {
+func (a *App) RemoveEventAction(event, source, actionToRemove string) error {
 	key := fmt.Sprintf("on_%s", event)
+	if source != "" {
+		key = fmt.Sprintf("%s_%s", key, source)
+	}
 	actions, ok := a.Config.Events[key]
 	if !ok {
 		return nil

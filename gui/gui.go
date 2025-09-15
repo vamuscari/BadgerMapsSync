@@ -4,6 +4,7 @@ import (
 	"badgermaps/app"
 	"badgermaps/database"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -69,11 +70,27 @@ func Launch(a *app.App, icon fyne.Resource) {
 
 	// Subscribe to pull events to show notifications
 	pullNotificationListener := func(e app.Event) {
-		if e.Type == app.PullStart {
+		switch e.Type {
+		case app.PullStart:
 			ui.showToast(fmt.Sprintf("Pulling %s from API...", e.Source))
+		case app.PullComplete:
+			ui.showToast(fmt.Sprintf("Successfully pulled %s.", e.Source))
+		case app.PullError:
+			ui.showToast(fmt.Sprintf("Error pulling %s.", e.Source))
+		case app.PullAllStart:
+			ui.showToast(fmt.Sprintf("Starting full pull for %s...", e.Source))
+		case app.PullAllComplete:
+			ui.showToast(fmt.Sprintf("Successfully pulled all %s.", e.Source))
+		case app.PullAllError:
+			ui.showToast(fmt.Sprintf("Error pulling all %s.", e.Source))
 		}
 	}
 	a.Events.Subscribe(app.PullStart, pullNotificationListener)
+	a.Events.Subscribe(app.PullComplete, pullNotificationListener)
+	a.Events.Subscribe(app.PullError, pullNotificationListener)
+	a.Events.Subscribe(app.PullAllStart, pullNotificationListener)
+	a.Events.Subscribe(app.PullAllComplete, pullNotificationListener)
+	a.Events.Subscribe(app.PullAllError, pullNotificationListener)
 
 	window.SetContent(ui.createContent())
 	window.Resize(fyne.NewSize(1280, 720))
@@ -354,15 +371,39 @@ func (ui *Gui) createEventsTab() fyne.CanvasObject {
 			for _, action := range actions {
 				actionLabel := widget.NewLabel(action)
 				// Use function closure to capture the correct eventName and action
-				currentEvent := eventName
+				currentEventKey := eventName
 				currentAction := action
 				removeButton := widget.NewButtonWithIcon("", theme.DeleteIcon(), func() {
-					err := ui.app.RemoveEventAction(currentEvent, currentAction)
+					trimmedKey := strings.TrimPrefix(currentEventKey, "on_")
+					var event, source string
+
+					allEvents := app.AllEventTypes()
+					sort.Slice(allEvents, func(i, j int) bool {
+						return len(allEvents[i]) > len(allEvents[j]) // Sort by length descending
+					})
+
+					found := false
+					for _, eventTypeStr := range allEvents {
+						if strings.HasPrefix(trimmedKey, eventTypeStr) {
+							event = eventTypeStr
+							source = strings.TrimPrefix(trimmedKey, eventTypeStr)
+							source = strings.TrimPrefix(source, "_")
+							found = true
+							break
+						}
+					}
+
+					if !found {
+						ui.log(fmt.Sprintf("Could not parse event key: %s", currentEventKey))
+						return
+					}
+
+					err := ui.app.RemoveEventAction(event, source, currentAction)
 					if err != nil {
 						ui.log(fmt.Sprintf("Error removing event action: %v", err))
 						return
 					}
-					ui.log(fmt.Sprintf("Removed action '%s' from event '%s'", currentAction, currentEvent))
+					ui.log(fmt.Sprintf("Removed action '%s' from event '%s'", currentAction, currentEventKey))
 				})
 				runButton := widget.NewButtonWithIcon("", theme.MediaPlayIcon(), func() {
 					ui.log(fmt.Sprintf("Manually triggering action: %s", currentAction))
@@ -385,15 +426,63 @@ func (ui *Gui) createEventsTab() fyne.CanvasObject {
 
 	// Form for adding new event actions
 	eventSelect := widget.NewSelect(app.AllEventTypes(), nil)
+	sourceSelect := widget.NewSelect([]string{"accounts", "checkins", "routes", "all"}, nil)
+	sourceSelect.Hide()
 	actionTypeSelect := widget.NewSelect([]string{"exec", "db", "api"}, nil)
-	actionTypeSelect.SetSelected("exec")
 	actionEntry := widget.NewEntry()
 	actionEntry.SetPlaceHolder("Enter command, function, or endpoint")
 
+	pullActionSelect := widget.NewSelect([]string{"accounts", "checkins", "routes", "all"}, nil)
+	pullActionSelect.Hide()
+
+	execTypeRadio := widget.NewRadioGroup([]string{"Custom Command", "Pull Action"}, func(selected string) {
+		if selected == "Custom Command" {
+			actionEntry.Show()
+			pullActionSelect.Hide()
+		} else {
+			actionEntry.Hide()
+			pullActionSelect.Show()
+		}
+	})
+	execTypeRadio.SetSelected("Custom Command")
+	execTypeRadio.Hide()
+
+	eventSelect.OnChanged = func(selected string) {
+		if strings.HasPrefix(selected, "PullAll") {
+			sourceSelect.Show()
+		} else {
+			sourceSelect.Hide()
+		}
+	}
+
+	actionTypeSelect.OnChanged = func(selected string) {
+		if selected == "exec" {
+			execTypeRadio.Show()
+			// Trigger the radio's OnChanged to set the correct initial view
+			execTypeRadio.OnChanged(execTypeRadio.Selected)
+		} else {
+			execTypeRadio.Hide()
+			pullActionSelect.Hide()
+			actionEntry.Show()
+		}
+	}
+	actionTypeSelect.SetSelected("exec")
+
 	addButton := widget.NewButtonWithIcon("Add Action", theme.ContentAddIcon(), func() {
 		event := eventSelect.Selected
+		source := sourceSelect.Selected
 		actionType := actionTypeSelect.Selected
-		action := actionEntry.Text
+		var action string
+
+		if actionType == "exec" {
+			if execTypeRadio.Selected == "Custom Command" {
+				action = actionEntry.Text
+			} else {
+				action = fmt.Sprintf("./badgermaps pull %s", pullActionSelect.Selected)
+			}
+		} else {
+			action = actionEntry.Text
+		}
 
 		if event == "" {
 			ui.log("Please select an event.")
@@ -406,7 +495,7 @@ func (ui *Gui) createEventsTab() fyne.CanvasObject {
 
 		fullAction := fmt.Sprintf("%s:%s", actionType, action)
 
-		err := ui.app.AddEventAction(event, fullAction)
+		err := ui.app.AddEventAction(event, source, fullAction)
 		if err != nil {
 			ui.log(fmt.Sprintf("Error adding event action: %v", err))
 			return
@@ -414,12 +503,16 @@ func (ui *Gui) createEventsTab() fyne.CanvasObject {
 
 		ui.log(fmt.Sprintf("Added action '%s' to event '%s'", fullAction, event))
 		actionEntry.SetText("")
+		pullActionSelect.ClearSelected()
 	})
 
 	addForm := widget.NewCard("Add New Event Action", "", container.NewVBox(
 		eventSelect,
+		sourceSelect,
 		actionTypeSelect,
+		execTypeRadio,
 		actionEntry,
+		pullActionSelect,
 		addButton,
 	))
 

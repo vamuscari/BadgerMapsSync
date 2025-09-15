@@ -49,24 +49,28 @@ func pullAccountCmd(App *app.App) *cobra.Command {
 				return fmt.Errorf("invalid account ID: %s", args[0])
 			}
 
+			listener := func(e app.Event) {
+				if e.Source != "account" {
+					return
+				}
+				switch e.Type {
+				case app.PullComplete:
+					fmt.Println(color.GreenString("Successfully pulled account %d.", e.Payload.(int)))
+				case app.PullError:
+					fmt.Println(color.RedString("Error: Failed to pull account %d. The API returned an error.", accountID))
+					fmt.Println(color.YellowString("Details: %v", e.Payload.(error)))
+				}
+			}
+			App.Events.Subscribe(app.PullComplete, listener)
+			App.Events.Subscribe(app.PullError, listener)
+
 			log := func(message string) {
-				if strings.Contains(message, "Error") || strings.Contains(message, "error") {
-					fmt.Println(color.RedString(message))
-				} else if strings.Contains(message, "Successfully") {
-					fmt.Println(color.GreenString(message))
-				} else {
+				if App.State.Verbose {
 					fmt.Println(color.CyanString(message))
 				}
 			}
 
-			err = app.PullAccount(App, accountID, log)
-			if err != nil {
-				// Provide a cleaner error message to the user
-				fmt.Println(color.RedString("Error: Failed to pull account %d. The API returned an error.", accountID))
-				fmt.Println(color.YellowString("Details: %v", err))
-				return nil // Return nil to prevent Cobra from printing usage
-			}
-			return nil
+			return app.PullAccount(App, accountID, log)
 		},
 	}
 	return cmd
@@ -145,52 +149,47 @@ func pullCheckinsCmd(App *app.App) *cobra.Command {
 			var bar *progressbar.ProgressBar
 
 			pullListener := func(e app.Event) {
+				if e.Source != "checkins" {
+					return
+				}
 				switch e.Type {
-				case app.PullStart:
-					if e.Source == "checkins" {
-						bar = progressbar.NewOptions(-1,
-							progressbar.OptionSetDescription("Pulling checkins..."),
-							progressbar.OptionSetWriter(os.Stderr),
-							progressbar.OptionSpinnerType(14),
-							progressbar.OptionEnableColorCodes(true),
-						)
-					}
+				case app.PullAllStart:
+					bar = progressbar.NewOptions(-1,
+						progressbar.OptionSetDescription("Pulling checkins..."),
+						progressbar.OptionSetWriter(os.Stderr),
+						progressbar.OptionSpinnerType(14),
+						progressbar.OptionEnableColorCodes(true),
+					)
 				case app.ResourceIDsFetched:
-					if e.Source == "checkins" {
-						count := e.Payload.(int)
-						if bar != nil {
-							bar.ChangeMax(count)
-							bar.Describe(fmt.Sprintf("Found %d accounts to pull checkins from.", count))
-						}
+					count := e.Payload.(int)
+					if bar != nil {
+						bar.ChangeMax(count)
+						bar.Describe(fmt.Sprintf("Found %d accounts to pull checkins from.", count))
 					}
-				case app.AccountCheckinsPulled:
-					if e.Source == "checkins" {
-						if bar != nil {
-							bar.Add(1)
-						}
+				case app.StoreSuccess:
+					if bar != nil {
+						bar.Add(1)
 					}
-				case app.PullError:
+				case app.PullAllError:
 					err := e.Payload.(error)
 					if bar != nil {
 						bar.Clear()
 					}
 					log.Printf(color.RedString("An error occurred during pull: %v"), err)
-				case app.PullComplete:
-					if e.Source == "checkins" {
-						if bar != nil {
-							bar.Finish()
-							fmt.Println(color.GreenString("✔ Pull for %s complete.", e.Source))
-						}
+				case app.PullAllComplete:
+					if bar != nil {
+						bar.Finish()
+						fmt.Println(color.GreenString("✔ Pull for %s complete.", e.Source))
 					}
 				}
 			}
 
 			// Subscribe the listener to all relevant events
-			App.Events.Subscribe(app.PullStart, pullListener)
+			App.Events.Subscribe(app.PullAllStart, pullListener)
 			App.Events.Subscribe(app.ResourceIDsFetched, pullListener)
-			App.Events.Subscribe(app.AccountCheckinsPulled, pullListener)
-			App.Events.Subscribe(app.PullError, pullListener)
-			App.Events.Subscribe(app.PullComplete, pullListener)
+			App.Events.Subscribe(app.StoreSuccess, pullListener)
+			App.Events.Subscribe(app.PullAllError, pullListener)
+			App.Events.Subscribe(app.PullAllComplete, pullListener)
 
 			logWrapper := func(message string) {
 				if App.State.Verbose {

@@ -9,24 +9,32 @@ import (
 	"sync"
 )
 
-func PullAll(a *App, top int, log func(string)) error {
-	a.Events.Dispatch(Event{Type: PullStart, Source: "all data"})
+func PullAll(a *App, top int, log func(string)) (err error) {
+	a.Events.Dispatch(Event{Type: PullAllStart, Source: "all"})
 	log("Pulling all data...")
 
+	defer func() {
+		if err != nil {
+			a.Events.Dispatch(Event{Type: PullAllError, Source: "all", Payload: err})
+		} else {
+			a.Events.Dispatch(Event{Type: PullAllComplete, Source: "all"})
+		}
+	}()
+
 	log("Pulling accounts...")
-	if err := PullAllAccounts(a, top, log); err != nil {
+	if err = PullAllAccounts(a, top, log); err != nil {
 		log(fmt.Sprintf("Error pulling accounts: %v", err))
 		return err
 	}
 
 	log("Pulling checkins...")
-	if err := PullAllCheckins(a, log); err != nil {
+	if err = PullAllCheckins(a, log); err != nil {
 		log(fmt.Sprintf("Error pulling checkins: %v", err))
 		return err
 	}
 
 	log("Pulling routes...")
-	if err := PullAllRoutes(a, log); err != nil {
+	if err = PullAllRoutes(a, log); err != nil {
 		log(fmt.Sprintf("Error pulling routes: %v", err))
 		return err
 	}
@@ -38,7 +46,7 @@ func PullAll(a *App, top int, log func(string)) error {
 		return err
 	}
 
-	if err := StoreProfile(a, profile, log); err != nil {
+	if err = StoreProfile(a, profile, log); err != nil {
 		log(fmt.Sprintf("Error storing profile: %v", err))
 		return err
 	}
@@ -48,16 +56,24 @@ func PullAll(a *App, top int, log func(string)) error {
 	return nil
 }
 
-func PullAccount(a *App, accountID int, log func(string)) error {
-	a.Events.Dispatch(Event{Type: PullStart, Source: "account"})
+func PullAccount(a *App, accountID int, log func(string)) (err error) {
+	a.Events.Dispatch(Event{Type: PullStart, Source: "account", Payload: accountID})
 	log(fmt.Sprintf("Pulling account with ID: %d", accountID))
+
+	defer func() {
+		if err != nil {
+			a.Events.Dispatch(Event{Type: PullError, Source: "account", Payload: err})
+		} else {
+			a.Events.Dispatch(Event{Type: PullComplete, Source: "account", Payload: accountID})
+		}
+	}()
 
 	account, err := a.API.GetAccountDetailed(accountID)
 	if err != nil {
 		return fmt.Errorf("error pulling account: %w", err)
 	}
 
-	if err := StoreAccountDetailed(a, account, log); err != nil {
+	if err = StoreAccountDetailed(a, account, log); err != nil {
 		return fmt.Errorf("error storing account: %w", err)
 	}
 
@@ -65,8 +81,16 @@ func PullAccount(a *App, accountID int, log func(string)) error {
 	return nil
 }
 
-func PullAllAccounts(a *App, top int, log func(string)) error {
-	a.Events.Dispatch(Event{Type: PullStart, Source: "accounts"})
+func PullAllAccounts(a *App, top int, log func(string)) (err error) {
+	a.Events.Dispatch(Event{Type: PullAllStart, Source: "accounts"})
+
+	defer func() {
+		if err != nil {
+			a.Events.Dispatch(Event{Type: PullAllError, Source: "accounts", Payload: err})
+		} else {
+			a.Events.Dispatch(Event{Type: PullAllComplete, Source: "accounts"})
+		}
+	}()
 
 	accountIDs, err := a.API.GetAccountIDs()
 	if err != nil {
@@ -130,16 +154,24 @@ func PullAllAccounts(a *App, top int, log func(string)) error {
 	return nil
 }
 
-func PullCheckin(a *App, checkinID int, log func(string)) error {
-	a.Events.Dispatch(Event{Type: PullStart, Source: "check-in"})
+func PullCheckin(a *App, checkinID int, log func(string)) (err error) {
+	a.Events.Dispatch(Event{Type: PullStart, Source: "check-in", Payload: checkinID})
 	log(fmt.Sprintf("Pulling checkin with ID: %d", checkinID))
+
+	defer func() {
+		if err != nil {
+			a.Events.Dispatch(Event{Type: PullError, Source: "check-in", Payload: err})
+		} else {
+			a.Events.Dispatch(Event{Type: PullComplete, Source: "check-in", Payload: checkinID})
+		}
+	}()
 
 	checkin, err := a.API.GetCheckin(checkinID)
 	if err != nil {
 		return fmt.Errorf("error pulling checkin: %w", err)
 	}
 
-	if err := StoreCheckin(a, *checkin, log); err != nil {
+	if err = StoreCheckin(a, *checkin, log); err != nil {
 		return fmt.Errorf("error storing checkin: %w", err)
 	}
 
@@ -147,8 +179,16 @@ func PullCheckin(a *App, checkinID int, log func(string)) error {
 	return nil
 }
 
-func PullAllCheckins(a *App, log func(string)) error {
-	a.Events.Dispatch(Event{Type: PullStart, Source: "checkins"})
+func PullAllCheckins(a *App, log func(string)) (err error) {
+	a.Events.Dispatch(Event{Type: PullAllStart, Source: "checkins"})
+
+	defer func() {
+		if err != nil {
+			a.Events.Dispatch(Event{Type: PullAllError, Source: "checkins", Payload: err})
+		} else {
+			a.Events.Dispatch(Event{Type: PullAllComplete, Source: "checkins"})
+		}
+	}()
 
 	accountIDs, err := a.API.GetAccountIDs()
 	if err != nil {
@@ -205,7 +245,6 @@ func PullAllCheckins(a *App, log func(string)) error {
 					a.Events.Dispatch(Event{Type: StoreSuccess, Source: "checkins", Payload: checkin})
 				}
 			}
-			a.Events.Dispatch(Event{Type: AccountCheckinsPulled, Source: "checkins", Payload: accountID})
 		}(id, i)
 	}
 
@@ -227,16 +266,24 @@ func PullAllCheckins(a *App, log func(string)) error {
 		return nil
 	}
 
-func PullRoute(a *App, routeID int, log func(string)) error {
-	a.Events.Dispatch(Event{Type: PullStart, Source: "route"})
+func PullRoute(a *App, routeID int, log func(string)) (err error) {
+	a.Events.Dispatch(Event{Type: PullStart, Source: "route", Payload: routeID})
 	log(fmt.Sprintf("Pulling route with ID: %d", routeID))
+
+	defer func() {
+		if err != nil {
+			a.Events.Dispatch(Event{Type: PullError, Source: "route", Payload: err})
+		} else {
+			a.Events.Dispatch(Event{Type: PullComplete, Source: "route", Payload: routeID})
+		}
+	}()
 
 	route, err := a.API.GetRoute(routeID)
 	if err != nil {
 		return fmt.Errorf("error pulling route: %w", err)
 	}
 
-	if err := StoreRoute(a, *route, log); err != nil {
+	if err = StoreRoute(a, *route, log); err != nil {
 		return fmt.Errorf("error storing route: %w", err)
 	}
 
@@ -244,8 +291,16 @@ func PullRoute(a *App, routeID int, log func(string)) error {
 	return nil
 }
 
-func PullAllRoutes(a *App, log func(string)) error {
-	a.Events.Dispatch(Event{Type: PullStart, Source: "routes"})
+func PullAllRoutes(a *App, log func(string)) (err error) {
+	a.Events.Dispatch(Event{Type: PullAllStart, Source: "routes"})
+
+	defer func() {
+		if err != nil {
+			a.Events.Dispatch(Event{Type: PullAllError, Source: "routes", Payload: err})
+		} else {
+			a.Events.Dispatch(Event{Type: PullAllComplete, Source: "routes"})
+		}
+	}()
 
 	routes, err := a.API.GetRoutes()
 	if err != nil {
@@ -279,15 +334,24 @@ func PullAllRoutes(a *App, log func(string)) error {
 	return nil
 }
 
-func PullProfile(a *App, log func(string)) error {
+func PullProfile(a *App, log func(string)) (err error) {
 	a.Events.Dispatch(Event{Type: PullStart, Source: "user profile"})
 	log("Pulling user profile...")
+
+	defer func() {
+		if err != nil {
+			a.Events.Dispatch(Event{Type: PullError, Source: "user profile", Payload: err})
+		} else {
+			a.Events.Dispatch(Event{Type: PullComplete, Source: "user profile"})
+		}
+	}()
+
 	profile, err := a.API.GetUserProfile()
 	if err != nil {
 		return fmt.Errorf("error pulling user profile: %w", err)
 	}
 
-	if err := StoreProfile(a, profile, log); err != nil {
+	if err = StoreProfile(a, profile, log); err != nil {
 		return fmt.Errorf("error storing profile: %w", err)
 	}
 

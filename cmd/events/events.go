@@ -74,7 +74,7 @@ Provide a shell command as an argument or specify a database function to execute
 				finalAction = action
 			}
 
-			if err := a.AddEventAction(event, finalAction); err != nil {
+			if err := a.AddEventAction(event, "", finalAction); err != nil {
 				return err
 			}
 
