@@ -731,7 +731,7 @@ func (ui *Gui) showToast(content string) {
 // --- Pull Functions ---
 func (ui *Gui) runPullAll() {
 	ui.log("Starting full data pull...")
-	if err := app.RunPullAll(ui.app, ui.log); err != nil {
+	if err := app.PullAll(ui.app, 0, ui.log); err != nil {
 		ui.log(fmt.Sprintf("ERROR: %v", err))
 		ui.showToast("Error: The data pull failed.")
 		return
@@ -746,7 +746,7 @@ func (ui *Gui) runPullAccount(idStr string) {
 		return
 	}
 	ui.log(fmt.Sprintf("Starting pull for account ID: %d...", id))
-	if err := app.RunPullAccount(ui.app, id, ui.log); err != nil {
+	if err := app.PullAccount(ui.app, id, ui.log); err != nil {
 		ui.log(fmt.Sprintf("ERROR: %v", err))
 		ui.showToast(fmt.Sprintf("Error: Failed to pull account %d.", id))
 		return
@@ -756,7 +756,7 @@ func (ui *Gui) runPullAccount(idStr string) {
 
 func (ui *Gui) runPullAccounts() {
 	ui.log("Starting pull for all accounts...")
-	if err := app.RunPullAccounts(ui.app, ui.log); err != nil {
+	if err := app.PullAllAccounts(ui.app, 0, ui.log); err != nil {
 		ui.log(fmt.Sprintf("ERROR: %v", err))
 		ui.showToast("Error: Failed to pull all accounts.")
 		return
@@ -771,7 +771,7 @@ func (ui *Gui) runPullCheckin(idStr string) {
 		return
 	}
 	ui.log(fmt.Sprintf("Starting pull for check-in ID: %d...", id))
-	if err := app.RunPullCheckin(ui.app, id, ui.log); err != nil {
+	if err := app.PullCheckin(ui.app, id, ui.log); err != nil {
 		ui.log(fmt.Sprintf("ERROR: %v", err))
 		ui.showToast(fmt.Sprintf("Error: Failed to pull check-in %d.", id))
 		return
@@ -781,7 +781,7 @@ func (ui *Gui) runPullCheckin(idStr string) {
 
 func (ui *Gui) runPullCheckins() {
 	ui.log("Starting pull for all check-ins...")
-	if err := app.RunPullCheckins(ui.app, ui.log); err != nil {
+	if err := app.PullAllCheckins(ui.app, ui.log); err != nil {
 		ui.log(fmt.Sprintf("ERROR: %v", err))
 		ui.showToast("Error: Failed to pull all check-ins.")
 		return
@@ -796,7 +796,7 @@ func (ui *Gui) runPullRoute(idStr string) {
 		return
 	}
 	ui.log(fmt.Sprintf("Starting pull for route ID: %d...", id))
-	if err := app.RunPullRoute(ui.app, id, ui.log); err != nil {
+	if err := app.PullRoute(ui.app, id, ui.log); err != nil {
 		ui.log(fmt.Sprintf("ERROR: %v", err))
 		ui.showToast(fmt.Sprintf("Error: Failed to pull route %d.", id))
 		return
@@ -806,7 +806,7 @@ func (ui *Gui) runPullRoute(idStr string) {
 
 func (ui *Gui) runPullRoutes() {
 	ui.log("Starting pull for all routes...")
-	if err := app.RunPullRoutes(ui.app, ui.log); err != nil {
+	if err := app.PullAllRoutes(ui.app, ui.log); err != nil {
 		ui.log(fmt.Sprintf("ERROR: %v", err))
 		ui.showToast("Error: Failed to pull all routes.")
 		return
@@ -816,7 +816,7 @@ func (ui *Gui) runPullRoutes() {
 
 func (ui *Gui) runPullProfile() {
 	ui.log("Starting pull for user profile...")
-	if err := app.RunPullProfile(ui.app, ui.log); err != nil {
+	if err := app.PullProfile(ui.app, ui.log); err != nil {
 		ui.log(fmt.Sprintf("ERROR: %v", err))
 		ui.showToast("Error: Failed to pull user profile.")
 		return
