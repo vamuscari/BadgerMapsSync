@@ -9,6 +9,7 @@ type State struct {
 	NoColor    bool
 	EnvFile    *string
 	ConfigFile *string
+	NoInput    bool
 
 	// Server configuration
 	ServerHost   string

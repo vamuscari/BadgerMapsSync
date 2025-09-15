@@ -326,6 +326,11 @@ func (a *App) EnsureConfig() {
 		fmt.Println(utils.Colors.Yellow("No configuration file found (.env or config.yaml)."))
 	}
 
+	if a.State.NoInput {
+		fmt.Println(utils.Colors.Red("No configuration file found and interactive prompts are disabled. Exiting."))
+		os.Exit(1)
+	}
+
 	if promptForSetup() {
 		if a.InteractiveSetup() {
 			if err := a.LoadConfig(); err != nil {

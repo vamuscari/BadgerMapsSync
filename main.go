@@ -80,6 +80,7 @@ It allows you to push and pull data, run in server mode, and perform various uti
 	rootCmd.PersistentFlags().BoolVarP(&App.State.Quiet, "quiet", "q", false, "Suppress all non-essential output")
 	rootCmd.PersistentFlags().BoolVar(&App.State.Debug, "debug", false, "Enable debug mode with maximum verbosity")
 	rootCmd.PersistentFlags().BoolVar(&App.State.NoColor, "no-color", false, "Disable colored output")
+	rootCmd.PersistentFlags().BoolVar(&App.State.NoInput, "no-input", false, "Disable interactive prompts")
 	rootCmd.PersistentFlags().StringVar(App.State.ConfigFile, "config", "", "Config file (default is $HOME/.badgermaps.yaml)")
 	rootCmd.PersistentFlags().StringVar(App.State.EnvFile, "env", "", "Env file (default is $PWD/.env).")
 	rootCmd.Flags().BoolVar(&guiFlag, "gui", false, "Launch the graphical user interface")
