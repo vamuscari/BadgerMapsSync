@@ -122,14 +122,14 @@ func (a *App) GetConfigFilePath() (string, bool, error) {
 	}
 
 	// Auto-detection logic
-	// 1. Check user config directory
+	// 1. Check local config.yaml
+	if utils.CheckIfFileExists(filepath.Join(".", "config.yaml")) {
+		return filepath.Join(".", "config.yaml"), true, nil
+	}
+	// 2. Check user config directory
 	userConfigPath := utils.GetConfigDirFile("config.yaml")
 	if utils.CheckIfFileExists(userConfigPath) {
 		return userConfigPath, true, nil
-	}
-	// 2. Check local config.yaml
-	if utils.CheckIfFileExists(filepath.Join(".", "config.yaml")) {
-		return filepath.Join(".", "config.yaml"), true, nil
 	}
 
 	return "", false, nil

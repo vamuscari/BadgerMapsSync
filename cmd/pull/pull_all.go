@@ -1,7 +1,6 @@
 package pull
 
 import (
-	"badgermaps/api"
 	"badgermaps/app"
 	"fmt"
 	"log"
@@ -36,7 +35,7 @@ func runPullAll(a *app.App, top int) {
 
 	pullListener := func(e app.Event) {
 		switch e.Type {
-		case app.PullStart:
+		case app.PullAllStart:
 			bar = progressbar.NewOptions(-1,
 				progressbar.OptionSetDescription(fmt.Sprintf("Starting pull for %s...", e.Source)),
 				progressbar.OptionSetWriter(os.Stderr),
@@ -45,37 +44,34 @@ func runPullAll(a *app.App, top int) {
 			)
 		case app.ResourceIDsFetched:
 			count := e.Payload.(int)
-			bar.ChangeMax(count)
-			bar.Describe(fmt.Sprintf("Found %d %s to pull.", count, e.Source))
+			if bar != nil {
+				bar.ChangeMax(count)
+				bar.Describe(fmt.Sprintf("Found %d %s to pull.", count, e.Source))
+			}
 		case app.StoreSuccess:
 			if bar != nil {
 				bar.Add(1)
 			}
-		case app.PullError:
+		case app.PullAllError:
 			err := e.Payload.(error)
+			if bar != nil {
+				bar.Clear()
+			}
 			log.Printf(color.RedString("An error occurred during pull: %v"), err)
-		case app.PullComplete:
+		case app.PullAllComplete:
 			if bar != nil {
 				bar.Finish()
 				fmt.Println(color.GreenString("✔ Pull for %s complete.", e.Source))
-			}
-		case app.FetchDetailSuccess:
-			// Example of accessing payload data
-			if account, ok := e.Payload.(*api.Account); ok {
-				if a.State.Verbose {
-					log.Printf("Fetched account: %s", account.FullName.String)
-				}
 			}
 		}
 	}
 
 	// Subscribe the listener to all relevant events
-	a.Events.Subscribe(app.PullStart, pullListener)
+	a.Events.Subscribe(app.PullAllStart, pullListener)
 	a.Events.Subscribe(app.ResourceIDsFetched, pullListener)
 	a.Events.Subscribe(app.StoreSuccess, pullListener)
-	a.Events.Subscribe(app.PullError, pullListener)
-	a.Events.Subscribe(app.PullComplete, pullListener)
-	a.Events.Subscribe(app.FetchDetailSuccess, pullListener)
+	a.Events.Subscribe(app.PullAllError, pullListener)
+	a.Events.Subscribe(app.PullAllComplete, pullListener)
 
 	// --- Execute Pull Operations ---
 	log.Println(color.CyanString("Starting data pull from BadgerMaps API..."))
