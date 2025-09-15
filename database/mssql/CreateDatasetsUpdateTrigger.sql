@@ -1,4 +1,4 @@
-CREATE OR ALTER TRIGGER datasets_update_trigger
+CREATE OR ALTER TRIGGER DatasetsUpdateTrigger
 ON DataSets
 AFTER INSERT, UPDATE, DELETE
 AS

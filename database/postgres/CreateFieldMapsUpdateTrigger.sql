@@ -1,14 +1,14 @@
-CREATE OR REPLACE FUNCTION refresh_field_maps()
-RETURNS TRIGGER AS $$
+CREATE OR REPLACE FUNCTION RefreshFieldMaps()
+RETURNS TRIGGER AS $
 BEGIN
-    PERFORM update_field_maps_from_datasets();
+    PERFORM UpdateFieldMapsFromDatasets();
     RETURN NULL;
 END;
-$$ LANGUAGE plpgsql;
+$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS datasets_field_maps_update_trigger ON "DataSets";
+DROP TRIGGER IF EXISTS DatasetsFieldMapsUpdateTrigger ON "DataSets";
 
-CREATE TRIGGER datasets_field_maps_update_trigger
+CREATE TRIGGER DatasetsFieldMapsUpdateTrigger
 AFTER INSERT OR UPDATE OR DELETE ON "DataSets"
 FOR EACH STATEMENT
-EXECUTE FUNCTION refresh_field_maps();
+EXECUTE FUNCTION RefreshFieldMaps();

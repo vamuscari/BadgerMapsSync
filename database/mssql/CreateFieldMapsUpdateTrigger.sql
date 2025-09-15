@@ -1,7 +1,7 @@
-CREATE OR ALTER TRIGGER datasets_field_maps_update_trigger
+CREATE OR ALTER TRIGGER DatasetsFieldMapsUpdateTrigger
 ON DataSets
 AFTER INSERT, UPDATE, DELETE
 AS
 BEGIN
-    EXEC update_field_maps_from_datasets;
+    EXEC UpdateFieldMapsFromDatasets;
 END;

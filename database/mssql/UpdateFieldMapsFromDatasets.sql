@@ -1,4 +1,4 @@
-CREATE OR ALTER PROCEDURE update_field_maps_from_datasets AS
+CREATE OR ALTER PROCEDURE UpdateFieldMapsFromDatasets AS
 BEGIN
     UPDATE fm
     SET

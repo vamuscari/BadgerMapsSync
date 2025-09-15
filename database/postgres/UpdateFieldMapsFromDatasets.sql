@@ -1,5 +1,5 @@
-CREATE OR REPLACE FUNCTION update_field_maps_from_datasets()
-RETURNS void AS $$
+CREATE OR REPLACE FUNCTION UpdateFieldMapsFromDatasets()
+RETURNS void AS $
 BEGIN
     UPDATE FieldMaps fm
     SET
@@ -8,4 +8,4 @@ BEGIN
     FROM DataSets ds
     WHERE fm.FieldName = ds.AccountField AND fm.ObjectType = 'Account';
 END;
-$$ LANGUAGE plpgsql;
+$ LANGUAGE plpgsql;

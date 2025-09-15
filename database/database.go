@@ -683,9 +683,9 @@ func (db *PostgreSQLConfig) ValidateSchema() error {
 	}
 
 	if db.state.Verbose && !db.state.Quiet {
-		fmt.Printf("Checking function: update_field_maps_from_datasets... ")
+		fmt.Printf("Checking function: UpdateFieldMapsFromDatasets... ")
 	}
-	procExists, err := db.ProcedureExists("update_field_maps_from_datasets")
+	procExists, err := db.ProcedureExists("UpdateFieldMapsFromDatasets")
 	if err != nil {
 		if db.state.Verbose && !db.state.Quiet {
 			fmt.Println(color.RedString("ERROR"))
@@ -693,22 +693,22 @@ func (db *PostgreSQLConfig) ValidateSchema() error {
 		if db.state.Debug {
 			fmt.Printf("ValidateSchema error: %v\n", err)
 		}
-		return fmt.Errorf("error checking if function update_field_maps_from_datasets exists: %w", err)
+		return fmt.Errorf("error checking if function UpdateFieldMapsFromDatasets exists: %w", err)
 	}
 	if !procExists {
 		if db.state.Verbose && !db.state.Quiet {
 			fmt.Println(color.RedString("MISSING"))
 		}
-		return fmt.Errorf("required function update_field_maps_from_datasets does not exist")
+		return fmt.Errorf("required function UpdateFieldMapsFromDatasets does not exist")
 	}
 	if db.state.Verbose && !db.state.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
 	if db.state.Verbose && !db.state.Quiet {
-		fmt.Printf("Checking trigger: datasets_update_trigger... ")
+		fmt.Printf("Checking trigger: DatasetsUpdateTrigger... ")
 	}
-	triggerExists, err := db.TriggerExists("datasets_update_trigger")
+	triggerExists, err := db.TriggerExists("DatasetsUpdateTrigger")
 	if err != nil {
 		if db.state.Verbose && !db.state.Quiet {
 			fmt.Println(color.RedString("ERROR"))
@@ -716,13 +716,13 @@ func (db *PostgreSQLConfig) ValidateSchema() error {
 		if db.state.Debug {
 			fmt.Printf("ValidateSchema error: %v\n", err)
 		}
-		return fmt.Errorf("error checking if trigger datasets_update_trigger exists: %w", err)
+		return fmt.Errorf("error checking if trigger DatasetsUpdateTrigger exists: %w", err)
 	}
 	if !triggerExists {
 		if db.state.Verbose && !db.state.Quiet {
 			fmt.Println(color.RedString("MISSING"))
 		}
-		return fmt.Errorf("required trigger datasets_update_trigger does not exist")
+		return fmt.Errorf("required trigger DatasetsUpdateTrigger does not exist")
 	}
 	if db.state.Verbose && !db.state.Quiet {
 		fmt.Println(color.GreenString("OK"))

@@ -12,6 +12,7 @@ import (
 	"fyne.io/fyne/v2"
 	fapp "fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
@@ -685,10 +686,22 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 		)
 	})
 
+	// Schema Management
+	schemaLabel := "Initialize Schema"
+	if err := ui.app.DB.ValidateSchema(); err == nil {
+		schemaLabel = "Re-initialize Schema"
+	}
+	schemaButton := widget.NewButtonWithIcon(schemaLabel, theme.StorageIcon(), func() {
+		go ui.runSchemaEnforcement()
+	})
+
+	schemaCard := widget.NewCard("Schema Management", "", schemaButton)
+
 	return container.NewVBox(
 		apiCard,
 		dbCard,
 		otherCard,
+		schemaCard,
 		container.NewGridWithColumns(2, testButton, saveButton),
 	)
 }
@@ -973,5 +986,36 @@ func (ui *Gui) testDBConnection(button *widget.Button, dbType, dbPath, dbHost, d
 	ui.log("Connection successful!")
 	button.SetText("Connection Successful")
 	button.SetIcon(theme.ConfirmIcon())
+}
+
+func (ui *Gui) runSchemaEnforcement() {
+	if err := ui.app.DB.ValidateSchema(); err == nil {
+		// Schema exists, confirm re-initialization
+		dialog.ShowConfirm("Re-initialize Schema?", "This will delete all existing data. Are you sure?", func(ok bool) {
+			if !ok {
+				return
+			}
+			ui.log("Re-initializing database schema...")
+			if err := ui.app.DB.EnforceSchema(); err != nil {
+				ui.log(fmt.Sprintf("ERROR: %v", err))
+				ui.showToast("Error: Failed to re-initialize schema.")
+				return
+			}
+			ui.log("Schema re-initialized successfully.")
+			ui.showToast("Success: Schema re-initialized.")
+			ui.refreshConfigTab()
+		}, ui.window)
+	} else {
+		// Schema doesn't exist, just initialize it
+		ui.log("Initializing database schema...")
+		if err := ui.app.DB.EnforceSchema(); err != nil {
+			ui.log(fmt.Sprintf("ERROR: %v", err))
+			ui.showToast("Error: Failed to initialize schema.")
+			return
+		}
+		ui.log("Schema initialized successfully.")
+		ui.showToast("Success: Schema initialized.")
+		ui.refreshConfigTab()
+	}
 }
 
