@@ -7,7 +7,6 @@ type State struct {
 	Quiet      bool
 	Debug      bool
 	NoColor    bool
-	EnvFile    *string
 	ConfigFile *string
 	NoInput    bool
 
@@ -27,6 +26,6 @@ func NewState() *State {
 		Debug:      false,
 		NoColor:    false,
 		ConfigFile: new(string),
-		EnvFile:    new(string),
+		NoInput:    false,
 	}
 }

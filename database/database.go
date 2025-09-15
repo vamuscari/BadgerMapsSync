@@ -576,15 +576,15 @@ func (db *PostgreSQLConfig) EnforceSchema() error {
 
 	// Create function to update field mappings
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
-		fmt.Printf("Creating function: update_field_mappings_from_datasets... ")
+		fmt.Printf("Creating function: UpdateFieldMapsFromDatasets... ")
 	}
-	sqlText = db.GetSQL("update_field_mappings_from_datasets")
+	sqlText = db.GetSQL("UpdateFieldMapsFromDatasets")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
-			return fmt.Errorf("failed to create function update_field_mappings_from_datasets: %w", err)
+			return fmt.Errorf("failed to create function UpdateFieldMapsFromDatasets: %w", err)
 		}
 	}
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
@@ -593,15 +593,15 @@ func (db *PostgreSQLConfig) EnforceSchema() error {
 
 	// Create trigger to update field mappings
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
-		fmt.Printf("Creating trigger: datasets_field_mappings_update_trigger... ")
+		fmt.Printf("Creating trigger: DatasetsFieldMapsUpdateTrigger... ")
 	}
-	sqlText = db.GetSQL("create_field_mappings_update_trigger")
+	sqlText = db.GetSQL("CreateFieldMapsUpdateTrigger")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
 			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
-			return fmt.Errorf("failed to create trigger datasets_field_mappings_update_trigger: %w", err)
+			return fmt.Errorf("failed to create trigger DatasetsFieldMapsUpdateTrigger: %w", err)
 		}
 	}
 	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {

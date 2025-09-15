@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -61,36 +60,14 @@ func (a *App) LoadConfig() error {
 
 	if ok {
 		a.ConfigFile = path
-		if strings.HasSuffix(path, ".env") {
-			// Load from .env file
-			// This is a simplified implementation. A more robust solution would handle
-			// comments, quoted values, etc.
-			file, err := os.Open(path)
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-
-			scanner := bufio.NewScanner(file)
-			for scanner.Scan() {
-				line := scanner.Text()
-				parts := strings.SplitN(line, "=", 2)
-				if len(parts) == 2 {
-					key := strings.TrimSpace(parts[0])
-					value := strings.TrimSpace(parts[1])
-					a.setConfigValue(key, value)
-				}
-			}
-		} else {
-			// Load from YAML file
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			err = yaml.Unmarshal(data, a.Config)
-			if err != nil {
-				return err
-			}
+		// Load from YAML file
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		err = yaml.Unmarshal(data, a.Config)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -110,40 +87,9 @@ func (a *App) LoadConfig() error {
 	return nil
 }
 
-func (a *App) setConfigValue(key, value string) {
-	switch key {
-	case "API_URL":
-		a.Config.API.BaseURL = value
-	case "API_KEY":
-		a.Config.API.APIKey = value
-	case "DB_TYPE":
-		a.Config.DB.Type = value
-	case "DB_HOST":
-		a.Config.DB.Host = value
-	case "DB_PORT":
-		a.Config.DB.Port, _ = strconv.Atoi(value)
-	case "DB_NAME":
-		a.Config.DB.Database = value
-	case "DB_USER":
-		a.Config.DB.Username = value
-	case "DB_PASSWORD":
-		a.Config.DB.Password = value
-	case "DB_SSL_MODE":
-		a.Config.DB.SSLMode = value
-	case "DB_PATH":
-		a.Config.DB.Path = value
-	case "MAX_CONCURRENT_REQUESTS":
-		a.Config.MaxConcurrentRequests, _ = strconv.Atoi(value)
-	}
-}
-
 func (a *App) SaveConfig() error {
 	if a.ConfigFile == "" {
 		return fmt.Errorf("no configuration file loaded, cannot save")
-	}
-
-	if strings.HasSuffix(a.ConfigFile, ".env") {
-		return a.writeEnvFile(a.ConfigFile)
 	}
 	return a.writeYamlFile(a.ConfigFile)
 }
@@ -156,23 +102,6 @@ func (a *App) writeYamlFile(path string) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-func (a *App) writeEnvFile(path string) error {
-	settings := make(map[string]string)
-	settings["API_URL"] = a.Config.API.BaseURL
-	settings["API_KEY"] = a.Config.API.APIKey
-	settings["MAX_CONCURRENT_REQUESTS"] = fmt.Sprintf("%d", a.Config.MaxConcurrentRequests)
-	settings["DB_TYPE"] = a.Config.DB.Type
-	settings["DB_HOST"] = a.Config.DB.Host
-	settings["DB_PORT"] = fmt.Sprintf("%d", a.Config.DB.Port)
-	settings["DB_NAME"] = a.Config.DB.Database
-	settings["DB_USER"] = a.Config.DB.Username
-	settings["DB_PASSWORD"] = a.Config.DB.Password
-	settings["DB_SSL_MODE"] = a.Config.DB.SSLMode
-	settings["DB_PATH"] = a.Config.DB.Path
-
-	return utils.WriteEnvFile(path, settings)
-}
-
 func (a *App) ReloadDB() error {
 	if a.DB != nil {
 		a.DB.Close()
@@ -183,16 +112,6 @@ func (a *App) ReloadDB() error {
 }
 
 func (a *App) GetConfigFilePath() (string, bool, error) {
-
-	// Highest precedence: --env flag
-	if a.State.EnvFile != nil && *a.State.EnvFile != "" {
-		absPath, err := filepath.Abs(*a.State.EnvFile)
-		if err != nil {
-			return "", false, fmt.Errorf("error getting absolute path for %s: %w", *a.State.EnvFile, err)
-		}
-		return absPath, true, nil
-	}
-
 	// Second precedence: --config flag
 	if a.State.ConfigFile != nil && *a.State.ConfigFile != "" {
 		absPath, err := filepath.Abs(*a.State.ConfigFile)
@@ -202,17 +121,13 @@ func (a *App) GetConfigFilePath() (string, bool, error) {
 		return absPath, true, nil
 	}
 
-	// Auto-detection logic: .env takes precedence
-	// 1. Check local .env
-	if utils.CheckIfFileExists(".env") {
-		return ".env", true, nil
-	}
-	// 2. Check user config directory
+	// Auto-detection logic
+	// 1. Check user config directory
 	userConfigPath := utils.GetConfigDirFile("config.yaml")
 	if utils.CheckIfFileExists(userConfigPath) {
 		return userConfigPath, true, nil
 	}
-	// 3. Check local config.yaml
+	// 2. Check local config.yaml
 	if utils.CheckIfFileExists(filepath.Join(".", "config.yaml")) {
 		return filepath.Join(".", "config.yaml"), true, nil
 	}
@@ -252,9 +167,9 @@ func (a *App) RemoveEventAction(event string, actionToRemove string) error {
 	a.Config.Events[key] = newActions
 	err := a.SaveConfig()
 	if err == nil {
-			a.Events.Dispatch(Event{Type: EventDelete, Source: "events", Payload: map[string]string{"event": event, "action": actionToRemove}})
-		}
-		return err
+		a.Events.Dispatch(Event{Type: EventDelete, Source: "events", Payload: map[string]string{"event": event, "action": actionToRemove}})
+	}
+	return err
 }
 
 // TriggerEventAction executes a specific action string (e.g., "db:my_function", "exec:ls").
@@ -323,7 +238,7 @@ func (a *App) EnsureConfig() {
 	}
 
 	if a.State.Verbose || a.State.Debug {
-		fmt.Println(utils.Colors.Yellow("No configuration file found (.env or config.yaml)."))
+		fmt.Println(utils.Colors.Yellow("No configuration file found (config.yaml)."))
 	}
 
 	if a.State.NoInput {
@@ -360,37 +275,15 @@ func (a *App) InteractiveSetup() bool {
 	fmt.Println(utils.Colors.Yellow("This will guide you through setting up the BadgerMaps CLI."))
 	fmt.Println()
 
-	setupOptions := []string{"Quick Setup", "Advanced Setup"}
-	setupChoice := utils.PromptChoice(reader, "Select setup type", setupOptions)
-
-	if setupChoice == "Advanced Setup" {
-		userSpecifiedFile := (a.State.EnvFile != nil) || (a.State.ConfigFile != nil)
-
-		if !userSpecifiedFile {
-			configOptions := []string{"config.yaml (in user config directory)", ".env file (in executable's directory)"}
-			configChoice := utils.PromptChoice(reader, "Select configuration file type to save to", configOptions)
-			if configChoice == configOptions[1] {
-				exe, err := os.Executable()
-				if err != nil {
-					fmt.Println(utils.Colors.Red("Error getting executable path: %v", err))
-					return false
-				}
-				a.ConfigFile = filepath.Join(filepath.Dir(exe), ".env")
-			} else {
-				a.ConfigFile = utils.GetConfigDirFile("config.yaml")
-			}
-		}
-	} else {
-		a.ConfigFile = utils.GetConfigDirFile("config.yaml")
-	}
+	a.ConfigFile = utils.GetConfigDirFile("config.yaml")
 
 	// API Settings
-	fmt.Println(utils.Colors.Blue("--- API Settings ---"))
+	fmt.Println(utils.Colors.Blue("---" + " API Settings ---"))
 	a.Config.API.APIKey = utils.PromptString(reader, "API Key", a.Config.API.APIKey)
 	a.Config.API.BaseURL = utils.PromptString(reader, "API URL", a.Config.API.BaseURL)
 
 	// Database Settings
-	fmt.Println(utils.Colors.Blue("--- Database Settings ---"))
+	fmt.Println(utils.Colors.Blue("---" + " Database Settings ---"))
 
 	dbOptions := []string{"sqlite3", "postgres", "mssql"}
 	dbType := utils.PromptChoice(reader, "Select database type", dbOptions)
@@ -430,18 +323,9 @@ func (a *App) InteractiveSetup() bool {
 	}
 	fmt.Println(utils.Colors.Green("Database connection successful."))
 
-	if setupChoice == "Advanced Setup" {
-		// Server Settings
-		fmt.Println(utils.Colors.Blue("--- Server Settings ---"))
-		// These settings are not yet in the config struct, so we'll just ignore them for now.
-		// a.Config.Server.Host = utils.PromptString(reader, "Server Host", a.Config.Server.Host)
-		// a.Config.Server.Port = utils.PromptInt(reader, "Server Port", a.Config.Server.Port)
-		// a.Config.Server.WebhookSecret = utils.PromptString(reader, "Webhook Secret", a.Config.Server.WebhookSecret)
-
-		// Advanced Settings
-		fmt.Println(utils.Colors.Blue("--- Advanced Settings ---"))
-		a.Config.MaxConcurrentRequests = utils.PromptInt(reader, "Max Concurrent Requests", a.Config.MaxConcurrentRequests)
-	}
+	// Advanced Settings
+	fmt.Println(utils.Colors.Blue("---" + " Advanced Settings ---"))
+	a.Config.MaxConcurrentRequests = utils.PromptInt(reader, "Max Concurrent Requests", a.Config.MaxConcurrentRequests)
 
 	// Save configuration
 	if err := a.SaveConfig(); err != nil {
