@@ -2,6 +2,8 @@ package utils
 
 import (
 	"badgermaps/app/state"
+	"runtime"
+
 	"github.com/fatih/color"
 )
 
@@ -40,5 +42,9 @@ var Colors = NewColorPrinter(false)
 // InitColors initializes the global Colors instance
 // This should be called after viper is initialized
 func InitColors(s *state.State) {
-	Colors = NewColorPrinter(s.NoColor)
+	if runtime.GOOS == "windows" {
+		Colors = NewColorPrinter(true)
+	} else {
+		Colors = NewColorPrinter(s.NoColor)
+	}
 }
