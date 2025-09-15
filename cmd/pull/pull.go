@@ -3,6 +3,7 @@ package pull
 import (
 	"badgermaps/app"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -141,26 +142,67 @@ func pullCheckinsCmd(App *app.App) *cobra.Command {
 		Short: "Pull all checkins from BadgerMaps",
 		Long:  `Pull all checkins from the BadgerMaps API and store them in the local database.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			bar := progressbar.NewOptions(-1,
-				progressbar.OptionSetDescription("Pulling checkins..."),
-				progressbar.OptionSetWriter(os.Stderr),
-				progressbar.OptionSpinnerType(14),
-				progressbar.OptionEnableColorCodes(true),
-			)
-			defer bar.Close()
+			var bar *progressbar.ProgressBar
 
-			log := func(message string) {
-				if strings.Contains(message, "Finished") {
-					bar.Finish()
-					fmt.Println(color.GreenString(message))
-				} else if strings.Contains(message, "Error") {
-					bar.Clear()
-					fmt.Println(color.RedString(message))
-				} else {
-					bar.Describe(message)
+			pullListener := func(e app.Event) {
+				switch e.Type {
+				case app.PullStart:
+					if e.Source == "checkins" {
+						bar = progressbar.NewOptions(-1,
+							progressbar.OptionSetDescription("Pulling checkins..."),
+							progressbar.OptionSetWriter(os.Stderr),
+							progressbar.OptionSpinnerType(14),
+							progressbar.OptionEnableColorCodes(true),
+						)
+					}
+				case app.ResourceIDsFetched:
+					if e.Source == "checkins" {
+						count := e.Payload.(int)
+						if bar != nil {
+							bar.ChangeMax(count)
+							bar.Describe(fmt.Sprintf("Found %d accounts to pull checkins from.", count))
+						}
+					}
+				case app.AccountCheckinsPulled:
+					if e.Source == "checkins" {
+						if bar != nil {
+							bar.Add(1)
+						}
+					}
+				case app.PullError:
+					err := e.Payload.(error)
+					if bar != nil {
+						bar.Clear()
+					}
+					log.Printf(color.RedString("An error occurred during pull: %v"), err)
+				case app.PullComplete:
+					if e.Source == "checkins" {
+						if bar != nil {
+							bar.Finish()
+							fmt.Println(color.GreenString("✔ Pull for %s complete.", e.Source))
+						}
+					}
 				}
 			}
-			return app.PullAllCheckins(App, log)
+
+			// Subscribe the listener to all relevant events
+			App.Events.Subscribe(app.PullStart, pullListener)
+			App.Events.Subscribe(app.ResourceIDsFetched, pullListener)
+			App.Events.Subscribe(app.AccountCheckinsPulled, pullListener)
+			App.Events.Subscribe(app.PullError, pullListener)
+			App.Events.Subscribe(app.PullComplete, pullListener)
+
+			logWrapper := func(message string) {
+				if App.State.Verbose {
+					log.Println(message)
+				}
+			}
+
+			err := app.PullAllCheckins(App, logWrapper)
+			if bar != nil && !bar.IsFinished() {
+				bar.Finish()
+			}
+			return err
 		},
 	}
 	return cmd

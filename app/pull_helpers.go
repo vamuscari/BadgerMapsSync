@@ -150,13 +150,9 @@ func PullCheckin(a *App, checkinID int, log func(string)) error {
 func PullAllCheckins(a *App, log func(string)) error {
 	a.Events.Dispatch(Event{Type: PullStart, Source: "checkins"})
 
-	if err := PullAllAccounts(a, 0, log); err != nil {
-		return fmt.Errorf("error pulling accounts before checkins: %w", err)
-	}
-
-	accountIDs, err := database.GetAllAccountIDs(a.DB)
+	accountIDs, err := a.API.GetAccountIDs()
 	if err != nil {
-		err = fmt.Errorf("error getting account IDs from DB: %w", err)
+		err = fmt.Errorf("error getting account IDs: %w", err)
 		a.Events.Dispatch(Event{Type: PullError, Source: "checkins", Payload: err})
 		return err
 	}
@@ -209,6 +205,7 @@ func PullAllCheckins(a *App, log func(string)) error {
 					a.Events.Dispatch(Event{Type: StoreSuccess, Source: "checkins", Payload: checkin})
 				}
 			}
+			a.Events.Dispatch(Event{Type: AccountCheckinsPulled, Source: "checkins", Payload: accountID})
 		}(id, i)
 	}
 
@@ -223,12 +220,12 @@ func PullAllCheckins(a *App, log func(string)) error {
 	a.Events.Dispatch(Event{Type: PullComplete, Source: "checkins", Payload: len(pullErrors)})
 
 	if len(pullErrors) > 0 {
-		return fmt.Errorf("encountered errors during check-in pull:\n- %s", strings.Join(pullErrors, "\n- "))
-	}
+			return fmt.Errorf("encountered errors during check-in pull:\n- %s", strings.Join(pullErrors, "\n- "))
+		}
 
-	log("Successfully pulled all checkins")
-	return nil
-}
+		log("Finished pulling all checkins")
+		return nil
+	}
 
 func PullRoute(a *App, routeID int, log func(string)) error {
 	a.Events.Dispatch(Event{Type: PullStart, Source: "route"})

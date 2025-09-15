@@ -12,6 +12,7 @@ const (
 	StoreSuccess
 	PullError
 	PullComplete
+	AccountCheckinsPulled
 
 	// Push Events
 	PushScanStart
@@ -38,6 +39,7 @@ func (e EventType) String() string {
 		"StoreSuccess",
 		"PullError",
 		"PullComplete",
+		"AccountCheckinsPulled",
 		"PushScanStart",
 		"PushScanComplete",
 		"PushItemStart",
