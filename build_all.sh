@@ -27,7 +27,7 @@ mv fyne-cross/dist/linux-amd64/BadgerMapsSync.tar.xz build/BadgerMapsSync_linux_
 
 # Compile for Windows
 echo "Compiling for Windows..."
-fyne-cross windows -arch amd64 --app-id com.badgermapssync --app-build=1 -icon ./assets/icon.png
+fyne-cross windows -arch amd64 --app-id com.badgermapssync --app-build=1 -icon ./assets/icon.png -console
 mv fyne-cross/dist/windows-amd64/BadgerMapsSync.exe.zip build/BadgerMapsSync_windows_amd64.exe.zip
 
 rm -rf ./fyne-cross
