@@ -58,7 +58,7 @@ func pullAccountCmd(App *app.App) *cobra.Command {
 				}
 			}
 
-			err = app.RunPullAccount(App, accountID, log)
+			err = app.PullAccount(App, accountID, log)
 			if err != nil {
 				// Provide a cleaner error message to the user
 				fmt.Println(color.RedString("Error: Failed to pull account %d. The API returned an error.", accountID))
@@ -96,7 +96,7 @@ func pullAccountsCmd(App *app.App) *cobra.Command {
 					bar.Describe(message)
 				}
 			}
-			return app.RunPullAccounts(App, log)
+			return app.PullAllAccounts(App, 0, log)
 		},
 	}
 	return cmd
@@ -122,7 +122,7 @@ func pullCheckinCmd(App *app.App) *cobra.Command {
 					fmt.Println(color.CyanString(message))
 				}
 			}
-			err = app.RunPullCheckin(App, checkinID, log)
+			err = app.PullCheckin(App, checkinID, log)
 			if err != nil {
 				// Provide a cleaner error message to the user
 				fmt.Println(color.RedString("Error: Failed to pull check-in %d. The API returned an error.", checkinID))
@@ -160,7 +160,7 @@ func pullCheckinsCmd(App *app.App) *cobra.Command {
 					bar.Describe(message)
 				}
 			}
-			return app.RunPullCheckins(App, log)
+			return app.PullAllCheckins(App, log)
 		},
 	}
 	return cmd
@@ -186,7 +186,7 @@ func pullRouteCmd(App *app.App) *cobra.Command {
 					fmt.Println(color.CyanString(message))
 				}
 			}
-			err = app.RunPullRoute(App, routeID, log)
+			err = app.PullRoute(App, routeID, log)
 			if err != nil {
 				// Provide a cleaner error message to the user
 				fmt.Println(color.RedString("Error: Failed to pull route %d. The API returned an error.", routeID))
@@ -224,7 +224,7 @@ func pullRoutesCmd(App *app.App) *cobra.Command {
 					bar.Describe(message)
 				}
 			}
-			return app.RunPullRoutes(App, log)
+			return app.PullAllRoutes(App, log)
 		},
 	}
 	return cmd
@@ -245,7 +245,7 @@ func pullProfileCmd(App *app.App) *cobra.Command {
 					fmt.Println(color.CyanString(message))
 				}
 			}
-			return app.RunPullProfile(App, log)
+			return app.PullProfile(App, log)
 		},
 	}
 	return cmd
