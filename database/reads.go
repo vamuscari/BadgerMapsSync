@@ -6,9 +6,9 @@ import (
 )
 
 func GetAccountByID(db DB, accountID int) (*api.Account, error) {
-	sqlText := db.GetSQL("get_account_by_id")
+	sqlText := db.GetSQL("GetAccountById")
 	if sqlText == "" {
-		return nil, fmt.Errorf("unknown or unavailable SQL command: get_account_by_id")
+		return nil, fmt.Errorf("unknown or unavailable SQL command: GetAccountById")
 	}
 
 	sqlDB := db.GetDB()
@@ -42,9 +42,9 @@ func GetAccountByID(db DB, accountID int) (*api.Account, error) {
 }
 
 func GetCheckinByID(db DB, checkinID int) (*api.Checkin, error) {
-	sqlText := db.GetSQL("get_checkin_by_id")
+	sqlText := db.GetSQL("GetCheckinById")
 	if sqlText == "" {
-		return nil, fmt.Errorf("unknown or unavailable SQL command: get_checkin_by_id")
+		return nil, fmt.Errorf("unknown or unavailable SQL command: GetCheckinById")
 	}
 
 	sqlDB := db.GetDB()
@@ -61,9 +61,9 @@ func GetCheckinByID(db DB, checkinID int) (*api.Checkin, error) {
 }
 
 func GetRouteByID(db DB, routeID int) (*api.Route, error) {
-	sqlText := db.GetSQL("get_route_by_id")
+	sqlText := db.GetSQL("GetRouteById")
 	if sqlText == "" {
-		return nil, fmt.Errorf("unknown or unavailable SQL command: get_route_by_id")
+		return nil, fmt.Errorf("unknown or unavailable SQL command: GetRouteById")
 	}
 
 	sqlDB := db.GetDB()
@@ -80,9 +80,9 @@ func GetRouteByID(db DB, routeID int) (*api.Route, error) {
 }
 
 func GetProfile(db DB) (*api.UserProfile, error) {
-	sqlText := db.GetSQL("get_profile")
+	sqlText := db.GetSQL("GetProfile")
 	if sqlText == "" {
-		return nil, fmt.Errorf("unknown or unavailable SQL command: get_profile")
+		return nil, fmt.Errorf("unknown or unavailable SQL command: GetProfile")
 	}
 
 	sqlDB := db.GetDB()
@@ -103,9 +103,9 @@ func GetProfile(db DB) (*api.UserProfile, error) {
 }
 
 func GetAllAccountIDs(db DB) ([]int, error) {
-	sqlText := db.GetSQL("get_all_account_ids")
+	sqlText := db.GetSQL("GetAllAccountIds")
 	if sqlText == "" {
-		return nil, fmt.Errorf("unknown or unavailable SQL command: get_all_account_ids")
+		return nil, fmt.Errorf("unknown or unavailable SQL command: GetAllAccountIds")
 	}
 
 	sqlDB := db.GetDB()

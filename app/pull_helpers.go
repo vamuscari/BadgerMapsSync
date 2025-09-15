@@ -150,6 +150,10 @@ func PullCheckin(a *App, checkinID int, log func(string)) error {
 func PullAllCheckins(a *App, log func(string)) error {
 	a.Events.Dispatch(Event{Type: PullStart, Source: "checkins"})
 
+	if err := PullAllAccounts(a, 0, log); err != nil {
+		return fmt.Errorf("error pulling accounts before checkins: %w", err)
+	}
+
 	accountIDs, err := database.GetAllAccountIDs(a.DB)
 	if err != nil {
 		err = fmt.Errorf("error getting account IDs from DB: %w", err)
