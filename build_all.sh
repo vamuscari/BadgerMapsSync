@@ -15,19 +15,19 @@ rm -rf build/*
 # Compile for macOS
 # Build with Fyne instead of fyne-cross until bug fixed
 echo "Compiling for macOS..."
-fyne package -os darwin -name BadgerMapsSync --app-id com.badgermapssync --app-build=1 -release -icon ./assets/icon.png
+fyne package -os darwin -name BadgerMapsSync --app-id com.badgermapssync --app-build=1 -release -icon ./assets/icon.png -tags gui
 echo "Compressing macOS app..."
 zip -r BadgerMapsSync_macOS.zip BadgerMapsSync.app
 mv BadgerMapsSync_macOS.zip build/
 
 # Compile for Linux
 echo "Compiling for Linux..."
-fyne-cross linux -arch amd64 --app-id com.badgermapssync --app-build=1 -release -icon ./assets/icon.png
+fyne-cross linux -arch amd64 --app-id com.badgermapssync --app-build=1 -release -icon ./assets/icon.png -tags gui
 mv fyne-cross/dist/linux-amd64/BadgerMapsSync.tar.xz build/BadgerMapsSync_linux_amd64.tar.xz
 
 # Compile for Windows
 echo "Compiling for Windows..."
-fyne-cross windows -arch amd64 --app-id com.badgermapssync --app-build=1 -icon ./assets/icon.png -console
+fyne-cross windows -arch amd64 --app-id com.badgermapssync --app-build=1 -icon ./assets/icon.png -console -tags gui
 
 # Create a temporary directory for packaging
 echo "Packaging Windows build with DLL..."

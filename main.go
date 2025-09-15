@@ -13,7 +13,6 @@ import (
 	"badgermaps/cmd/test"
 	"badgermaps/cmd/version"
 	"badgermaps/database"
-	"badgermaps/gui"
 	"badgermaps/utils"
 
 	_ "embed"
@@ -48,7 +47,7 @@ It allows you to push and pull data, run in server mode, and perform various uti
 			App.EnsureConfig()
 		},
 		Run: func(cmd *cobra.Command, args []string) {
-			if guiFlag || len(args) == 0 {
+			if (guiFlag || len(args) == 0) && hasGUI {
 				runGUI()
 			} else {
 				cmd.Help()
@@ -103,14 +102,5 @@ func main() {
 		}
 		os.Exit(1)
 	}
-}
-
-func runGUI() {
-	// For the GUI, we need to ensure the basic configuration is loaded
-	// so the app can function. We can trigger the same logic Cobra uses.
-	App.EnsureConfig()
-
-	// Launch the Fyne GUI
-	gui.Launch(App, AppIcon)
 }
 
