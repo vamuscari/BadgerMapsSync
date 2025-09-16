@@ -13,6 +13,7 @@ import (
 	"badgermaps/cmd/test"
 	"badgermaps/cmd/version"
 	"badgermaps/database"
+	"badgermaps/gui"
 	"badgermaps/utils"
 
 	_ "embed"
@@ -44,11 +45,11 @@ It allows you to push and pull data, run in server mode, and perform various uti
 			if cmd.Name() == "version" || cmd.Name() == "help" {
 				return
 			}
-			App.EnsureConfig()
+			App.EnsureConfig(false)
 		},
 		Run: func(cmd *cobra.Command, args []string) {
-			if (guiFlag || len(args) == 0) && hasGUI {
-				runGUI()
+			if guiFlag && gui.Enabled {
+				gui.Run(App, AppIcon)
 			} else {
 				cmd.Help()
 			}
@@ -94,6 +95,13 @@ func main() {
 		defer App.DB.Close()
 	}
 
+	// If no command is specified, and the GUI is available, launch it.
+	if len(os.Args) == 1 && gui.Enabled {
+		gui.Run(App, AppIcon)
+		return // Exit after GUI closes
+	}
+
+	// Otherwise, run the command-line interface
 	rootCmd := createRootCmd()
 	if err := rootCmd.Execute(); err != nil {
 		if App.State.Debug {

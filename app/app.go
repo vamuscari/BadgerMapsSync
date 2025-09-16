@@ -213,7 +213,7 @@ func (a *App) TriggerEventAction(action string) error {
 	return nil
 }
 
-func (a *App) EnsureConfig() {
+func (a *App) EnsureConfig(isGui bool) {
 	if a.State.NoColor {
 		utils.InitColors(a.State)
 	}
@@ -236,11 +236,24 @@ func (a *App) EnsureConfig() {
 				if a.API.APIKey != "" {
 					apiKeyStatus = "set"
 				}
-			dbType := a.DB.GetType()
-			fmt.Println(utils.Colors.Cyan("Setup OK: DB_TYPE=%s, API_KEY=%s", dbType, apiKeyStatus))
+				dbType := a.DB.GetType()
+				fmt.Println(utils.Colors.Cyan("Setup OK: DB_TYPE=%s, API_KEY=%s", dbType, apiKeyStatus))
 			}
 			return
 		}
+	}
+
+	// If running in GUI mode and no config is found, just load the defaults and continue.
+	if isGui {
+		if a.State.Verbose || a.State.Debug {
+			fmt.Println(utils.Colors.Yellow("No configuration file found. Loading default settings for GUI."))
+		}
+		// LoadConfig with no path will initialize with defaults
+		if err := a.LoadConfig(); err != nil {
+			fmt.Println(utils.Colors.Red("Error loading default configuration: %v", err))
+			// In GUI mode, we might still want to continue with a broken config to allow fixing it.
+		}
+		return
 	}
 
 	if a.State.Verbose || a.State.Debug {

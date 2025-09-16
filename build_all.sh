@@ -1,7 +1,12 @@
 #!/bin/bash
 
 # This script cross-compiles the application for macOS, Linux, and Windows
-# using fyne-cross, and places the binaries in the build directory.
+# using the Fyne CLI, and places the binaries in the build directory.
+# It assumes you have the necessary cross-compilation toolchains installed.
+# For Windows: mingw-w64 (e.g., `brew install mingw-w64`)
+# For Linux: a Linux GCC toolchain (e.g., `brew install x86_64-unknown-linux-gnu`)
+
+export CGO_ENABLED=1
 
 # Exit on error
 set -e
@@ -9,48 +14,65 @@ set -e
 # Clean the build directory
 echo "Cleaning build directory..."
 rm -rf build/*
-
-# go build -o build/badgermaps
+rm -rf BadgerMapsSync.app BadgerMapsSync
 
 # Compile for macOS
-# Build with Fyne instead of fyne-cross until bug fixed
 echo "Compiling for macOS..."
-fyne package -os darwin -name BadgerMapsSync --app-id com.badgermapssync --app-build=1 -release -icon ./assets/icon.png -tags gui
+fyne package -os darwin -release
 echo "Compressing macOS app..."
-zip -r BadgerMapsSync_macOS.zip BadgerMapsSync.app
-mv BadgerMapsSync_macOS.zip build/
+zip -r build/BadgerMapsSync_macOS.zip BadgerMapsSync.app
+rm -rf BadgerMapsSync.app
 
 # Compile for Linux
-echo "Compiling for Linux..."
-fyne-cross linux -arch amd64 --app-id com.badgermapssync --app-build=1 -release -icon ./assets/icon.png -tags gui
-mv fyne-cross/dist/linux-amd64/BadgerMapsSync.tar.xz build/BadgerMapsSync_linux_amd64.tar.xz
+# NOTE: Requires a Linux cross-compiler like x86_64-unknown-linux-gnu
+# echo "Compiling for Linux..."
+# export GOOS=linux
+# export GOARCH=amd64
+# export CC=x86_64-elf-gcc
+# If your linux cross-compiler has a different name, set the CC env var.
+# export CC=x86_64-linux-gnu-gcc
+# fyne package -os linux -release
+# tar -cJf build/BadgerMapsSync_linux_amd64.tar.xz BadgerMapsSync
+# rm -rf BadgerMapsSync
+# unset GOOS
+# unset GOARCH
+# unset CC
 
 # Compile for Windows
+# NOTE: Requires a Windows cross-compiler like mingw-w64
 echo "Compiling for Windows..."
-fyne-cross windows -arch amd64 --app-id com.badgermapssync --app-build=1 -icon ./assets/icon.png -tags gui -ldflags '-H=windowsgui'
+export GOOS=windows
+export GOARCH=amd64
+export CC=x86_64-w64-mingw32-gcc
 
-# Create a temporary directory for packaging
+# Build the executable first with the correct linker flags
+go build -o BadgerMapsSync.exe -ldflags="-H windowsgui -s -w" -tags release
+
+# This command embeds the icon and metadata from FyneApp.toml into the .exe
+fyne package --os windows --executable BadgerMapsSync.exe -release
+
+# Create a temporary directory for packaging the final zip
 echo "Packaging Windows build with DLL..."
 TEMP_DIR="build/windows_temp"
 mkdir -p "$TEMP_DIR"
 
-# Unzip the original package
-unzip -q fyne-cross/dist/windows-amd64/BadgerMapsSync.exe.zip -d "$TEMP_DIR"
-
-# Copy the DLL if it exists
+# Copy the final executable and the DLL to the temp directory
+cp BadgerMapsSync.exe "$TEMP_DIR/"
 if [ -f "assets/opengl32.dll" ]; then
-    echo "Including opengl32.dll..."
-    cp "assets/opengl32.dll" "$TEMP_DIR/"
+  echo "Including opengl32.dll..."
+  cp "assets/opengl32.dll" "$TEMP_DIR/"
 else
-    echo "Warning: assets/opengl32.dll not found. Skipping."
+  echo "Warning: assets/opengl32.dll not found. Skipping."
 fi
 
-# Re-zip the contents from the temp directory
-(cd "$TEMP_DIR" && zip -q -r ../BadgerMapsSync_windows_amd64.exe.zip .)
+# Create the final zip file from the contents of the temp directory
+(cd "$TEMP_DIR" && zip -q -r ../BadgerMapsSync_windows_amd64.zip .)
 
-# Clean up the temporary directory
+# Clean up intermediate files
+rm -f BadgerMapsSync.exe
 rm -rf "$TEMP_DIR"
-
-rm -rf ./fyne-cross
+unset GOOS
+unset GOARCH
+unset CC
 
 echo "Build complete."

@@ -1,0 +1,6 @@
+[Details]
+  Icon = "assets/icon.png"
+  Name = "BadgerMapsSync"
+  ID = "com.badgermapssync"
+  Version = "1.0.0"
+  Build = 30
