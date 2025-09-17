@@ -9,6 +9,7 @@ type State struct {
 	NoColor    bool
 	ConfigFile *string
 	NoInput    bool
+	IsGui      bool
 
 	// Server configuration
 	ServerHost   string
@@ -16,7 +17,7 @@ type State struct {
 	TLSEnabled   bool
 	TLSCert      string
 	TLSKey       string
-	WebhookToken string
+	PIDFile      string
 }
 
 func NewState() *State {

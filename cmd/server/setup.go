@@ -42,7 +42,5 @@ func interactiveServerSetup(a *app.App) error {
 		a.State.TLSKey = utils.PromptString(reader, "TLS Key File", a.State.TLSKey)
 	}
 
-	a.State.WebhookToken = utils.PromptString(reader, "Webhook Secret", a.State.WebhookToken)
-
 	return a.SaveConfig()
 }

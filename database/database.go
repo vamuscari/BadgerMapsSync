@@ -50,8 +50,8 @@ type DB interface {
 	ProcedureExists(procedureName string) (bool, error)
 	TriggerExists(triggerName string) (bool, error)
 	GetTableColumns(tableName string) ([]string, error)
-	ValidateSchema() error
-	EnforceSchema() error
+	ValidateSchema(s *state.State) error
+	EnforceSchema(s *state.State) error
 	TestConnection() error
 	DropAllTables() error
 	Connect() error
@@ -65,9 +65,8 @@ type DB interface {
 
 // SQLiteConfig represents a SQLite database configuration
 type SQLiteConfig struct {
-	state *state.State
-	db    *sql.DB
-	Path  string `mapstructure:"DB_PATH"`
+	db   *sql.DB
+	Path string `mapstructure:"DB_PATH"`
 }
 
 func (db *SQLiteConfig) GetSQL(command string) string {
@@ -125,7 +124,7 @@ func (db *SQLiteConfig) GetTableColumns(tableName string) ([]string, error) {
 	return columns, nil
 }
 
-func (db *SQLiteConfig) EnforceSchema() error {
+func (db *SQLiteConfig) EnforceSchema(s *state.State) error {
 	if err := db.DropAllTables(); err != nil {
 		return err
 	}
@@ -133,83 +132,76 @@ func (db *SQLiteConfig) EnforceSchema() error {
 	sqlDB := db.GetDB()
 
 	for _, tableName := range RequiredTables() {
-		if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+		if (s.Verbose || s.Debug) && !s.Quiet {
 			fmt.Printf("Creating table: %s... ", tableName)
 		}
 		createCmd := CreateCommandForTable(tableName)
 		sqlText := db.GetSQL(createCmd)
 		if sqlText == "" {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
-			err := fmt.Errorf("failed to load SQL command '%s' for database type '%s'", createCmd, db.GetType())
-			if db.state.Debug {
-				fmt.Fprintf(os.Stderr, "DEBUG: %v\n", err)
-			}
-			return err
+			return fmt.Errorf("failed to load SQL command '%s' for database type '%s'", createCmd, db.GetType())
 		}
 		if _, err := sqlDB.Exec(sqlText); err != nil {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
-			}
-			if db.state.Debug {
-				fmt.Fprintf(os.Stderr, "DEBUG: SQL execution error for table %s: %v\n", tableName, err)
 			}
 			return fmt.Errorf("failed to create table %s: %w", tableName, err)
 		}
-		if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+		if (s.Verbose || s.Debug) && !s.Quiet {
 			fmt.Println(color.GreenString("OK"))
 		}
 	}
 
 	// Insert initial data for FieldMaps
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Inserting initial data for FieldMaps... ")
 	}
 	sqlText := db.GetSQL("InsertFieldMaps")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
 			return fmt.Errorf("failed to insert initial data for FieldMaps: %w", err)
 		}
 	}
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
 	// Insert initial data for Configurations
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Inserting initial data for Configurations... ")
 	}
 	sqlText = db.GetSQL("InsertConfigurations")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
 			return fmt.Errorf("failed to insert initial data for Configurations: %w", err)
 		}
 	}
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
 	// Create view
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Creating view: AccountsWithLabels... ")
 	}
 	sqlText = db.GetSQL("CreateAccountsWithLabelsView")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
 			return fmt.Errorf("failed to create view AccountsWithLabels: %w", err)
 		}
 	}
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
@@ -220,29 +212,26 @@ func (db *SQLiteConfig) TestConnection() error {
 	return db.GetDB().Ping()
 }
 
-func (db *SQLiteConfig) ValidateSchema() error {
+func (db *SQLiteConfig) ValidateSchema(s *state.State) error {
 	expectedSchema := GetExpectedSchema()
 	for _, tableName := range RequiredTables() {
-		if db.state.Verbose && !db.state.Quiet {
+		if s.Verbose && !s.Quiet {
 			fmt.Printf("Checking table: %s... ", tableName)
 		}
 		exists, err := db.TableExists(tableName)
 		if err != nil {
-			if db.state.Verbose && !db.state.Quiet {
+			if s.Verbose && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
-			}
-			if db.state.Debug {
-				fmt.Printf("ValidateSchema error: %v\n", err)
 			}
 			return fmt.Errorf("error checking if table %s exists: %w", tableName, err)
 		}
 		if !exists {
-			if db.state.Verbose && !db.state.Quiet {
+			if s.Verbose && !s.Quiet {
 				fmt.Println(color.RedString("MISSING"))
 			}
 			return fmt.Errorf("required table %s does not exist", tableName)
 		}
-		if db.state.Verbose && !db.state.Quiet {
+		if s.Verbose && !s.Quiet {
 			fmt.Println(color.GreenString("OK"))
 		}
 
@@ -266,26 +255,23 @@ func (db *SQLiteConfig) ValidateSchema() error {
 		}
 	}
 
-	if db.state.Verbose && !db.state.Quiet {
+	if s.Verbose && !s.Quiet {
 		fmt.Printf("Checking view: AccountsWithLabels... ")
 	}
 	exists, err := db.ViewExists("AccountsWithLabels")
 	if err != nil {
-		if db.state.Verbose && !db.state.Quiet {
+		if s.Verbose && !s.Quiet {
 			fmt.Println(color.RedString("ERROR"))
-		}
-		if db.state.Debug {
-			fmt.Printf("ValidateSchema error: %v\n", err)
 		}
 		return fmt.Errorf("error checking if view AccountsWithLabels exists: %w", err)
 	}
 	if !exists {
-		if db.state.Verbose && !db.state.Quiet {
+		if s.Verbose && !s.Quiet {
 			fmt.Println(color.RedString("MISSING"))
 		}
 		return fmt.Errorf("required view AccountsWithLabels does not exist")
 	}
-	if db.state.Verbose && !db.state.Quiet {
+	if s.Verbose && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
@@ -298,9 +284,6 @@ func (db *SQLiteConfig) TableExists(tableName string) (bool, error) {
 	var count int
 	err := sqlDB.QueryRow(query, tableName).Scan(&count)
 	if err != nil {
-		if db.state.Debug {
-			fmt.Printf("TableExists error: %v\n", err)
-		}
 		return false, err
 	}
 	return count > 0, nil
@@ -312,9 +295,6 @@ func (db *SQLiteConfig) ViewExists(viewName string) (bool, error) {
 	var count int
 	err := sqlDB.QueryRow(query, viewName).Scan(&count)
 	if err != nil {
-		if db.state.Debug {
-			fmt.Printf("ViewExists error: %v\n", err)
-		}
 		return false, err
 	}
 	return count > 0, nil
@@ -369,9 +349,6 @@ func (db *SQLiteConfig) DropAllTables() error {
 
 func (db *SQLiteConfig) RunFunction(functionName string) error {
 	// SQLite does not have stored procedures, so we'll just log a message
-	if db.state.Verbose || db.state.Debug {
-		fmt.Printf("SQLite does not support stored procedures. Function '%s' was not executed.\n", functionName)
-	}
 	return nil
 }
 
@@ -399,7 +376,6 @@ func (db *SQLiteConfig) ExecuteQuery(query string) (*sql.Rows, error) {
 
 // PostgreSQLConfig represents a PostgreSQL database configuration
 type PostgreSQLConfig struct {
-	state    *state.State
 	db       *sql.DB
 	Host     string `mapstructure:"DB_HOST"`
 	Port     int    `mapstructure:"DB_PORT"`
@@ -459,152 +435,145 @@ func (db *PostgreSQLConfig) GetTableColumns(tableName string) ([]string, error) 
 	return columns, nil
 }
 
-func (db *PostgreSQLConfig) EnforceSchema() error {
+func (db *PostgreSQLConfig) EnforceSchema(s *state.State) error {
 	sqlDB := db.GetDB()
 
 	for _, tableName := range RequiredTables() {
-		if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+		if (s.Verbose || s.Debug) && !s.Quiet {
 			fmt.Printf("Creating table: %s... ", tableName)
 		}
 		createCmd := CreateCommandForTable(tableName)
 		sqlText := db.GetSQL(createCmd)
 		if sqlText == "" {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
-			err := fmt.Errorf("failed to load SQL command '%s' for database type '%s'", createCmd, db.GetType())
-			if db.state.Debug {
-				fmt.Fprintf(os.Stderr, "DEBUG: %v\n", err)
-			}
-			return err
+			return fmt.Errorf("failed to load SQL command '%s' for database type '%s'", createCmd, db.GetType())
 		}
 		if _, err := sqlDB.Exec(sqlText); err != nil {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
-			}
-			if db.state.Debug {
-				fmt.Fprintf(os.Stderr, "DEBUG: SQL execution error for table %s: %v\n", tableName, err)
 			}
 			return fmt.Errorf("failed to create table %s: %w", tableName, err)
 		}
-		if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+		if (s.Verbose || s.Debug) && !s.Quiet {
 			fmt.Println(color.GreenString("OK"))
 		}
 	}
 
 	// Insert initial data for FieldMaps
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Inserting initial data for FieldMaps... ")
 	}
 	sqlText := db.GetSQL("InsertFieldMaps")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
 			return fmt.Errorf("failed to insert initial data for FieldMaps: %w", err)
 		}
 	}
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
 	// Insert initial data for Configurations
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Inserting initial data for Configurations... ")
 	}
 	sqlText = db.GetSQL("InsertConfigurations")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
 			return fmt.Errorf("failed to insert initial data for Configurations: %w", err)
 		}
 	}
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
 	// Create function
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Creating function: AccountsWithLabelsView... ")
 	}
 	sqlText = db.GetSQL("CreateAccountsWithLabelsView")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
 			return fmt.Errorf("failed to create function AccountsWithLabelsView: %w", err)
 		}
 	}
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
 	// Call function to create view
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Creating view: AccountsWithLabels... ")
 	}
 	if _, err := db.GetDB().Exec("SELECT AccountsWithLabelsView()"); err != nil {
-		if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+		if (s.Verbose || s.Debug) && !s.Quiet {
 			fmt.Println(color.RedString("ERROR"))
 		}
 		return fmt.Errorf("failed to execute AccountsWithLabelsView function: %w", err)
 	}
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
 	// Create trigger
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Creating trigger: datasets_update_trigger... ")
 	}
 	sqlText = db.GetSQL("CreateDatasetsUpdateTrigger")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
 			return fmt.Errorf("failed to create trigger datasets_update_trigger: %w", err)
 		}
 	}
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
 	// Create function to update field mappings
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Creating function: UpdateFieldMapsFromDatasets... ")
 	}
 	sqlText = db.GetSQL("UpdateFieldMapsFromDatasets")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
 			return fmt.Errorf("failed to create function UpdateFieldMapsFromDatasets: %w", err)
 		}
 	}
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
 	// Create trigger to update field mappings
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Creating trigger: DatasetsFieldMapsUpdateTrigger... ")
 	}
 	sqlText = db.GetSQL("CreateFieldMapsUpdateTrigger")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
 			return fmt.Errorf("failed to create trigger DatasetsFieldMapsUpdateTrigger: %w", err)
 		}
 	}
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
@@ -613,29 +582,26 @@ func (db *PostgreSQLConfig) EnforceSchema() error {
 func (db *PostgreSQLConfig) TestConnection() error {
 	return db.GetDB().Ping()
 }
-func (db *PostgreSQLConfig) ValidateSchema() error {
+func (db *PostgreSQLConfig) ValidateSchema(s *state.State) error {
 	expectedSchema := GetExpectedSchema()
 	for _, tableName := range RequiredTables() {
-		if db.state.Verbose && !db.state.Quiet {
+		if s.Verbose && !s.Quiet {
 			fmt.Printf("Checking table: %s... ", tableName)
 		}
 		exists, err := db.TableExists(tableName)
 		if err != nil {
-			if db.state.Verbose && !db.state.Quiet {
+			if s.Verbose && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
-			}
-			if db.state.Debug {
-				fmt.Printf("ValidateSchema error: %v\n", err)
 			}
 			return fmt.Errorf("error checking if table %s exists: %w", tableName, err)
 		}
 		if !exists {
-			if db.state.Verbose && !db.state.Quiet {
+			if s.Verbose && !s.Quiet {
 				fmt.Println(color.RedString("MISSING"))
 			}
 			return fmt.Errorf("required table %s does not exist", tableName)
 		}
-		if db.state.Verbose && !db.state.Quiet {
+		if s.Verbose && !s.Quiet {
 			fmt.Println(color.GreenString("OK"))
 		}
 
@@ -659,72 +625,63 @@ func (db *PostgreSQLConfig) ValidateSchema() error {
 		}
 	}
 
-	if db.state.Verbose && !db.state.Quiet {
+	if s.Verbose && !s.Quiet {
 		fmt.Printf("Checking view: AccountsWithLabels... ")
 	}
 	viewExists, err := db.ViewExists("AccountsWithLabels")
 	if err != nil {
-		if db.state.Verbose && !db.state.Quiet {
+		if s.Verbose && !s.Quiet {
 			fmt.Println(color.RedString("ERROR"))
-		}
-		if db.state.Debug {
-			fmt.Printf("ValidateSchema error: %v\n", err)
 		}
 		return fmt.Errorf("error checking if view AccountsWithLabels exists: %w", err)
 	}
 	if !viewExists {
-		if db.state.Verbose && !db.state.Quiet {
+		if s.Verbose && !s.Quiet {
 			fmt.Println(color.RedString("MISSING"))
 		}
 		return fmt.Errorf("required view AccountsWithLabels does not exist")
 	}
-	if db.state.Verbose && !db.state.Quiet {
+	if s.Verbose && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
-	if db.state.Verbose && !db.state.Quiet {
+	if s.Verbose && !s.Quiet {
 		fmt.Printf("Checking function: UpdateFieldMapsFromDatasets... ")
 	}
 	procExists, err := db.ProcedureExists("UpdateFieldMapsFromDatasets")
 	if err != nil {
-		if db.state.Verbose && !db.state.Quiet {
+		if s.Verbose && !s.Quiet {
 			fmt.Println(color.RedString("ERROR"))
-		}
-		if db.state.Debug {
-			fmt.Printf("ValidateSchema error: %v\n", err)
 		}
 		return fmt.Errorf("error checking if function UpdateFieldMapsFromDatasets exists: %w", err)
 	}
 	if !procExists {
-		if db.state.Verbose && !db.state.Quiet {
+		if s.Verbose && !s.Quiet {
 			fmt.Println(color.RedString("MISSING"))
 		}
 		return fmt.Errorf("required function UpdateFieldMapsFromDatasets does not exist")
 	}
-	if db.state.Verbose && !db.state.Quiet {
+	if s.Verbose && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
-	if db.state.Verbose && !db.state.Quiet {
+	if s.Verbose && !s.Quiet {
 		fmt.Printf("Checking trigger: DatasetsUpdateTrigger... ")
 	}
 	triggerExists, err := db.TriggerExists("DatasetsUpdateTrigger")
 	if err != nil {
-		if db.state.Verbose && !db.state.Quiet {
+		if s.Verbose && !s.Quiet {
 			fmt.Println(color.RedString("ERROR"))
-		}
-		if db.state.Debug {
-			fmt.Printf("ValidateSchema error: %v\n", err)
 		}
 		return fmt.Errorf("error checking if trigger DatasetsUpdateTrigger exists: %w", err)
 	}
 	if !triggerExists {
-		if db.state.Verbose && !db.state.Quiet {
+		if s.Verbose && !s.Quiet {
 			fmt.Println(color.RedString("MISSING"))
 		}
 		return fmt.Errorf("required trigger DatasetsUpdateTrigger does not exist")
 	}
-	if db.state.Verbose && !db.state.Quiet {
+	if s.Verbose && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
@@ -736,9 +693,6 @@ func (db *PostgreSQLConfig) TableExists(tableName string) (bool, error) {
 	var count int
 	err := sqlDB.QueryRow(query, tableName).Scan(&count)
 	if err != nil {
-		if db.state.Debug {
-			fmt.Printf("TableExists error: %v\n", err)
-		}
 		return false, err
 	}
 	return count > 0, nil
@@ -750,9 +704,6 @@ func (db *PostgreSQLConfig) ViewExists(viewName string) (bool, error) {
 	var count int
 	err := sqlDB.QueryRow(query, viewName).Scan(&count)
 	if err != nil {
-		if db.state.Debug {
-			fmt.Printf("ViewExists error: %v\n", err)
-		}
 		return false, err
 	}
 	return count > 0, nil
@@ -764,9 +715,6 @@ func (db *PostgreSQLConfig) ProcedureExists(procedureName string) (bool, error) 
 	var count int
 	err := sqlDB.QueryRow(query, procedureName).Scan(&count)
 	if err != nil {
-		if db.state.Debug {
-			fmt.Printf("ProcedureExists error: %v\n", err)
-		}
 		return false, err
 	}
 	return count > 0, nil
@@ -778,9 +726,6 @@ func (db *PostgreSQLConfig) TriggerExists(triggerName string) (bool, error) {
 	var count int
 	err := sqlDB.QueryRow(query, triggerName).Scan(&count)
 	if err != nil {
-		if db.state.Debug {
-			fmt.Printf("TriggerExists error: %v\n", err)
-		}
 		return false, err
 	}
 	return count > 0, nil
@@ -877,7 +822,6 @@ func (db *PostgreSQLConfig) ExecuteQuery(query string) (*sql.Rows, error) {
 
 // MSSQLConfig represents a Microsoft SQL Server database configuration
 type MSSQLConfig struct {
-	state    *state.State
 	db       *sql.DB
 	Host     string `mapstructure:"DB_HOST"`
 	Port     int    `mapstructure:"DB_PORT"`
@@ -936,152 +880,145 @@ func (db *MSSQLConfig) GetTableColumns(tableName string) ([]string, error) {
 	return columns, nil
 }
 
-func (db *MSSQLConfig) EnforceSchema() error {
+func (db *MSSQLConfig) EnforceSchema(s *state.State) error {
 	sqlDB := db.GetDB()
 
 	for _, tableName := range RequiredTables() {
-		if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+		if (s.Verbose || s.Debug) && !s.Quiet {
 			fmt.Printf("Creating table: %s... ", tableName)
 		}
 		createCmd := CreateCommandForTable(tableName)
 		sqlText := db.GetSQL(createCmd)
 		if sqlText == "" {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
-			err := fmt.Errorf("failed to load SQL command '%s' for database type '%s'", createCmd, db.GetType())
-			if db.state.Debug {
-				fmt.Fprintf(os.Stderr, "DEBUG: %v\n", err)
-			}
-			return err
+			return fmt.Errorf("failed to load SQL command '%s' for database type '%s'", createCmd, db.GetType())
 		}
 		if _, err := sqlDB.Exec(sqlText); err != nil {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
-			}
-			if db.state.Debug {
-				fmt.Fprintf(os.Stderr, "DEBUG: SQL execution error for table %s: %v\n", tableName, err)
 			}
 			return fmt.Errorf("failed to create table %s: %w", tableName, err)
 		}
-		if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+		if (s.Verbose || s.Debug) && !s.Quiet {
 			fmt.Println(color.GreenString("OK"))
 		}
 	}
 
 	// Insert initial data for FieldMaps
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Inserting initial data for FieldMaps... ")
 	}
 	sqlText := db.GetSQL("InsertFieldMaps")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
 			return fmt.Errorf("failed to insert initial data for FieldMaps: %w", err)
 		}
 	}
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
 	// Insert initial data for Configurations
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Inserting initial data for Configurations... ")
 	}
 	sqlText = db.GetSQL("InsertConfigurations")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
 			return fmt.Errorf("failed to insert initial data for Configurations: %w", err)
 		}
 	}
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
 	// Create procedure
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Creating procedure: AccountsWithLabelsView... ")
 	}
 	sqlText = db.GetSQL("CreateAccountsWithLabelsView")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
 			return fmt.Errorf("failed to create procedure AccountsWithLabelsView: %w", err)
 		}
 	}
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
 	// Call procedure to create view
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Creating view: AccountsWithLabels... ")
 	}
 	if _, err := db.GetDB().Exec("EXEC AccountsWithLabelsView"); err != nil {
-		if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+		if (s.Verbose || s.Debug) && !s.Quiet {
 			fmt.Println(color.RedString("ERROR"))
 		}
 		return fmt.Errorf("failed to execute AccountsWithLabelsView procedure: %w", err)
 	}
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
 	// Create trigger
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Creating trigger: datasets_update_trigger... ")
 	}
 	sqlText = db.GetSQL("CreateDatasetsUpdateTrigger")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
 			return fmt.Errorf("failed to create trigger datasets_update_trigger: %w", err)
 		}
 	}
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
 	// Create procedure to update field maps
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Creating procedure: update_field_maps_from_datasets... ")
 	}
 	sqlText = db.GetSQL("UpdateFieldMapsFromDatasets")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
 			return fmt.Errorf("failed to create procedure update_field_maps_from_datasets: %w", err)
 		}
 	}
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
 	// Create trigger to update field maps
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Creating trigger: datasets_field_maps_update_trigger... ")
 	}
 	sqlText = db.GetSQL("CreateFieldMapsUpdateTrigger")
 	if sqlText != "" {
 		if _, err := db.GetDB().Exec(sqlText); err != nil {
-			if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
 			return fmt.Errorf("failed to create trigger datasets_field_maps_update_trigger: %w", err)
 		}
 	}
-	if (db.state.Verbose || db.state.Debug) && !db.state.Quiet {
+	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
@@ -1090,29 +1027,26 @@ func (db *MSSQLConfig) EnforceSchema() error {
 func (db *MSSQLConfig) TestConnection() error {
 	return db.GetDB().Ping()
 }
-func (db *MSSQLConfig) ValidateSchema() error {
+func (db *MSSQLConfig) ValidateSchema(s *state.State) error {
 	expectedSchema := GetExpectedSchema()
 	for _, tableName := range RequiredTables() {
-		if db.state.Verbose && !db.state.Quiet {
+		if s.Verbose && !s.Quiet {
 			fmt.Printf("Checking table: %s... ", tableName)
 		}
 		exists, err := db.TableExists(tableName)
 		if err != nil {
-			if db.state.Verbose && !db.state.Quiet {
+			if s.Verbose && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
-			}
-			if db.state.Debug {
-				fmt.Printf("ValidateSchema error: %v\n", err)
 			}
 			return fmt.Errorf("error checking if table %s exists: %w", tableName, err)
 		}
 		if !exists {
-			if db.state.Verbose && !db.state.Quiet {
+			if s.Verbose && !s.Quiet {
 				fmt.Println(color.RedString("MISSING"))
 			}
 			return fmt.Errorf("required table %s does not exist", tableName)
 		}
-		if db.state.Verbose && !db.state.Quiet {
+		if s.Verbose && !s.Quiet {
 			fmt.Println(color.GreenString("OK"))
 		}
 
@@ -1136,72 +1070,63 @@ func (db *MSSQLConfig) ValidateSchema() error {
 		}
 	}
 
-	if db.state.Verbose && !db.state.Quiet {
+	if s.Verbose && !s.Quiet {
 		fmt.Printf("Checking view: AccountsWithLabels... ")
 	}
 	viewExists, err := db.ViewExists("AccountsWithLabels")
 	if err != nil {
-		if db.state.Verbose && !db.state.Quiet {
+		if s.Verbose && !s.Quiet {
 			fmt.Println(color.RedString("ERROR"))
-		}
-		if db.state.Debug {
-			fmt.Printf("ValidateSchema error: %v\n", err)
 		}
 		return fmt.Errorf("error checking if view AccountsWithLabels exists: %w", err)
 	}
 	if !viewExists {
-		if db.state.Verbose && !db.state.Quiet {
+		if s.Verbose && !s.Quiet {
 			fmt.Println(color.RedString("MISSING"))
 		}
 		return fmt.Errorf("required view AccountsWithLabels does not exist")
 	}
-	if db.state.Verbose && !db.state.Quiet {
+	if s.Verbose && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
-	if db.state.Verbose && !db.state.Quiet {
+	if s.Verbose && !s.Quiet {
 		fmt.Printf("Checking procedure: UpdateFieldMapsFromDatasets... ")
 	}
 	procExists, err := db.ProcedureExists("UpdateFieldMapsFromDatasets")
 	if err != nil {
-		if db.state.Verbose && !db.state.Quiet {
+		if s.Verbose && !s.Quiet {
 			fmt.Println(color.RedString("ERROR"))
-		}
-		if db.state.Debug {
-			fmt.Printf("ValidateSchema error: %v\n", err)
 		}
 		return fmt.Errorf("error checking if procedure UpdateFieldMapsFromDatasets exists: %w", err)
 	}
 	if !procExists {
-		if db.state.Verbose && !db.state.Quiet {
+		if s.Verbose && !s.Quiet {
 			fmt.Println(color.RedString("MISSING"))
 		}
 		return fmt.Errorf("required procedure UpdateFieldMapsFromDatasets does not exist")
 	}
-	if db.state.Verbose && !db.state.Quiet {
+	if s.Verbose && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
-	if db.state.Verbose && !db.state.Quiet {
+	if s.Verbose && !s.Quiet {
 		fmt.Printf("Checking trigger: DatasetsUpdateTrigger... ")
 	}
 	triggerExists, err := db.TriggerExists("DatasetsUpdateTrigger")
 	if err != nil {
-		if db.state.Verbose && !db.state.Quiet {
+		if s.Verbose && !s.Quiet {
 			fmt.Println(color.RedString("ERROR"))
-		}
-		if db.state.Debug {
-			fmt.Printf("ValidateSchema error: %v\n", err)
 		}
 		return fmt.Errorf("error checking if trigger DatasetsUpdateTrigger exists: %w", err)
 	}
 	if !triggerExists {
-		if db.state.Verbose && !db.state.Quiet {
+		if s.Verbose && !s.Quiet {
 			fmt.Println(color.RedString("MISSING"))
 		}
 		return fmt.Errorf("required trigger DatasetsUpdateTrigger does not exist")
 	}
-	if db.state.Verbose && !db.state.Quiet {
+	if s.Verbose && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
 	}
 
@@ -1210,20 +1135,11 @@ func (db *MSSQLConfig) ValidateSchema() error {
 func (db *MSSQLConfig) TableExists(tableName string) (bool, error) {
 	sqlDB := db.GetDB()
 	query := db.GetSQL("CheckTableExists")
-	if db.state.Debug {
-		fmt.Printf("DEBUG: Executing query: %s with arg: %s\n", query, tableName)
-	}
 	var count int
 	err := sqlDB.QueryRow(query, tableName).Scan(&count)
 
 	if err != nil {
-		if db.state.Debug {
-			fmt.Printf("DEBUG: TableExists SQL ERROR: %v\n", err)
-		}
 		return false, err
-	}
-	if db.state.Debug {
-		fmt.Printf("DEBUG: TableExists count for %s: %d\n", tableName, count)
 	}
 	return count > 0, nil
 }
@@ -1234,9 +1150,6 @@ func (db *MSSQLConfig) ViewExists(viewName string) (bool, error) {
 	var count int
 	err := sqlDB.QueryRow(query, viewName).Scan(&count)
 	if err != nil {
-		if db.state.Debug {
-			fmt.Printf("ViewExists error: %v\n", err)
-		}
 		return false, err
 	}
 	return count > 0, nil
@@ -1248,9 +1161,6 @@ func (db *MSSQLConfig) ProcedureExists(procedureName string) (bool, error) {
 	var count int
 	err := sqlDB.QueryRow(query, procedureName).Scan(&count)
 	if err != nil {
-		if db.state.Debug {
-			fmt.Printf("ProcedureExists error: %v\n", err)
-		}
 		return false, err
 	}
 	return count > 0, nil
@@ -1262,9 +1172,6 @@ func (db *MSSQLConfig) TriggerExists(triggerName string) (bool, error) {
 	var count int
 	err := sqlDB.QueryRow(query, triggerName).Scan(&count)
 	if err != nil {
-		if db.state.Debug {
-			fmt.Printf("TriggerExists error: %v\n", err)
-		}
 		return false, err
 	}
 	return count > 0, nil
@@ -1384,27 +1291,21 @@ func (db *MSSQLConfig) ExecuteQuery(query string) (*sql.Rows, error) {
 }
 
 // NewDBFromConfig creates a new DB instance from a config struct.
-func NewDB(config *DBConfig, s *state.State) (DB, error) {
+func NewDB(config *DBConfig) (DB, error) {
 	var db DB
 	switch config.Type {
 	case "sqlite3":
-		db = &SQLiteConfig{
-			state: s,
-		}
+		db = &SQLiteConfig{}
 	case "postgres":
 		db = &PostgreSQLConfig{
-			state: s,
-			Port:  5432,
+			Port: 5432,
 		}
 	case "mssql":
 		db = &MSSQLConfig{
-			state: s,
-			Port:  1433,
+			Port: 1433,
 		}
 	default:
-		db = &SQLiteConfig{
-			state: s,
-		}
+		db = &SQLiteConfig{}
 	}
 
 	db.LoadConfig(config)
@@ -1538,4 +1439,3 @@ func GetExpectedSchema() map[string][]string {
 		},
 	}
 }
-

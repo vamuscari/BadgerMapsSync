@@ -1,6 +1,7 @@
-package app
+package push
 
 import (
+	"badgermaps/app"
 	"badgermaps/database"
 	"fmt"
 	"sort"
@@ -18,7 +19,7 @@ type PushFilterOptions struct {
 }
 
 // GetFilteredPendingChanges retrieves pending account or check-in changes based on the provided filters.
-func GetFilteredPendingChanges(a *App, entityType string, options PushFilterOptions) (interface{}, error) {
+func GetFilteredPendingChanges(a *app.App, entityType string, options PushFilterOptions) (interface{}, error) {
 	var accountChanges []database.AccountPendingChange
 	var checkinChanges []database.CheckinPendingChange
 	var err error
@@ -147,3 +148,4 @@ func filterAndSortCheckinChanges(changes []database.CheckinPendingChange, option
 func isSameDay(t1, t2 time.Time) bool {
 	return t1.Year() == t2.Year() && t1.Month() == t2.Month() && t1.Day() == t2.Day()
 }
+

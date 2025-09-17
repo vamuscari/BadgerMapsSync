@@ -2,6 +2,8 @@ package pull
 
 import (
 	"badgermaps/app"
+	"badgermaps/app/pull"
+	"badgermaps/events"
 	"fmt"
 	"log"
 	"os"
@@ -33,32 +35,32 @@ func PullAllCmd(a *app.App) *cobra.Command {
 func runPullAll(a *app.App, top int) {
 	log.SetOutput(os.Stderr) // Configure logger to write to stderr
 
-	pullListener := func(e app.Event) {
+	pullListener := func(e events.Event) {
 		switch e.Type {
-		case app.PullAllStart:
+		case events.PullAllStart:
 			bar = progressbar.NewOptions(-1,
 				progressbar.OptionSetDescription(fmt.Sprintf("Starting pull for %s...", e.Source)),
 				progressbar.OptionSetWriter(os.Stderr),
 				progressbar.OptionSpinnerType(14),
 				progressbar.OptionEnableColorCodes(true),
 			)
-		case app.ResourceIDsFetched:
+		case events.ResourceIDsFetched:
 			count := e.Payload.(int)
 			if bar != nil {
 				bar.ChangeMax(count)
 				bar.Describe(fmt.Sprintf("Found %d %s to pull.", count, e.Source))
 			}
-		case app.StoreSuccess:
+		case events.StoreSuccess:
 			if bar != nil {
 				bar.Add(1)
 			}
-		case app.PullAllError:
+		case events.PullAllError:
 			err := e.Payload.(error)
 			if bar != nil {
 				bar.Clear()
 			}
 			log.Printf(color.RedString("An error occurred during pull: %v"), err)
-		case app.PullAllComplete:
+		case events.PullAllComplete:
 			if bar != nil {
 				bar.Finish()
 				fmt.Println(color.GreenString("✔ Pull for %s complete.", e.Source))
@@ -67,32 +69,34 @@ func runPullAll(a *app.App, top int) {
 	}
 
 	// Subscribe the listener to all relevant events
-	a.Events.Subscribe(app.PullAllStart, pullListener)
-	a.Events.Subscribe(app.ResourceIDsFetched, pullListener)
-	a.Events.Subscribe(app.StoreSuccess, pullListener)
-	a.Events.Subscribe(app.PullAllError, pullListener)
-	a.Events.Subscribe(app.PullAllComplete, pullListener)
+	a.Events.Subscribe(events.PullAllStart, pullListener)
+	a.Events.Subscribe(events.ResourceIDsFetched, pullListener)
+	a.Events.Subscribe(events.StoreSuccess, pullListener)
+	a.Events.Subscribe(events.PullAllError, pullListener)
+	a.Events.Subscribe(events.PullAllComplete, pullListener)
 
 	// --- Execute Pull Operations ---
-	log.Println(color.CyanString("Starting data pull from BadgerMaps API..."))
+	a.Events.Dispatch(events.Infof("pull", "Starting data pull from BadgerMaps API..."))
 
-	logWrapper := func(message string) {
-		log.Println(message)
+	if err := pull.PullAllAccounts(a, top, nil); err != nil {
+		a.Events.Dispatch(events.Errorf("pull", "Failed to pull accounts: %v", err))
+		os.Exit(1)
 	}
 
-	if err := app.PullAllAccounts(a, top, logWrapper); err != nil {
-		log.Fatalf(color.RedString("Failed to pull accounts: %v", err))
+	if err := pull.PullAllCheckins(a, nil); err != nil {
+		a.Events.Dispatch(events.Errorf("pull", "Failed to pull checkins: %v", err))
+		os.Exit(1)
 	}
 
-	// Note: PullAllCheckins and PullAllRoutes are not yet instrumented with events.
-	// To see progress for them, they would need to be updated similarly to PullAllAccounts.
-	if err := app.PullAllCheckins(a, logWrapper); err != nil {
-		log.Fatalf(color.RedString("Failed to pull checkins: %v", err))
+	if err := pull.PullAllRoutes(a, nil); err != nil {
+		a.Events.Dispatch(events.Errorf("pull", "Failed to pull routes: %v", err))
+		os.Exit(1)
 	}
 
-	if err := app.PullAllRoutes(a, logWrapper); err != nil {
-		log.Fatalf(color.RedString("Failed to pull routes: %v", err))
+	if err := pull.PullProfile(a, nil); err != nil {
+		a.Events.Dispatch(events.Errorf("pull", "Failed to pull user profile: %v", err))
+		os.Exit(1)
 	}
 
-	log.Println(color.GreenString("✔ All data pulled successfully!"))
+	a.Events.Dispatch(events.Infof("pull", "✔ All data pulled successfully!"))
 }

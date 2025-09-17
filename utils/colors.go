@@ -17,6 +17,7 @@ type ColorPrinter struct {
 	Cyan      func(format string, a ...interface{}) string
 	Bold      func(format string, a ...interface{}) string
 	Underline func(format string, a ...interface{}) string
+	Gray      func(format string, a ...interface{}) string
 }
 
 // NewColorPrinter creates a new ColorPrinter that respects the --no-color flag
@@ -33,6 +34,7 @@ func NewColorPrinter(noColor bool) *ColorPrinter {
 		Cyan:      color.New(color.FgCyan).SprintfFunc(),
 		Bold:      color.New(color.Bold).SprintfFunc(),
 		Underline: color.New(color.Underline).SprintfFunc(),
+		Gray:      color.New(color.FgHiBlack).SprintfFunc(),
 	}
 }
 

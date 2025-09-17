@@ -2,6 +2,7 @@ package push
 
 import (
 	"badgermaps/app"
+	"badgermaps/app/push"
 	"badgermaps/database"
 	"fmt"
 	"os"
@@ -20,7 +21,7 @@ func listCmd(App *app.App) *cobra.Command {
 		Short: "List pending push changes with filtering and sorting",
 		Long:  `Displays a list of pending data changes (pushes) that have not yet been sent to the BadgerMaps API. You can filter by status, entity type, date, and account, as well as control the sort order.`, 
 		RunE: func(cmd *cobra.Command, args []string) error {
-			options := app.PushFilterOptions{
+			options := push.PushFilterOptions{
 				Status:    status,
 				AccountID: accountID,
 				OrderBy:   orderBy,
@@ -35,7 +36,7 @@ func listCmd(App *app.App) *cobra.Command {
 				options.Date = date
 			}
 
-			results, err := app.GetFilteredPendingChanges(App, entityType, options)
+			results, err := push.GetFilteredPendingChanges(App, entityType, options)
 			if err != nil {
 				return err
 			}

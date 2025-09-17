@@ -440,7 +440,7 @@ func testDatabase(App *app.App) {
 	fmt.Println(color.GreenString("PASSED: Database connection successful"))
 
 	fmt.Println(color.CyanString("\nValidating database schema..."))
-	if err := db.ValidateSchema(); err != nil {
+	if err := db.ValidateSchema(App.State); err != nil {
 		fmt.Println(color.RedString("FAILED: Schema validation failed"))
 		if App.State.Debug {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -457,7 +457,7 @@ func testDatabase(App *app.App) {
 			fmt.Println(color.GreenString("Tables dropped successfully."))
 
 			fmt.Println(color.CyanString("Re-initializing schema..."))
-			if err := db.EnforceSchema(); err != nil {
+			if err := db.EnforceSchema(App.State); err != nil {
 				fmt.Println(color.RedString("FAILED: Could not enforce schema"))
 				if App.State.Debug {
 					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -467,7 +467,7 @@ func testDatabase(App *app.App) {
 			fmt.Println(color.GreenString("Schema re-initialized successfully."))
 
 			fmt.Println(color.CyanString("\nRe-validating database schema..."))
-			if err := db.ValidateSchema(); err != nil {
+			if err := db.ValidateSchema(App.State); err != nil {
 				fmt.Println(color.RedString("FAILED: Schema validation failed again after re-initialization"))
 				if App.State.Debug {
 					fmt.Fprintf(os.Stderr, "Error: %v\n", err)

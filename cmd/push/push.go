@@ -2,10 +2,11 @@ package push
 
 import (
 	"badgermaps/app"
+	"badgermaps/app/push"
 	"badgermaps/database"
+	"badgermaps/events"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/fatih/color"
 	"github.com/schollz/progressbar/v3"
@@ -39,11 +40,11 @@ func pushAccountsCmd(a *app.App) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var bar *progressbar.ProgressBar
 
-			pushListener := func(e app.Event) {
+			pushListener := func(e events.Event) {
 				switch e.Type {
-				case app.PushScanStart:
+				case events.PushScanStart:
 					fmt.Println(color.CyanString("Scanning for pending %s changes...", e.Source))
-				case app.PushScanComplete:
+				case events.PushScanComplete:
 					changes := e.Payload.([]database.AccountPendingChange)
 					if len(changes) > 0 {
 						bar = progressbar.NewOptions(len(changes),
@@ -52,14 +53,14 @@ func pushAccountsCmd(a *app.App) *cobra.Command {
 							progressbar.OptionEnableColorCodes(true),
 						)
 					}
-				case app.PushItemSuccess:
+				case events.PushItemSuccess:
 					if bar != nil {
 						bar.Add(1)
 					}
-				case app.PushItemError:
+				case events.PushItemError:
 					err := e.Payload.(error)
 					fmt.Println(color.RedString("An error occurred during push: %v", err))
-				case app.PushComplete:
+				case events.PushComplete:
 					if bar != nil {
 						bar.Finish()
 					}
@@ -68,13 +69,13 @@ func pushAccountsCmd(a *app.App) *cobra.Command {
 				}
 			}
 
-			a.Events.Subscribe(app.PushScanStart, pushListener)
-			a.Events.Subscribe(app.PushScanComplete, pushListener)
-			a.Events.Subscribe(app.PushItemSuccess, pushListener)
-			a.Events.Subscribe(app.PushItemError, pushListener)
-			a.Events.Subscribe(app.PushComplete, pushListener)
+			a.Events.Subscribe(events.PushScanStart, pushListener)
+			a.Events.Subscribe(events.PushScanComplete, pushListener)
+			a.Events.Subscribe(events.PushItemSuccess, pushListener)
+			a.Events.Subscribe(events.PushItemError, pushListener)
+			a.Events.Subscribe(events.PushComplete, pushListener)
 
-			return app.RunPushAccounts(a, func(s string) {}) // Pass an empty logger
+			return push.RunPushAccounts(a)
 		},
 	}
 	return cmd
@@ -88,16 +89,16 @@ func pushCheckinsCmd(a *app.App) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var bar *progressbar.ProgressBar
 
-			pushListener := func(e app.Event) {
+			pushListener := func(e events.Event) {
 				// Only listen for checkin events
 				if e.Source != "checkins" {
 					return
 				}
 
 				switch e.Type {
-				case app.PushScanStart:
+				case events.PushScanStart:
 					fmt.Println(color.CyanString("Scanning for pending %s changes...", e.Source))
-				case app.PushScanComplete:
+				case events.PushScanComplete:
 					changes := e.Payload.([]database.CheckinPendingChange)
 					if len(changes) > 0 {
 						bar = progressbar.NewOptions(len(changes),
@@ -106,14 +107,14 @@ func pushCheckinsCmd(a *app.App) *cobra.Command {
 							progressbar.OptionEnableColorCodes(true),
 						)
 					}
-				case app.PushItemSuccess:
+				case events.PushItemSuccess:
 					if bar != nil {
 						bar.Add(1)
 					}
-				case app.PushItemError:
+				case events.PushItemError:
 					err := e.Payload.(error)
 					fmt.Println(color.RedString("An error occurred during push: %v", err))
-				case app.PushComplete:
+				case events.PushComplete:
 					if bar != nil {
 						bar.Finish()
 					}
@@ -122,13 +123,13 @@ func pushCheckinsCmd(a *app.App) *cobra.Command {
 				}
 			}
 
-			a.Events.Subscribe(app.PushScanStart, pushListener)
-			a.Events.Subscribe(app.PushScanComplete, pushListener)
-			a.Events.Subscribe(app.PushItemSuccess, pushListener)
-			a.Events.Subscribe(app.PushItemError, pushListener)
-			a.Events.Subscribe(app.PushComplete, pushListener)
+			a.Events.Subscribe(events.PushScanStart, pushListener)
+			a.Events.Subscribe(events.PushScanComplete, pushListener)
+			a.Events.Subscribe(events.PushItemSuccess, pushListener)
+			a.Events.Subscribe(events.PushItemError, pushListener)
+			a.Events.Subscribe(events.PushComplete, pushListener)
 
-			return app.RunPushCheckins(a, func(s string) {}) // Pass an empty logger
+			return push.RunPushCheckins(a)
 		},
 	}
 	return cmd
@@ -140,19 +141,10 @@ func pushAllCmd(App *app.App) *cobra.Command {
 		Short: "Push all pending changes to BadgerMaps",
 		Long:  `Push all pending changes (accounts and check-ins) from your local database to the BadgerMaps API.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			log := func(message string) {
-				if strings.Contains(message, "Error") || strings.Contains(message, "error") {
-					fmt.Println(color.RedString(message))
-				} else if strings.Contains(message, "Successfully") || strings.Contains(message, "Finished") {
-					fmt.Println(color.GreenString(message))
-				} else {
-					fmt.Println(color.CyanString(message))
-				}
-			}
-			if err := app.RunPushAccounts(App, log); err != nil {
+			if err := push.RunPushAccounts(App); err != nil {
 				return err
 			}
-			return app.RunPushCheckins(App, log)
+			return push.RunPushCheckins(App)
 		},
 	}
 	return cmd

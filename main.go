@@ -5,8 +5,8 @@ import (
 	"os"
 
 	"badgermaps/app"
+	"badgermaps/cmd/action"
 	"badgermaps/cmd/config"
-	"badgermaps/cmd/events"
 	"badgermaps/cmd/pull"
 	"badgermaps/cmd/push"
 	"badgermaps/cmd/server"
@@ -39,7 +39,7 @@ func createRootCmd() *cobra.Command {
 		Use:   "badgermaps",
 		Short: "BadgerMaps CLI - Command line interface for BadgerMaps",
 		Long: `BadgerMaps CLI is a command line interface for interacting with the BadgerMaps API.
-It allows you to push and pull data, run in server mode, and perform various utility operations.`, 
+It allows you to push and pull data, run in server mode, and perform various utility operations.`,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			// Don't load config for version or help commands
 			if cmd.Name() == "version" || cmd.Name() == "help" {
@@ -49,6 +49,7 @@ It allows you to push and pull data, run in server mode, and perform various uti
 		},
 		Run: func(cmd *cobra.Command, args []string) {
 			if guiFlag && gui.Enabled {
+				App.State.IsGui = true
 				gui.Run(App, AppIcon)
 			} else {
 				cmd.Help()
@@ -71,9 +72,9 @@ It allows you to push and pull data, run in server mode, and perform various uti
 	testCmd := test.TestCmd(App)
 	configCmd := config.ConfigCmd(App)
 	versionCmd := version.VersionCmd()
-	eventsCmd := events.EventsCmd(App)
+	actionCmd := action.ActionCmd(App)
 
-	rootCmd.AddCommand(pushCmd, pullCmd, serverCmd, testCmd, configCmd, versionCmd, eventsCmd)
+	rootCmd.AddCommand(pushCmd, pullCmd, serverCmd, testCmd, configCmd, versionCmd, actionCmd)
 
 	// Global flags
 	rootCmd.PersistentFlags().BoolVarP(&App.State.Verbose, "verbose", "v", false, "Enable verbose output with additional details")
@@ -90,6 +91,7 @@ It allows you to push and pull data, run in server mode, and perform various uti
 func main() {
 	// Initialize the core application
 	App = app.NewApp()
+
 	utils.InitColors(App.State)
 	if App.DB != nil {
 		defer App.DB.Close()
@@ -97,6 +99,7 @@ func main() {
 
 	// If no command is specified, and the GUI is available, launch it.
 	if len(os.Args) == 1 && gui.Enabled {
+		App.State.IsGui = true
 		gui.Run(App, AppIcon)
 		return // Exit after GUI closes
 	}
@@ -110,4 +113,3 @@ func main() {
 		os.Exit(1)
 	}
 }
-

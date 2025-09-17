@@ -7,6 +7,4 @@ type ServerConfig struct {
 	TLSEnabled    bool   `mapstructure:"SERVER_TLS_ENABLED"`
 	TLSCert       string `mapstructure:"SERVER_TLS_CERT"`
 	TLSKey        string `mapstructure:"SERVER_TLS_KEY"`
-	WebhookSecret string `mapstructure:"WEBHOOK_SECRET"`
-	WebhookToken  string `mapstructure:"WEBHOOK_TOKEN"`
 }

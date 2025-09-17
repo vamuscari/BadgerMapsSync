@@ -3,11 +3,13 @@ package server
 import (
 	"badgermaps/api"
 	"badgermaps/app"
+	"badgermaps/app/pull"
+	"badgermaps/app/server"
+	"badgermaps/events"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,26 +20,95 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ServerCmd creates a new server command
-func ServerCmd(App *app.App) *cobra.Command {
+var (
+	App             *app.App
+	ServerCmdFunc   func(a *app.App, serverCmd *cobra.Command)
+	IsWindowsService func() bool
+	RunWindowsService func()
+)
+
+// ServerCmd creates the parent 'server' command
+func ServerCmd(a *app.App) *cobra.Command {
+	App = a // Store app instance for service handler
 	serverCmd := &cobra.Command{
 		Use:   "server",
-		Short: "Run in server mode",
-		Long:  `Run the BadgerMaps CLI in server mode, listening for incoming webhooks.`,
+		Short: "Manage the BadgerMaps webhook server",
+		Long:  `Start, stop, and configure the webhook server. When run without subcommands, it starts the server in the foreground.`,
 		Run: func(cmd *cobra.Command, args []string) {
+			if IsWindowsService() {
+				RunWindowsService()
+				return
+			}
+
+			// This code runs if 'badgermaps server' is executed directly in a terminal.
 			serverConfig := ServerConfig{
 				Host:         App.State.ServerHost,
 				Port:         App.State.ServerPort,
-				WebhookToken: App.State.WebhookToken,
+				TLSEnabled:   App.State.TLSEnabled,
+				TLSCert:      App.State.TLSCert,
+				TLSKey:       App.State.TLSKey,
 			}
 			runServer(App, &serverConfig)
 		},
 	}
+
+	// Add platform-specific commands (like install/uninstall on Windows)
+	ServerCmdFunc(a, serverCmd)
+
+	// Add platform-agnostic commands
+	serverCmd.AddCommand(newServerStartCmd(a))
+	serverCmd.AddCommand(newServerStopCmd(a))
+	serverCmd.AddCommand(newServerStatusCmd(a))
+	serverCmd.AddCommand(newServerSetupCmd(a))
+
 	return serverCmd
 }
 
+func newServerStartCmd(a *app.App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "start",
+		Short: "Start the webhook server in the background",
+		Run: func(cmd *cobra.Command, args []string) {
+			if err := server.StartServer(a); err != nil {
+				fmt.Println(color.RedString("Failed to start server: %v", err))
+				os.Exit(1)
+			}
+			pid, _ := server.GetServerStatus(a)
+			fmt.Println(color.GreenString("Server started successfully with PID %d.", pid))
+		},
+	}
+}
+
+func newServerStopCmd(a *app.App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "stop",
+		Short: "Stop the webhook server",
+		Run: func(cmd *cobra.Command, args []string) {
+			if err := server.StopServer(a); err != nil {
+				fmt.Println(color.RedString("Failed to stop server: %v", err))
+				os.Exit(1)
+			}
+			fmt.Println(color.GreenString("Server stopped successfully."))
+		},
+	}
+}
+
+func newServerStatusCmd(a *app.App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Check the status of the webhook server",
+		Run: func(cmd *cobra.Command, args []string) {
+			if pid, running := server.GetServerStatus(a); running {
+				fmt.Println(color.GreenString("Server is running with PID %d.", pid))
+			} else {
+				fmt.Println(color.YellowString("Server is not running."))
+			}
+		},
+	}
+}
+
 func runServer(App *app.App, config *ServerConfig) {
-	s := &server{App: App}
+	s := &httpServer{App: App}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/webhook/account/create", s.handleAccountCreateWebhook)
 	mux.HandleFunc("/webhook/checkin", s.handleCheckinWebhook)
@@ -48,27 +119,34 @@ func runServer(App *app.App, config *ServerConfig) {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		fmt.Printf("Starting server on %s\n", addr)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
+		App.Events.Dispatch(events.Infof("server", "Starting server on %s", addr))
+		var err error
+		if config.TLSEnabled {
+			App.Events.Dispatch(events.Infof("server", "TLS is enabled. Starting HTTPS server."))
+			err = server.ListenAndServeTLS(config.TLSCert, config.TLSKey)
+		} else {
+			err = server.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
+			App.Events.Dispatch(events.Errorf("server", "Server error: %v", err))
 		}
 	}()
 
 	<-stop
-	fmt.Println("Shutting down server...")
+	App.Events.Dispatch(events.Infof("server", "Shutting down server..."))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := server.Shutdown(ctx); err != nil {
-		log.Fatalf("Server shutdown error: %v", err)
+		App.Events.Dispatch(events.Errorf("server", "Server shutdown error: %v", err))
 	}
-	fmt.Println("Server stopped")
+	App.Events.Dispatch(events.Infof("server", "Server stopped"))
 }
 
-type server struct {
+type httpServer struct {
 	App *app.App
 }
 
-func (s *server) handleAccountCreateWebhook(w http.ResponseWriter, r *http.Request) {
+func (s *httpServer) handleAccountCreateWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -88,22 +166,16 @@ func (s *server) handleAccountCreateWebhook(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	logFunc := func(msg string) {
-		log.Println(msg)
-	}
-
-	// NOTE: Using StoreAccountDetailed as StoreAccountBasic was removed during refactor.
-	// The underlying SQL procedure should handle the missing fields gracefully.
-	if err := app.StoreAccountDetailed(s.App, &acc, logFunc); err != nil {
+	if err := pull.StoreAccountDetailed(s.App, &acc); err != nil {
 		http.Error(w, "failed to store account", http.StatusInternalServerError)
 		return
 	}
-	fmt.Println(color.CyanString("Received and processed account webhook for account: %s", acc.FullName))
+	s.App.Events.Dispatch(events.Infof("server", "Received and processed account webhook for account: %s", acc.FullName))
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "Account webhook processed")
 }
 
-func (s *server) handleCheckinWebhook(w http.ResponseWriter, r *http.Request) {
+func (s *httpServer) handleCheckinWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -123,15 +195,11 @@ func (s *server) handleCheckinWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logFunc := func(msg string) {
-		log.Println(msg)
-	}
-
-	if err := app.StoreCheckin(s.App, checkin, logFunc); err != nil {
+	if err := pull.StoreCheckin(s.App, checkin); err != nil {
 		http.Error(w, "failed to store checkin", http.StatusInternalServerError)
 		return
 	}
-	fmt.Println(color.CyanString("Received and processed checkin webhook for checkin: %d", checkin.CheckinId))
+	s.App.Events.Dispatch(events.Infof("server", "Received and processed checkin webhook for checkin: %d", checkin.CheckinId))
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "Checkin webhook processed")
 }
