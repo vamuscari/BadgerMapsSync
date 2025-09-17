@@ -42,3 +42,6 @@ GEMINI.md
 # Binaries
 badgermaps
 BadgerMapsSync
+
+# System Files 
+.DS_Store

@@ -1,6 +1,9 @@
 package events
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // LogLevel defines the severity of a log event.
 type LogLevel int
@@ -30,7 +33,6 @@ const (
 	FetchDetailStart
 	FetchDetailSuccess
 	StoreSuccess
-	PullError
 	PullComplete
 
 	// Group Pull Events
@@ -44,14 +46,12 @@ const (
 	PushItemStart
 	PushItemSuccess
 	PushItemError
-	PushError
 	PushComplete
 
-	// Event CRUD
-	EventCreate
-	EventRead
-	EventUpdate
-	EventDelete
+	// Action Config Events (for GUI refresh)
+	ActionConfigCreated
+	ActionConfigUpdated
+	ActionConfigDeleted
 
 	// Action Events
 	ActionStart
@@ -70,7 +70,6 @@ func (e EventType) String() string {
 		"FetchDetailStart",
 		"FetchDetailSuccess",
 		"StoreSuccess",
-		"PullError",
 		"PullComplete",
 		"PullAllStart",
 		"PullAllComplete",
@@ -81,10 +80,9 @@ func (e EventType) String() string {
 		"PushItemSuccess",
 		"PushItemError",
 		"PushComplete",
-		"EventCreate",
-		"EventRead",
-		"EventUpdate",
-		"EventDelete",
+		"ActionConfigCreated",
+		"ActionConfigUpdated",
+		"ActionConfigDeleted",
 		"ActionStart",
 		"ActionSuccess",
 		"ActionError",
@@ -99,22 +97,33 @@ type Event struct {
 	Payload interface{} // Can be an error, a data object, an ID, etc.
 }
 
+// CompletionPayload is used for events that signify the end of a process.
+type CompletionPayload struct {
+	Success bool
+	Error   error
+	Count   int
+}
+
 // LogEventPayload is the structured data for a log event.
 type LogEventPayload struct {
-	Level   LogLevel
-	Message string
-	Fields  map[string]interface{}
+	Timestamp time.Time
+	Level     LogLevel
+	Source    string
+	Message   string
+	Fields    map[string]interface{}
 }
 
 // NewLogEvent creates a new log event.
 func NewLogEvent(level LogLevel, source, message string, fields map[string]interface{}) Event {
 	return Event{
 		Type:   LogEvent,
-		Source: source,
+		Source: source, // Keep source on parent for routing, but also add to payload
 		Payload: LogEventPayload{
-			Level:   level,
-			Message: message,
-			Fields:  fields,
+			Timestamp: time.Now(),
+			Level:     level,
+			Source:    source,
+			Message:   message,
+			Fields:    fields,
 		},
 	}
 }
@@ -137,20 +146,24 @@ func Debugf(source, format string, a ...interface{}) Event {
 // EventListener is a function that can handle an event.
 type EventListener func(e Event)
 
-// AllEventTypes returns a slice of all event type strings.
+// AllEventTypes returns a slice of all event type strings suitable for user configuration.
 func AllEventTypes() []string {
-	var types []string
-	for i := 0; i <= int(EventDelete); i++ {
-		types = append(types, EventType(i).String())
+	return []string{
+		PullComplete.String(),
+		PullAllStart.String(),
+		PullAllComplete.String(),
+		PushScanComplete.String(),
+		PushComplete.String(),
+		ActionSuccess.String(),
+		ActionError.String(),
 	}
-	return types
 }
 
 // StringToEventType converts a string to an EventType.
 // It returns the corresponding EventType and true if the string is a valid event type,
 // otherwise it returns 0 and false.
 func StringToEventType(s string) (EventType, bool) {
-	for i := 0; i <= int(EventDelete); i++ {
+	for i := 0; i <= int(Debug); i++ {
 		if EventType(i).String() == s {
 			return EventType(i), true
 		}

@@ -19,6 +19,15 @@ type ActionConfig struct {
 	Args map[string]interface{} `yaml:"args"`
 }
 
+// EventAction is the top-level struct for an event-triggered action.
+type EventAction struct {
+	Name   string         `yaml:"name"`
+	Event  string         `yaml:"event"`
+	Source string         `yaml:"source,omitempty"`
+	Run    []ActionConfig `yaml:"run"`
+}
+
+
 // NewActionFromConfig creates a specific action implementation from a generic ActionConfig.
 func NewActionFromConfig(config ActionConfig) (Action, error) {
 	bytes, err := yaml.Marshal(config.Args)

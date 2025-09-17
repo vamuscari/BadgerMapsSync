@@ -2,7 +2,6 @@
 
 This document provides a detailed overview of the database module in the BadgerMaps CLI.
 
-- [Back to Architecture](./ARCHITECTURE.md)
 - [README](../README.md)
 
 ## Overview

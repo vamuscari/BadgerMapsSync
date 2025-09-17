@@ -8,7 +8,7 @@ import (
 
 // AppConfig defines the configuration for the event dispatcher.
 type AppConfig struct {
-	Events map[string][]ActionConfig `yaml:"actions"`
+	Events []EventAction `yaml:"event_actions"`
 }
 
 // AppInterface defines the methods that the event system needs to access from the main app.

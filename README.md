@@ -1,66 +1,103 @@
-# BadgerMaps CLI
+# BadgerMapsSync
 
-A command line interface for interacting with the BadgerMaps API.
+BadgerMapsSync is a command-line interface (CLI) and graphical user interface (GUI) for interacting with the BadgerMaps API. It allows you to synchronize data between the BadgerMaps API and a local database, providing a powerful tool for managing customer accounts, routes, check-ins, and user profiles.
 
-## Overview
+## Features
 
-The BadgerMaps CLI allows you to synchronize data between the BadgerMaps API and a local database. It provides a powerful interface for managing customer accounts, routes, check-ins, and user profiles. The CLI supports `sqlite3`, `postgres`, and `mssql` as database backends and features a dynamic schema that adapts to your BadgerMaps data.
+-   **Two-Way Data Sync**: Pull data from the BadgerMaps API to a local database and push local changes back to the API.
+-   **Multiple Database Backends**: Supports SQLite, PostgreSQL, and Microsoft SQL Server.
+-   **Webhook Server**: Run in server mode to listen for real-time updates from BadgerMaps webhooks.
+-   **Event-Driven Actions**: Configure custom actions to be triggered by specific events (e.g., `PullComplete`, `PushComplete`).
+-   **Cross-Platform GUI**: A user-friendly graphical interface built with Fyne for managing data and configurations.
+-   **Interactive Setup**: An interactive configuration wizard to get you started quickly.
 
-## Installation
+## Supported Databases
+
+-   **SQLite**: Default, lightweight, and file-based.
+-   **PostgreSQL**: Powerful, open-source object-relational database.
+-   **Microsoft SQL Server (MSSQL)**: Enterprise-grade relational database.
+
+## GUI
+
+The application includes a graphical user interface (GUI) built with the Fyne toolkit, providing a user-friendly way to interact with its features.
+
+### GUI Features
+
+-   **Pull Tab**: Pull data from the BadgerMaps API, either all at once or by specific IDs.
+-   **Push Tab**: Push local changes to the BadgerMaps API.
+-   **Events Tab**: View and manage event-driven actions.
+-   **Explorer Tab**: A database explorer to view the contents of the local database.
+-   **Configuration Tab**: Configure API credentials, database settings, and other application settings.
+-   **Debug Tab**: View debug information.
+-   **Log View**: See real-time log messages from the application.
+-   **Details View**: View details about selected items.
+
+## Building and Running
+
+### Building the Project
+
+To build the project, you need to have Go installed. Then, run the following command from the project's root directory:
 
 ```bash
-# Clone the repository
-git clone https://github.com/vamuscari/BadgerMaps_CLI.git
-
-# Navigate to the project directory
-cd BadgerMaps_CLI
-
-# Build the application
 go build -o badgermaps
 ```
 
-## Getting Started
+This will create an executable file named `badgermaps` in the project's root directory.
 
-The first time you run the CLI, you should use the interactive `config` command to set up your API key and database connection.
+### Running the Project
+
+To run the project, you can use the following command:
 
 ```bash
-./badgermaps config
+./badgermaps [command]
 ```
 
-This will guide you through the process of configuring the CLI and creating the necessary database schema.
+Replace `[command]` with one of the available commands. You can see the list of available commands by running:
 
-## Main Commands
+```bash
+./badgermaps --help
+```
 
-- `config`: Run the interactive setup to configure the CLI.
-- `pull`: Retrieve data from the BadgerMaps API and store it in your local database.
-  - `pull account [id]`: Pull a single account.
-  - `pull accounts`: Pull all accounts.
-  - `pull checkin [id]`: Pull a single checkin.
-  - `pull checkins`: Pull all checkins.
-  - `pull route [id]`: Pull a single route.
-  - `pull routes`: Pull all routes.
-  - `pull profile`: Pull your user profile.
-  - `pull all`: Pull all data (accounts, checkins, routes, and profile).
-- `push`: Push data from your local database to the BadgerMaps API.
-- `server`: Run in server mode to listen for webhooks from the BadgerMaps API.
-- `version`: Display the version of the CLI.
+To run the GUI, use the `gui` command:
 
-## Database
+```bash
+./badgermaps gui
+```
 
-The CLI uses a local database to store the data pulled from the BadgerMaps API. The database schema is created and managed automatically by the CLI.
+### Running Tests
 
-### Dynamic Schema
+To run the tests, you can use the following command:
 
-The database features a dynamic schema that adapts to your BadgerMaps data. The `AccountsWithLabels` view is dynamically created based on the `DataSets` in your BadgerMaps account, providing a convenient way to view your accounts with custom labels.
+```bash
+go test ./...
+```
 
-Triggers are used to keep the `AccountsWithLabels` view and other parts of the schema up-to-date when the `DataSets` table is modified.
+## Development Conventions
 
-### Supported Databases
+### Building After Changes
 
-- `sqlite3`
-- `postgres`
-- `mssql`
+After making any changes to the code, it is recommended to build the project to ensure that the changes have not introduced any compilation errors.
+
+```bash
+go build -o badgermaps
+```
+
+### Testing Conventions
+
+Before building the project, it is recommended to run the tests to ensure that the changes have not introduced any regressions.
+
+```bash
+go test ./...
+```
+
+### Shared Logic
+
+To avoid code duplication, both the `gui` and `cmd` packages should utilize shared helper methods and data structures from the `app` package. This ensures that core business logic is decoupled from the user interface.
+
+### Configuration Management
+
+The project follows a modular approach to configuration management. Each major component (e.g., `api`, `database`, `server`) is responsible for managing its own configuration settings. The `gui` and `cmd` packages should not set configuration keys directly but should interact with the configuration through the `app.App` instance.
 
 ## License
 
-This project is licensed under the terms of the license included in the repository.
+This project is licensed under the terms of the MIT License. See the [LICENSE](LICENSE) file for more details.

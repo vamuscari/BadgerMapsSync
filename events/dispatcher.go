@@ -36,14 +36,20 @@ func (d *EventDispatcher) Dispatch(e Event) {
 		fmt.Printf("Dispatching event: %s (Source: %s)\n", e.Type.String(), e.Source)
 	}
 
-	// runActions is a helper closure to execute actions for a given key.
-	runActions := func(key string) {
-		actionConfigs, ok := d.app.GetConfig().Events[key]
-		if !ok {
-			return
+	// Execute configured event actions
+	for _, eventAction := range d.app.GetConfig().Events {
+		// Check if the event type matches
+		if eventAction.Event != e.Type.String() {
+			continue
 		}
 
-		for _, actionConfig := range actionConfigs {
+		// Check if the source matches (if a source is specified in the action)
+		if eventAction.Source != "" && eventAction.Source != e.Source {
+			continue
+		}
+
+		// If we reach here, the event matches, so run the actions
+		for _, actionConfig := range eventAction.Run {
 			action, err := NewActionFromConfig(actionConfig)
 			if err != nil {
 				d.Dispatch(Event{Type: ActionError, Source: e.Source, Payload: fmt.Errorf("error creating action: %w", err)})
@@ -55,28 +61,19 @@ func (d *EventDispatcher) Dispatch(e Event) {
 				continue
 			}
 
-			d.Dispatch(Event{Type: ActionStart, Source: e.Source, Payload: fmt.Sprintf("Executing action type '%s'", actionConfig.Type)})
+			d.Dispatch(Event{Type: ActionStart, Source: e.Source, Payload: fmt.Sprintf("Executing action type '%s' from '%s'", actionConfig.Type, eventAction.Name)})
 
 			go func(action Action, actionConfig ActionConfig) {
 				if err := action.Execute(d.app); err != nil {
 					d.Dispatch(Event{Type: ActionError, Source: e.Source, Payload: err})
 				} else {
-					d.Dispatch(Event{Type: ActionSuccess, Source: e.Source, Payload: fmt.Sprintf("Action '%v' completed successfully", actionConfig.Type)})
+					d.Dispatch(Event{Type: ActionSuccess, Source: e.Source, Payload: fmt.Sprintf("Action '%s' from '%s' completed successfully", actionConfig.Type, eventAction.Name)})
 				}
 			}(action, actionConfig)
 		}
 	}
 
-	// Run actions for the general event type (e.g., "on_PullComplete")
-	generalKey := fmt.Sprintf("on_%s", e.Type.String())
-	runActions(generalKey)
-
-	// Run actions for the source-specific event type (e.g., "on_PullComplete_accounts")
-	if e.Source != "" {
-		sourceKey := fmt.Sprintf("on_%s_%s", e.Type.String(), e.Source)
-		runActions(sourceKey)
-	}
-
+	// Notify listeners
 	if listeners, found := d.listeners[e.Type]; found {
 		for _, listener := range listeners {
 			// Listeners are called synchronously.
@@ -85,4 +82,5 @@ func (d *EventDispatcher) Dispatch(e Event) {
 		}
 	}
 }
+
 

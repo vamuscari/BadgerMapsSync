@@ -2,7 +2,6 @@
 
 This document provides a detailed overview of the API module in the BadgerMaps CLI.
 
-- [Back to Architecture](./ARCHITECTURE.md)
 - [README](../README.md)
 
 ## Overview
