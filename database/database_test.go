@@ -148,6 +148,9 @@ func TestEnforceSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to load database settings: %v", err)
 	}
+	if err := db.Connect(); err != nil {
+		t.Fatalf("Failed to connect to database: %v", err)
+	}
 	defer db.Close()
 
 	if err := db.EnforceSchema(s); err != nil {
@@ -170,5 +173,44 @@ func TestEnforceSchema(t *testing.T) {
 
 	if count < 5 {
 		t.Errorf("FieldMaps table has %d rows, expected at least 5", count)
+	}
+}
+
+func TestIsConnected(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test.db")
+
+	config := &DBConfig{
+		Type: "sqlite3",
+		Path: dbPath,
+	}
+
+	db, err := NewDB(config)
+	if err != nil {
+		t.Fatalf("Failed to load database settings: %v", err)
+	}
+
+	if db.IsConnected() {
+		t.Errorf("Expected IsConnected to be false for a new database connection")
+	}
+
+	if err := db.Connect(); err != nil {
+		t.Fatalf("Failed to connect to database: %v", err)
+	}
+
+	if err := db.TestConnection(); err != nil {
+		t.Fatalf("Failed to test database connection: %v", err)
+	}
+
+	if !db.IsConnected() {
+		t.Errorf("Expected IsConnected to be true after a successful connection")
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("Failed to close database connection: %v", err)
+	}
+
+	if db.IsConnected() {
+		t.Errorf("Expected IsConnected to be false after closing the connection")
 	}
 }

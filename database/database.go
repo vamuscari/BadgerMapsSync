@@ -61,12 +61,18 @@ type DB interface {
 	RunFunction(functionName string) error
 	GetTables() ([]string, error)
 	ExecuteQuery(query string) (*sql.Rows, error)
+	IsConnected() bool
 }
 
 // SQLiteConfig represents a SQLite database configuration
 type SQLiteConfig struct {
-	db   *sql.DB
-	Path string `mapstructure:"DB_PATH"`
+	db        *sql.DB
+	Path      string `mapstructure:"DB_PATH"`
+	connected bool
+}
+
+func (db *SQLiteConfig) IsConnected() bool {
+	return db.connected
 }
 
 func (db *SQLiteConfig) GetSQL(command string) string {
@@ -82,12 +88,14 @@ func (db *SQLiteConfig) Connect() error {
 	var err error
 	db.db, err = sql.Open("sqlite3", db.DatabaseConnection())
 	if err != nil {
+		db.connected = false
 		return fmt.Errorf("failed to open SQLite database: %w", err)
 	}
 	return nil
 }
 
 func (db *SQLiteConfig) Close() error {
+	db.connected = false
 	if db.db != nil {
 		return db.db.Close()
 	}
@@ -209,7 +217,13 @@ func (db *SQLiteConfig) EnforceSchema(s *state.State) error {
 }
 
 func (db *SQLiteConfig) TestConnection() error {
-	return db.GetDB().Ping()
+	err := db.GetDB().Ping()
+	if err != nil {
+		db.connected = false
+		return err
+	}
+	db.connected = true
+	return nil
 }
 
 func (db *SQLiteConfig) ValidateSchema(s *state.State) error {
@@ -386,6 +400,11 @@ type PostgreSQLConfig struct {
 	Username string `mapstructure:"DB_USER"`
 	Password string `mapstructure:"DB_PASSWORD"`
 	SSLMode  string `mapstructure:"DB_SSL_MODE"`
+	connected bool
+}
+
+func (db *PostgreSQLConfig) IsConnected() bool {
+	return db.connected
 }
 
 func (db *PostgreSQLConfig) GetSQL(command string) string {
@@ -401,12 +420,14 @@ func (db *PostgreSQLConfig) Connect() error {
 	var err error
 	db.db, err = sql.Open("postgres", db.DatabaseConnection())
 	if err != nil {
+		db.connected = false
 		return fmt.Errorf("failed to open PostgreSQL database: %w", err)
 	}
 	return nil
 }
 
 func (db *PostgreSQLConfig) Close() error {
+	db.connected = false
 	if db.db != nil {
 		return db.db.Close()
 	}
@@ -583,7 +604,13 @@ func (db *PostgreSQLConfig) EnforceSchema(s *state.State) error {
 	return nil
 }
 func (db *PostgreSQLConfig) TestConnection() error {
-	return db.GetDB().Ping()
+	err := db.GetDB().Ping()
+	if err != nil {
+		db.connected = false
+		return err
+	}
+	db.connected = true
+	return nil
 }
 func (db *PostgreSQLConfig) ValidateSchema(s *state.State) error {
 	if db.db == nil {
@@ -828,12 +855,17 @@ func (db *PostgreSQLConfig) ExecuteQuery(query string) (*sql.Rows, error) {
 
 // MSSQLConfig represents a Microsoft SQL Server database configuration
 type MSSQLConfig struct {
-	db       *sql.DB
-	Host     string `mapstructure:"DB_HOST"`
-	Port     int    `mapstructure:"DB_PORT"`
-	Database string `mapstructure:"DB_NAME"`
-	Username string `mapstructure:"DB_USER"`
-	Password string `mapstructure:"DB_PASSWORD"`
+	db        *sql.DB
+	Host      string `mapstructure:"DB_HOST"`
+	Port      int    `mapstructure:"DB_PORT"`
+	Database  string `mapstructure:"DB_NAME"`
+	Username  string `mapstructure:"DB_USER"`
+	Password  string `mapstructure:"DB_PASSWORD"`
+	connected bool
+}
+
+func (db *MSSQLConfig) IsConnected() bool {
+	return db.connected
 }
 
 func (db *MSSQLConfig) GetSQL(command string) string {
@@ -849,12 +881,14 @@ func (db *MSSQLConfig) Connect() error {
 	var err error
 	db.db, err = sql.Open("mssql", db.DatabaseConnection())
 	if err != nil {
+		db.connected = false
 		return fmt.Errorf("failed to open MSSQL database: %w", err)
 	}
 	return nil
 }
 
 func (db *MSSQLConfig) Close() error {
+	db.connected = false
 	if db.db != nil {
 		return db.db.Close()
 	}
@@ -1031,7 +1065,13 @@ func (db *MSSQLConfig) EnforceSchema(s *state.State) error {
 	return nil
 }
 func (db *MSSQLConfig) TestConnection() error {
-	return db.GetDB().Ping()
+	err := db.GetDB().Ping()
+	if err != nil {
+		db.connected = false
+		return err
+	}
+	db.connected = true
+	return nil
 }
 func (db *MSSQLConfig) ValidateSchema(s *state.State) error {
 	if db.db == nil {

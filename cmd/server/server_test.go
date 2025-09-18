@@ -28,6 +28,9 @@ func TestHandleAccountCreateWebhook(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temporary database: %v", err)
 	}
+	if err := db.Connect(); err != nil {
+		t.Fatalf("Failed to connect to temporary database: %v", err)
+	}
 	if err := db.EnforceSchema(&state.State{}); err != nil {
 		t.Fatalf("Failed to enforce schema: %v", err)
 	}

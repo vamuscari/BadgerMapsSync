@@ -103,6 +103,10 @@ func (a *App) LoadConfig() error {
 	if dbErr != nil {
 		a.Events.Dispatch(events.Errorf("db", "Failed to connect to database: %v", dbErr))
 		a.DB = nil // Set DB to nil to indicate connection failure
+	} else if a.DB != nil {
+		if err := a.DB.Connect(); err == nil {
+			a.DB.TestConnection()
+		}
 	}
 
 	// Limit between
@@ -161,22 +165,7 @@ func (a *App) GetConfigFilePath() (string, bool, error) {
 	return "", false, nil
 }
 
-func (a *App) AddEventAction(event, source, actionString string) error {
-	// This is a temporary solution to keep the GUI working.
-	// A better solution would be to have a dedicated UI for creating actions.
-	parts := strings.SplitN(actionString, ":", 2)
-	if len(parts) != 2 {
-		return fmt.Errorf("invalid action format: %s", actionString)
-	}
-	actionConfig := events.ActionConfig{
-		Type: parts[0],
-		Args: map[string]interface{}{
-			"command":  parts[1], // Assuming exec action for now
-			"function": parts[1], // Assuming db action for now
-			"endpoint": parts[1], // Assuming api action for now
-		},
-	}
-
+func (a *App) AddEventAction(event, source string, actionConfig events.ActionConfig) error {
 	key := fmt.Sprintf("on_%s", event)
 	if source != "" {
 		key = fmt.Sprintf("%s_%s", key, source)
@@ -188,7 +177,7 @@ func (a *App) AddEventAction(event, source, actionString string) error {
 			a.Config.EventActions[i].Run = append(a.Config.EventActions[i].Run, actionConfig)
 			err := a.SaveConfig()
 			if err == nil {
-				a.Events.Dispatch(events.Event{Type: events.ActionConfigUpdated, Source: "events", Payload: map[string]string{"event": event, "action": actionString}})
+				a.Events.Dispatch(events.Event{Type: events.ActionConfigUpdated, Source: "events"})
 			}
 			return err
 		}
@@ -204,24 +193,47 @@ func (a *App) AddEventAction(event, source, actionString string) error {
 	a.Config.EventActions = append(a.Config.EventActions, newEventAction)
 	err := a.SaveConfig()
 	if err == nil {
-		a.Events.Dispatch(events.Event{Type: events.ActionConfigCreated, Source: "events", Payload: map[string]string{"event": event, "action": actionString}})
+		a.Events.Dispatch(events.Event{Type: events.ActionConfigCreated, Source: "events"})
 	}
 	return err
 }
 
-func (a *App) GetEventActions() []events.EventAction {
-	return a.Config.EventActions
+func (a *App) UpdateEventAction(eventName string, actionIndex int, actionConfig events.ActionConfig) error {
+	for i := range a.Config.EventActions {
+		if a.Config.EventActions[i].Name == eventName {
+			if actionIndex < 0 || actionIndex >= len(a.Config.EventActions[i].Run) {
+				return fmt.Errorf("invalid action index")
+			}
+			a.Config.EventActions[i].Run[actionIndex] = actionConfig
+			err := a.SaveConfig()
+			if err == nil {
+				a.Events.Dispatch(events.Event{Type: events.ActionConfigUpdated, Source: "events"})
+			}
+			return err
+		}
+	}
+	return fmt.Errorf("event action not found: %s", eventName)
 }
 
-func (a *App) RemoveEventAction(event, source, actionToRemove string) error {
-	// This is a temporary solution. We need a better way to identify actions to remove.
-	// For now, we just don't support removing actions from the GUI.
-	// This will be improved in a future update.
-	err := a.SaveConfig()
-	if err == nil {
-		a.Events.Dispatch(events.Event{Type: events.ActionConfigDeleted, Source: "events", Payload: map[string]string{"event": event, "action": actionToRemove}})
+func (a *App) RemoveEventAction(eventName string, actionIndex int) error {
+	for i := range a.Config.EventActions {
+		if a.Config.EventActions[i].Name == eventName {
+			if actionIndex < 0 || actionIndex >= len(a.Config.EventActions[i].Run) {
+				return fmt.Errorf("invalid action index")
+			}
+			a.Config.EventActions[i].Run = append(a.Config.EventActions[i].Run[:actionIndex], a.Config.EventActions[i].Run[actionIndex+1:]...)
+			err := a.SaveConfig()
+			if err == nil {
+				a.Events.Dispatch(events.Event{Type: events.ActionConfigDeleted, Source: "events"})
+			}
+			return err
+		}
 	}
-	return nil
+	return fmt.Errorf("event action not found: %s", eventName)
+}
+
+func (a *App) GetEventActions() []events.EventAction {
+	return a.Config.EventActions
 }
 
 // TriggerEventAction executes a specific action string (e.g., "db:my_function", "exec:ls").

@@ -33,6 +33,9 @@ func TestPushAccountsCmd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temporary database: %v", err)
 	}
+	if err := db.Connect(); err != nil {
+		t.Fatalf("Failed to connect to temporary database: %v", err)
+	}
 
 	sqlDB, err := sql.Open("sqlite3", db.DatabaseConnection())
 	if err != nil {
@@ -43,15 +46,12 @@ func TestPushAccountsCmd(t *testing.T) {
 	if err := db.EnforceSchema(&state.State{}); err != nil {
 		t.Fatalf("Failed to enforce schema: %v", err)
 	}
-
 	_, err = sqlDB.Exec("INSERT INTO AccountsPendingChanges (AccountId, ChangeType, Changes) VALUES (?, ?, ?)", 123, "UPDATE", `{"last_name":"Test Account"}`)
 	if err != nil {
 		t.Fatalf("Failed to insert test pending change: %v", err)
 	}
-
 	app.DB = db
 	app.API = api.NewAPIClient(&api.APIConfig{BaseURL: server.URL})
-
 	cmd := PushCmd(app)
 	cmd.SetArgs([]string{"accounts"})
 	if err := cmd.Execute(); err != nil {
@@ -77,6 +77,9 @@ func TestPushCheckinsCmd(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Failed to create temporary database: %v", err)
+	}
+	if err := db.Connect(); err != nil {
+		t.Fatalf("Failed to connect to temporary database: %v", err)
 	}
 
 	sqlDB, err := sql.Open("sqlite3", db.DatabaseConnection())

@@ -26,11 +26,6 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-const (
-	// SecondaryButtonImportance is a custom importance level for buttons
-	SecondaryButtonImportance widget.ButtonImportance = 99
-)
-
 // SecondaryButton is a custom button that can be styled with a secondary color
 type SecondaryButton struct {
 	widget.Button
@@ -226,9 +221,9 @@ func Launch(a *app.App, icon fyne.Resource) {
 		}
 		if ui.tabs != nil {
 			for _, tab := range ui.tabs.Items {
-				if tab.Text == "Events" {
+				if tab.Text == "Actions" {
 					// Re-create the content of the events tab
-					tab.Content = ui.createEventsTab()
+					tab.Content = ui.createActionsTab()
 					ui.tabs.Refresh()
 					break
 				}
@@ -236,6 +231,7 @@ func Launch(a *app.App, icon fyne.Resource) {
 		}
 	}
 	a.Events.Subscribe(events.ActionConfigCreated, eventListener)
+	a.Events.Subscribe(events.ActionConfigUpdated, eventListener)
 	a.Events.Subscribe(events.ActionConfigDeleted, eventListener)
 
 	// Subscribe to logging and action events
@@ -270,20 +266,20 @@ func Launch(a *app.App, icon fyne.Resource) {
 			ui.showToast(fmt.Sprintf("Successfully pulled %s.", e.Source))
 		case events.PullError:
 			ui.showToast(fmt.Sprintf("Error pulling %s.", e.Source))
-		case events.PullAllStart:
+		case events.PullGroupStart:
 			ui.showToast(fmt.Sprintf("Starting full pull for %s...", e.Source))
-		case events.PullAllComplete:
+		case events.PullGroupComplete:
 			ui.showToast(fmt.Sprintf("Successfully pulled all %s.", e.Source))
-		case events.PullAllError:
+		case events.PullGroupError:
 			ui.showToast(fmt.Sprintf("Error pulling all %s.", e.Source))
 		}
 	}
 	a.Events.Subscribe(events.PullStart, pullNotificationListener)
 	a.Events.Subscribe(events.PullComplete, pullNotificationListener)
 	a.Events.Subscribe(events.PullError, pullNotificationListener)
-	a.Events.Subscribe(events.PullAllStart, pullNotificationListener)
-	a.Events.Subscribe(events.PullAllComplete, pullNotificationListener)
-	a.Events.Subscribe(events.PullAllError, pullNotificationListener)
+	a.Events.Subscribe(events.PullGroupStart, pullNotificationListener)
+	a.Events.Subscribe(events.PullGroupComplete, pullNotificationListener)
+	a.Events.Subscribe(events.PullGroupError, pullNotificationListener)
 
 	window.SetContent(ui.createContent())
 	window.Resize(fyne.NewSize(1280, 720))
@@ -301,7 +297,7 @@ func (ui *Gui) createMainContent() fyne.CanvasObject {
 	tabs := []*container.TabItem{
 		container.NewTabItemWithIcon("Pull", theme.DownloadIcon(), ui.createPullTab()),
 		container.NewTabItemWithIcon("Push", theme.UploadIcon(), ui.createPushTab()),
-		container.NewTabItemWithIcon("Events", theme.ListIcon(), ui.createEventsTab()),
+		container.NewTabItemWithIcon("Actions", theme.ListIcon(), ui.createActionsTab()),
 		container.NewTabItemWithIcon("Explorer", theme.FolderIcon(), ui.createExplorerTab()),
 		container.NewTabItemWithIcon("Server", theme.ComputerIcon(), ui.createServerTab()),
 		container.NewTabItemWithIcon("Configuration", theme.SettingsIcon(), ui.createConfigTab()),
@@ -424,7 +420,7 @@ func (ui *Gui) createPullTab() fyne.CanvasObject {
 		pullProfileButton,
 	))
 
-	pullAllButton := widget.NewButtonWithIcon("Run Full Pull (All Data)", theme.ViewRefreshIcon(), func() { go ui.runPullAll() })
+	pullAllButton := widget.NewButtonWithIcon("Run Full Pull (All Data)", theme.ViewRefreshIcon(), func() { go ui.runPullGroup() })
 
 	return container.NewVScroll(container.NewVBox(
 		singlePullCard,
@@ -435,7 +431,7 @@ func (ui *Gui) createPullTab() fyne.CanvasObject {
 
 // createPushTab creates the content for the "Push" tab
 func (ui *Gui) createPushTab() fyne.CanvasObject {
-	if ui.app.DB == nil || ui.app.DB.GetDB() == nil {
+	if ui.app.DB == nil || !ui.app.DB.IsConnected() {
 		return widget.NewLabel("Database not configured. Please configure it in the Configuration tab.")
 	}
 	pushAccountsButton := widget.NewButtonWithIcon("Push Account Changes", theme.UploadIcon(), func() { go ui.runPushAccounts() })
@@ -560,185 +556,182 @@ func (ui *Gui) createPendingChangesTable(entityType string) fyne.CanvasObject {
 	return dataTable
 }
 
-// createEventsTab creates the content for the "Events" tab
-func (ui *Gui) createEventsTab() fyne.CanvasObject {
-	eventsContent := container.NewVBox()
+// createActionsTab creates the content for the "Actions" tab
+func (ui *Gui) createActionsTab() fyne.CanvasObject {
+	actionsContent := container.NewVBox()
 
-	// Function to refresh the events list
-	var refreshEvents func()
-	refreshEvents = func() {
-		eventsContent.Objects = nil
+	var refreshActions func()
+	refreshActions = func() {
+		actionsContent.Objects = nil
 		eventActions := ui.app.GetEventActions()
 
-		// Create a sorted list of event names for consistent order
 		sort.Slice(eventActions, func(i, j int) bool {
 			return eventActions[i].Name < eventActions[j].Name
 		})
 
 		for _, eventAction := range eventActions {
-			actions := eventAction.Run
-
 			eventLabel := widget.NewLabelWithStyle(eventAction.Name, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-			eventsContent.Add(eventLabel)
+			actionsContent.Add(eventLabel)
 
-			for _, action := range actions {
+			for i, action := range eventAction.Run {
 				actionLabel := widget.NewLabel(fmt.Sprintf("%s: %v", action.Type, action.Args))
-				// Use function closure to capture the correct eventName and action
-				currentEventKey := eventAction.Name
-				currentAction := action
+				currentEventAction := eventAction
+				actionIndex := i
+
+				editButton := widget.NewButtonWithIcon("", theme.DocumentCreateIcon(), func() {
+					ui.createActionPopup(&currentEventAction, actionIndex)
+				})
 				removeButton := widget.NewButtonWithIcon("", theme.DeleteIcon(), func() {
-					trimmedKey := strings.TrimPrefix(currentEventKey, "on_")
-					var source string
-
-					allEvents := events.AllEventTypes()
-					sort.Slice(allEvents, func(i, j int) bool {
-						return len(allEvents[i]) > len(allEvents[j]) // Sort by length descending
-					})
-
-					found := false
-					for _, eventTypeStr := range allEvents {
-						if strings.HasPrefix(trimmedKey, eventTypeStr) {
-							// event = eventTypeStr
-							source = strings.TrimPrefix(trimmedKey, eventTypeStr)
-							source = strings.TrimPrefix(source, "_")
-							found = true
-							break
-						}
+					err := ui.app.RemoveEventAction(currentEventAction.Name, actionIndex)
+					if err != nil {
+						ui.log(fmt.Sprintf("Error removing action: %v", err))
 					}
-
-					if !found {
-						ui.log(fmt.Sprintf("Could not parse event key: %s", currentEventKey))
-						return
-					}
-
-					// This is a temporary solution. We need a better way to identify actions to remove.
-					// For now, we just don't support removing actions from the GUI.
-					// This will be improved in a future update.
-					// err := ui.app.RemoveEventAction(event, source, currentAction)
-					// if err != nil {
-					// 	ui.log(fmt.Sprintf("Error removing event action: %v", err))
-					// 	return
-					// }
-					ui.log(fmt.Sprintf("Removing action '%s' from event '%s' is not supported in this version.", currentAction, currentEventKey))
 				})
-				runButton := widget.NewButtonWithIcon("", theme.MediaPlayIcon(), func() {
-					ui.log(fmt.Sprintf("Manually triggering action: %s", currentAction))
-					// This is a temporary solution. We need a better way to trigger actions from the GUI.
-					// if err := ui.app.TriggerEventAction(currentAction); err != nil {
-					// 	ui.log(fmt.Sprintf("Error triggering action: %v", err))
-					// 	ui.showToast(fmt.Sprintf("Error: Failed to trigger action: %v", err))
-					// } else {
-					// 	ui.showToast(fmt.Sprintf("Success: Action '%s' triggered.", currentAction))
-					// }
-				})
-				actionBox := container.NewHBox(removeButton, runButton, actionLabel)
-				eventsContent.Add(actionBox)
+
+				actionBox := container.NewHBox(editButton, removeButton, actionLabel)
+				actionsContent.Add(actionBox)
 			}
 		}
-		eventsContent.Refresh()
+		actionsContent.Refresh()
 	}
 
-	// Initial population
-	refreshEvents()
-
-	// Form for adding new event actions
-	eventSelect := widget.NewSelect(events.AllEventTypes(), nil)
-	sourceSelect := widget.NewSelect([]string{"accounts", "checkins", "routes", "all"}, nil)
-	sourceSelect.Hide()
-	actionTypeSelect := widget.NewSelect([]string{"exec", "db", "api"}, nil)
-	actionEntry := widget.NewEntry()
-	actionEntry.SetPlaceHolder("Enter command, function, or endpoint")
-
-	pullActionSelect := widget.NewSelect([]string{"accounts", "checkins", "routes", "all"}, nil)
-	pullActionSelect.Hide()
-
-	execTypeRadio := widget.NewRadioGroup([]string{"Custom Command", "Pull Action"}, func(selected string) {
-		if selected == "Custom Command" {
-			actionEntry.Show()
-			pullActionSelect.Hide()
-		} else {
-			actionEntry.Hide()
-			pullActionSelect.Show()
-		}
-	})
-	execTypeRadio.SetSelected("Custom Command")
-	execTypeRadio.Hide()
-
-	eventSelect.OnChanged = func(selected string) {
-		if strings.HasPrefix(selected, "PullAll") {
-			sourceSelect.Show()
-		} else {
-			sourceSelect.Hide()
-		}
-	}
-
-	actionTypeSelect.OnChanged = func(selected string) {
-		if selected == "exec" {
-			execTypeRadio.Show()
-			// Trigger the radio's OnChanged to set the correct initial view
-			execTypeRadio.OnChanged(execTypeRadio.Selected)
-		} else {
-			execTypeRadio.Hide()
-			pullActionSelect.Hide()
-			actionEntry.Show()
-		}
-	}
-	actionTypeSelect.SetSelected("exec")
+	refreshActions()
 
 	addButton := widget.NewButtonWithIcon("Add Action", theme.ContentAddIcon(), func() {
-		event := eventSelect.Selected
-		source := sourceSelect.Selected
-		actionType := actionTypeSelect.Selected
-		var action string
-
-		if actionType == "exec" {
-			if execTypeRadio.Selected == "Custom Command" {
-				action = actionEntry.Text
-			} else {
-				action = fmt.Sprintf("./badgermaps pull %s", pullActionSelect.Selected)
-			}
-		} else {
-			action = actionEntry.Text
-		}
-
-		if event == "" {
-			ui.log("Please select an event.")
-			return
-		}
-		if action == "" {
-			ui.log("Please enter an action.")
-			return
-		}
-
-		fullAction := fmt.Sprintf("%s:%s", actionType, action)
-
-		err := ui.app.AddEventAction(event, source, fullAction)
-		if err != nil {
-			ui.log(fmt.Sprintf("Error adding action: %v", err))
-			return
-		}
-
-		ui.log(fmt.Sprintf("Added action '%s' to event '%s'", fullAction, event))
-		actionEntry.SetText("")
-		pullActionSelect.ClearSelected()
+		ui.createActionPopup(nil, -1)
 	})
 
-	addForm := widget.NewCard("Add New Action", "", container.NewVBox(
-		eventSelect,
-		sourceSelect,
-		actionTypeSelect,
-		execTypeRadio,
-		actionEntry,
-		pullActionSelect,
-		addButton,
-	))
+	return container.NewBorder(nil, addButton, nil, nil, container.NewScroll(actionsContent))
+}
 
-	return container.NewVScroll(container.NewBorder(nil, addForm, nil, nil, container.NewScroll(eventsContent)))
+func (ui *Gui) createActionPopup(eventAction *events.EventAction, actionIndex int) {
+	var event, source, actionType, command, function, endpoint, method string
+	var args []string
+
+	if eventAction != nil {
+		event = eventAction.Event
+		source = eventAction.Source
+		if actionIndex != -1 {
+			action := eventAction.Run[actionIndex]
+			actionType = action.Type
+			switch actionType {
+			case "exec":
+				command = action.Args["command"].(string)
+				if action.Args["args"] != nil {
+					for _, arg := range action.Args["args"].([]interface{}) {
+						args = append(args, arg.(string))
+					}
+				}
+			case "db":
+				function = action.Args["function"].(string)
+			case "api":
+				endpoint = action.Args["endpoint"].(string)
+				method = action.Args["method"].(string)
+			}
+		}
+	}
+
+	eventEntry := widget.NewSelect(events.AllEventTypes(), nil)
+	eventEntry.SetSelected(event)
+	sourceEntry := widget.NewSelect(events.AllEventSources(), nil)
+	sourceEntry.SetSelected(source)
+	actionTypeEntry := widget.NewSelect([]string{"exec", "db", "api"}, nil)
+	actionTypeEntry.SetSelected(actionType)
+
+	formItems := []*widget.FormItem{
+		widget.NewFormItem("Event", eventEntry),
+		widget.NewFormItem("Source", sourceEntry),
+		widget.NewFormItem("Action Type", actionTypeEntry),
+	}
+
+	execCommandEntry := widget.NewEntry()
+	execCommandEntry.SetText(command)
+	execArgsEntry := widget.NewEntry()
+	execArgsEntry.SetText(strings.Join(args, " "))
+	dbFunctionEntry := widget.NewEntry()
+	dbFunctionEntry.SetText(function)
+	apiEndpointEntry := widget.NewEntry()
+	apiEndpointEntry.SetText(endpoint)
+	apiMethodEntry := widget.NewSelect([]string{"GET", "POST", "PUT", "DELETE"}, nil)
+	apiMethodEntry.SetSelected(method)
+
+	execForm := []*widget.FormItem{
+		widget.NewFormItem("Command", execCommandEntry),
+		widget.NewFormItem("Args", execArgsEntry),
+	}
+	dbForm := []*widget.FormItem{
+		widget.NewFormItem("Function", dbFunctionEntry),
+	}
+	apiForm := []*widget.FormItem{
+		widget.NewFormItem("Endpoint", apiEndpointEntry),
+		widget.NewFormItem("Method", apiMethodEntry),
+	}
+
+	form := widget.NewForm(formItems...)
+
+	actionTypeEntry.OnChanged = func(selected string) {
+		form.Items = formItems
+		switch selected {
+		case "exec":
+			for _, item := range execForm {
+				form.AppendItem(item)
+			}
+		case "db":
+			for _, item := range dbForm {
+				form.AppendItem(item)
+			}
+		case "api":
+			for _, item := range apiForm {
+				form.AppendItem(item)
+			}
+		}
+		form.Refresh()
+	}
+	actionTypeEntry.OnChanged(actionType)
+
+	content := container.NewVBox(form)
+	d := dialog.NewCustom("Action", "Cancel", content, ui.window)
+	d.Resize(fyne.NewSize(400, 300))
+
+	saveButton := widget.NewButton("Save", func() {
+		var newAction events.ActionConfig
+		newAction.Type = actionTypeEntry.Selected
+		newAction.Args = make(map[string]interface{})
+
+		switch newAction.Type {
+		case "exec":
+			newAction.Args["command"] = execCommandEntry.Text
+			newAction.Args["args"] = strings.Split(execArgsEntry.Text, " ")
+		case "db":
+			newAction.Args["function"] = dbFunctionEntry.Text
+		case "api":
+			newAction.Args["endpoint"] = apiEndpointEntry.Text
+			newAction.Args["method"] = apiMethodEntry.Selected
+		}
+
+		if eventAction == nil {
+			// Add new event action
+			err := ui.app.AddEventAction(eventEntry.Selected, sourceEntry.Selected, newAction)
+			if err != nil {
+				ui.log(fmt.Sprintf("Error adding action: %v", err))
+			}
+		} else {
+			// Update existing event action
+			err := ui.app.UpdateEventAction(eventAction.Name, actionIndex, newAction)
+			if err != nil {
+				ui.log(fmt.Sprintf("Error updating action: %v", err))
+			}
+		}
+		d.Hide()
+	})
+
+	d.SetButtons([]fyne.CanvasObject{saveButton})
+	d.Show()
 }
 
 // createExplorerTab creates the content for the "Explorer" tab
 func (ui *Gui) createExplorerTab() fyne.CanvasObject {
-	if ui.app.DB == nil || ui.app.DB.GetDB() == nil {
+	if ui.app.DB == nil || !ui.app.DB.IsConnected() {
 		return widget.NewLabel("Database not configured. Please configure it in the Configuration tab.")
 	}
 	tableContainer := container.NewMax() // Use NewMax to fill available space
@@ -1101,7 +1094,7 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 
 	// Schema Management
 	schemaLabel := "Initialize Schema"
-	if ui.app.DB != nil && ui.app.DB.GetDB() != nil {
+	if ui.app.DB != nil && ui.app.DB.IsConnected() {
 		if err := ui.app.DB.ValidateSchema(ui.app.State); err == nil {
 			schemaLabel = "Re-initialize Schema"
 		}
@@ -1185,8 +1178,8 @@ func (ui *Gui) setProgress(value float64) {
 	ui.progressBar.SetValue(value)
 }
 
-func (ui *Gui) runPullAll() {
-	ui.app.Events.Dispatch(events.Debugf("gui", "runPullAll called"))
+func (ui *Gui) runPullGroup() {
+	ui.app.Events.Dispatch(events.Debugf("gui", "runPullGroup called"))
 	ui.log("Starting full data pull...")
 	ui.showProgressBar("Running Full Pull...")
 	ui.setProgress(0)
@@ -1200,7 +1193,7 @@ func (ui *Gui) runPullAll() {
 		progress := (float64(current) / float64(total)) * majorStepWeight
 		ui.setProgress(progress)
 	}
-	if err := pull.PullAllAccounts(ui.app, 0, accountsCallback); err != nil {
+	if err := pull.PullGroupAccounts(ui.app, 0, accountsCallback); err != nil {
 		ui.app.Events.Dispatch(events.Errorf("gui", "Error pulling accounts: %v", err))
 		ui.showToast("Error: The data pull failed.")
 		return
@@ -1212,7 +1205,7 @@ func (ui *Gui) runPullAll() {
 		progress := majorStepWeight + (float64(current)/float64(total))*majorStepWeight
 		ui.setProgress(progress)
 	}
-	if err := pull.PullAllCheckins(ui.app, checkinsCallback); err != nil {
+	if err := pull.PullGroupCheckins(ui.app, checkinsCallback); err != nil {
 		ui.app.Events.Dispatch(events.Errorf("gui", "Error pulling checkins: %v", err))
 		ui.showToast("Error: The data pull failed.")
 		return
@@ -1224,7 +1217,7 @@ func (ui *Gui) runPullAll() {
 		progress := 2*majorStepWeight + (float64(current)/float64(total))*majorStepWeight
 		ui.setProgress(progress)
 	}
-	if err := pull.PullAllRoutes(ui.app, routesCallback); err != nil {
+	if err := pull.PullGroupRoutes(ui.app, routesCallback); err != nil {
 		ui.app.Events.Dispatch(events.Errorf("gui", "Error pulling routes: %v", err))
 		ui.showToast("Error: The data pull failed.")
 		return
@@ -1274,7 +1267,7 @@ func (ui *Gui) runPullAccounts() {
 		callback := func(current, total int) {
 			ui.setProgress(float64(current) / float64(total))
 		}
-		if err := pull.PullAllAccounts(ui.app, 0, callback); err != nil {
+		if err := pull.PullGroupAccounts(ui.app, 0, callback); err != nil {
 			ui.log(fmt.Sprintf("ERROR: %v", err))
 			ui.showToast("Error: Failed to pull all accounts.")
 			return
@@ -1311,7 +1304,7 @@ func (ui *Gui) runPullCheckins() {
 		callback := func(current, total int) {
 			ui.setProgress(float64(current) / float64(total))
 		}
-		if err := pull.PullAllCheckins(ui.app, callback); err != nil {
+		if err := pull.PullGroupCheckins(ui.app, callback); err != nil {
 			ui.log(fmt.Sprintf("ERROR: %v", err))
 			ui.showToast("Error: Failed to pull all check-ins.")
 			return
@@ -1348,7 +1341,7 @@ func (ui *Gui) runPullRoutes() {
 		callback := func(current, total int) {
 			ui.setProgress(float64(current) / float64(total))
 		}
-		if err := pull.PullAllRoutes(ui.app, callback); err != nil {
+		if err := pull.PullGroupRoutes(ui.app, callback); err != nil {
 			ui.log(fmt.Sprintf("ERROR: %v", err))
 			ui.showToast("Error: Failed to pull all routes.")
 			return
@@ -1361,6 +1354,13 @@ func (ui *Gui) runPullRoutes() {
 
 func (ui *Gui) runPullProfile() {
 	go func() {
+		if ui.app.DB == nil || ui.app.DB.GetDB() == nil {
+			if err := ui.app.ReloadDB(); err != nil {
+				ui.log(fmt.Sprintf("ERROR: Failed to connect to database: %v", err))
+				ui.showToast("Error: Failed to connect to database.")
+				return
+			}
+		}
 		ui.app.Events.Dispatch(events.Debugf("gui", "runPullProfile called"))
 		ui.log("Starting pull for user profile...")
 		ui.showProgressBar("Pulling User Profile...")
