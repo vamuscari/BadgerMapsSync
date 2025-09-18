@@ -47,34 +47,34 @@ func validateEventsCmd(a *app.App) *cobra.Command {
 		Use:   "validate",
 		Short: "Validate the event actions in the configuration file",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("Validating event actions...")
+			a.Events.Dispatch(events.Infof("action", "Validating event actions..."))
 
 			if a.Config.EventActions == nil {
-				fmt.Println("No event actions found in configuration.")
+				a.Events.Dispatch(events.Warningf("action", "No event actions found in configuration."))
 				return nil
 			}
 
 			valid := true
 			for _, eventAction := range a.Config.EventActions {
-				fmt.Printf("Event: %s (Source: %s)\n", eventAction.Event, eventAction.Source)
+				a.Events.Dispatch(events.Infof("action", "Event: %s (Source: %s)", eventAction.Event, eventAction.Source))
 				for i, config := range eventAction.Run {
 					action, err := events.NewActionFromConfig(config)
 					if err != nil {
-						fmt.Printf("  - Action %d: Error creating action: %v\n", i+1, err)
+						a.Events.Dispatch(events.Errorf("action", "  - Action %d: Error creating action: %v", i+1, err))
 						valid = false
 						continue
 					}
 					if err := action.Validate(); err != nil {
-						fmt.Printf("  - Action %d: Invalid configuration: %v\n", i+1, err)
+						a.Events.Dispatch(events.Errorf("action", "  - Action %d: Invalid configuration: %v", i+1, err))
 						valid = false
 					} else {
-						fmt.Printf("  - Action %d (%s): OK\n", i+1, config.Type)
+						a.Events.Dispatch(events.Infof("action", "  - Action %d (%s): OK", i+1, config.Type))
 					}
 				}
 			}
 
 			if valid {
-				fmt.Println("\nAll event actions are valid.")
+				a.Events.Dispatch(events.Infof("action", "\nAll event actions are valid."))
 			} else {
 				return fmt.Errorf("\none or more event actions are invalid")
 			}

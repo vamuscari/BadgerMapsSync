@@ -2,10 +2,10 @@ package config
 
 import (
 	"badgermaps/app"
+	"badgermaps/events"
 	"fmt"
 	"os"
 
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
@@ -22,7 +22,7 @@ func ConfigCmd(a *app.App) *cobra.Command {
 			// If a config file was specified and doesn't exist, create it.
 			if a.ConfigFile != "" {
 				if _, err := os.Stat(a.ConfigFile); os.IsNotExist(err) {
-					fmt.Println(color.YellowString("Creating config file at %s", a.ConfigFile))
+					a.Events.Dispatch(events.Infof("config", "Creating config file at %s", a.ConfigFile))
 					file, err := os.Create(a.ConfigFile)
 					if err != nil {
 						fmt.Fprintf(os.Stderr, "Error creating config file: %v\n", err)
@@ -32,11 +32,11 @@ func ConfigCmd(a *app.App) *cobra.Command {
 				}
 			}
 
-			fmt.Println(color.CyanString("Starting interactive setup..."))
+			a.Events.Dispatch(events.Infof("config", "Starting interactive setup..."))
 			if a.InteractiveSetup() {
-				fmt.Println(color.GreenString("Setup completed successfully."))
+				a.Events.Dispatch(events.Infof("config", "Setup completed successfully."))
 			} else {
-				fmt.Println(color.RedString("Setup did not complete successfully."))
+				a.Events.Dispatch(events.Errorf("config", "Setup did not complete successfully."))
 			}
 		},
 	}

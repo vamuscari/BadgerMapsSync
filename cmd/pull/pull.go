@@ -5,11 +5,9 @@ import (
 	"badgermaps/app/pull"
 	"badgermaps/events"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 
-	"github.com/fatih/color"
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 )
@@ -21,7 +19,7 @@ func PullCmd(App *app.App) *cobra.Command {
 		Short: "Retrieve data from BadgerMaps API",
 		Long:  `Pull data from the BadgerMaps API to your local database.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("Please specify a data type to pull (account, checkin, route, profile, all)")
+			cmd.Help()
 			os.Exit(1)
 		},
 	}
@@ -56,10 +54,10 @@ func pullAccountCmd(App *app.App) *cobra.Command {
 				}
 				switch e.Type {
 				case events.PullComplete:
-					fmt.Println(color.GreenString("Successfully pulled account %d.", e.Payload.(int)))
+					App.Events.Dispatch(events.Infof("pull", "Successfully pulled account %d.", e.Payload.(int)))
 				case events.PullError:
-					fmt.Println(color.RedString("Error: Failed to pull account %d. The API returned an error.", accountID))
-					fmt.Println(color.YellowString("Details: %v", e.Payload.(error)))
+					App.Events.Dispatch(events.Errorf("pull", "Error: Failed to pull account %d. The API returned an error.", accountID))
+					App.Events.Dispatch(events.Warningf("pull", "Details: %v", e.Payload.(error)))
 				}
 			}
 			App.Events.Subscribe(events.PullComplete, listener)
@@ -91,29 +89,28 @@ func pullAccountsCmd(App *app.App) *cobra.Command {
 						progressbar.OptionSpinnerType(14),
 						progressbar.OptionEnableColorCodes(true),
 					)
-				case events.ResourceIDsFetched:
-					count := e.Payload.(int)
-					if bar != nil {
-						bar.ChangeMax(count)
-						bar.Describe(fmt.Sprintf("Found %d accounts to pull.", count))
-					}
-				case events.StoreSuccess:
-					if bar != nil {
-						bar.Add(1)
-					}
-				case events.PullGroupError:
-					err := e.Payload.(error)
-					if bar != nil {
-						bar.Clear()
-					}
-					log.Printf(color.RedString("An error occurred during pull: %v"), err)
-				case events.PullGroupComplete:
-					if bar != nil {
-						bar.Finish()
-						fmt.Println(color.GreenString("✔ Pull for %s complete.", e.Source))
-					}
-				}
-			}
+				                case events.ResourceIDsFetched:
+				                    count := e.Payload.(int)
+				                    if bar != nil {
+				                        bar.ChangeMax(count)
+				                        bar.Describe(fmt.Sprintf("Found %d accounts to pull.", count))
+				                    }
+				                case events.StoreSuccess:
+				                    if bar != nil {
+				                        bar.Add(1)
+				                    }
+				                case events.PullGroupError:
+				                    err := e.Payload.(error)
+				                    if bar != nil {
+				                        bar.Clear()
+				                    }
+				                    App.Events.Dispatch(events.Errorf("pull", "An error occurred during pull: %v", err))
+				                case events.PullGroupComplete:
+				                    if bar != nil {
+				                        bar.Finish()
+				                        App.Events.Dispatch(events.Infof("pull", "✔ Pull for %s complete.", e.Source))
+				                    }
+				                }			}
 
 			// Subscribe the listener to all relevant events
 			App.Events.Subscribe(events.PullGroupStart, pullListener)
@@ -150,10 +147,10 @@ func pullCheckinCmd(App *app.App) *cobra.Command {
 				}
 				switch e.Type {
 				case events.PullComplete:
-					fmt.Println(color.GreenString("Successfully pulled check-in %d.", e.Payload.(int)))
+					App.Events.Dispatch(events.Infof("pull", "Successfully pulled check-in %d.", e.Payload.(int)))
 				case events.PullError:
-					fmt.Println(color.RedString("Error: Failed to pull check-in %d. The API returned an error.", checkinID))
-					fmt.Println(color.YellowString("Details: %v", e.Payload.(error)))
+					App.Events.Dispatch(events.Errorf("pull", "Error: Failed to pull check-in %d. The API returned an error.", checkinID))
+					App.Events.Dispatch(events.Warningf("pull", "Details: %v", e.Payload.(error)))
 				}
 			}
 			App.Events.Subscribe(events.PullComplete, listener)
@@ -200,11 +197,11 @@ func pullCheckinsCmd(App *app.App) *cobra.Command {
 					if bar != nil {
 						bar.Clear()
 					}
-					log.Printf(color.RedString("An error occurred during pull: %v"), err)
+					App.Events.Dispatch(events.Errorf("pull", "An error occurred during pull: %v", err))
 				case events.PullGroupComplete:
 					if bar != nil {
 						bar.Finish()
-						fmt.Println(color.GreenString("✔ Pull for %s complete.", e.Source))
+						App.Events.Dispatch(events.Infof("pull", "✔ Pull for %s complete.", e.Source))
 					}
 				}
 			}
@@ -244,10 +241,10 @@ func pullRouteCmd(App *app.App) *cobra.Command {
 				}
 				switch e.Type {
 				case events.PullComplete:
-					fmt.Println(color.GreenString("Successfully pulled route %d.", e.Payload.(int)))
+					App.Events.Dispatch(events.Infof("pull", "Successfully pulled route %d.", e.Payload.(int)))
 				case events.PullError:
-					fmt.Println(color.RedString("Error: Failed to pull route %d. The API returned an error.", routeID))
-					fmt.Println(color.YellowString("Details: %v", e.Payload.(error)))
+					App.Events.Dispatch(events.Errorf("pull", "Error: Failed to pull route %d. The API returned an error.", routeID))
+					App.Events.Dispatch(events.Warningf("pull", "Details: %v", e.Payload.(error)))
 				}
 			}
 			App.Events.Subscribe(events.PullComplete, listener)
@@ -294,11 +291,11 @@ func pullRoutesCmd(App *app.App) *cobra.Command {
 					if bar != nil {
 						bar.Clear()
 					}
-					log.Printf(color.RedString("An error occurred during pull: %v"), err)
+					App.Events.Dispatch(events.Errorf("pull", "An error occurred during pull: %v", err))
 				case events.PullGroupComplete:
 					if bar != nil {
 						bar.Finish()
-						fmt.Println(color.GreenString("✔ Pull for %s complete.", e.Source))
+						App.Events.Dispatch(events.Infof("pull", "✔ Pull for %s complete.", e.Source))
 					}
 				}
 			}
@@ -332,10 +329,10 @@ func pullProfileCmd(App *app.App) *cobra.Command {
 				}
 				switch e.Type {
 				case events.PullComplete:
-					fmt.Println(color.GreenString("Successfully pulled user profile."))
+					App.Events.Dispatch(events.Infof("pull", "Successfully pulled user profile."))
 				case events.PullError:
-					fmt.Println(color.RedString("Error: Failed to pull user profile. The API returned an error."))
-					fmt.Println(color.YellowString("Details: %v", e.Payload.(error)))
+					App.Events.Dispatch(events.Errorf("pull", "Error: Failed to pull user profile. The API returned an error."))
+					App.Events.Dispatch(events.Warningf("pull", "Details: %v", e.Payload.(error)))
 				}
 			}
 			App.Events.Subscribe(events.PullComplete, listener)

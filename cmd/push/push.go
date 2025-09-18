@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/fatih/color"
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 )
@@ -20,7 +19,7 @@ func PushCmd(App *app.App) *cobra.Command {
 		Short: "Send data to BadgerMaps API",
 		Long:  `Push data from your local database to the BadgerMaps API.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("Please specify a data type to push (accounts, checkins, all)")
+			cmd.Help()
 			os.Exit(1)
 		},
 	}
@@ -46,18 +45,18 @@ func pushAccountsCmd(a *app.App) *cobra.Command {
 				}
 				switch e.Type {
 				case events.PushScanStart:
-					fmt.Println(color.CyanString("Scanning for pending %s changes...", e.Source))
+					a.Events.Dispatch(events.Infof("push", "Scanning for pending %s changes...", e.Source))
 				                case events.PushItemError:
 				                    err := e.Payload.(error)
-				                    fmt.Println(color.RedString("An error occurred during push: %v", err))
+				                    a.Events.Dispatch(events.Errorf("push", "An error occurred during push: %v", err))
 				                case events.PushError:
 				                    err := e.Payload.(error)
-				                    fmt.Println(color.RedString("An error occurred during push scan: %v", err))
+				                    a.Events.Dispatch(events.Errorf("push", "An error occurred during push scan: %v", err))
 				                case events.PushComplete:					if bar != nil {
 						bar.Finish()
 					}
 					errorCount := e.Payload.(int)
-					fmt.Println(color.GreenString("✔ Push for %s complete. Encountered %d errors.", e.Source, errorCount))
+					a.Events.Dispatch(events.Infof("push", "✔ Push for %s complete. Encountered %d errors.", e.Source, errorCount))
 				}
 			}
 
@@ -89,7 +88,7 @@ func pushCheckinsCmd(a *app.App) *cobra.Command {
 
 				switch e.Type {
 				case events.PushScanStart:
-					fmt.Println(color.CyanString("Scanning for pending %s changes...", e.Source))
+					a.Events.Dispatch(events.Infof("push", "Scanning for pending %s changes...", e.Source))
 				case events.PushScanComplete:
 					changes := e.Payload.([]database.CheckinPendingChange)
 					if len(changes) > 0 {
@@ -105,16 +104,16 @@ func pushCheckinsCmd(a *app.App) *cobra.Command {
 					}
 				case events.PushItemError:
 					err := e.Payload.(error)
-					fmt.Println(color.RedString("An error occurred during push: %v", err))
+					a.Events.Dispatch(events.Errorf("push", "An error occurred during push: %v", err))
 				case events.PushError:
 					err := e.Payload.(error)
-					fmt.Println(color.RedString("An error occurred during push scan: %v", err))
+					a.Events.Dispatch(events.Errorf("push", "An error occurred during push scan: %v", err))
 				case events.PushComplete:
 					if bar != nil {
 						bar.Finish()
 					}
 					errorCount := e.Payload.(int)
-					fmt.Println(color.GreenString("✔ Push for %s complete. Encountered %d errors.", e.Source, errorCount))
+					a.Events.Dispatch(events.Infof("push", "✔ Push for %s complete. Encountered %d errors.", e.Source, errorCount))
 				}
 			}
 

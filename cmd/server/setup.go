@@ -1,14 +1,13 @@
 package server
 
 import (
+	"badgermaps/app"
+	"badgermaps/events"
+	"badgermaps/utils"
 	"bufio"
 	"fmt"
 	"os"
 
-	"badgermaps/app"
-	"badgermaps/utils"
-
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
@@ -19,10 +18,10 @@ func newServerSetupCmd(App *app.App) *cobra.Command {
 		Long:  `An interactive setup wizard to configure server settings like host, port, TLS, and webhook secret.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := interactiveServerSetup(App); err != nil {
-				fmt.Println(color.RedString("Error during server setup: %v", err))
+				App.Events.Dispatch(events.Errorf("server", "Error during server setup: %v", err))
 				os.Exit(1)
 			}
-			fmt.Println(color.GreenString("Server configuration saved successfully."))
+			App.Events.Dispatch(events.Infof("server", "Server configuration saved successfully."))
 		},
 	}
 	return cmd

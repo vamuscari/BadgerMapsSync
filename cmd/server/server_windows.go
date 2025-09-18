@@ -41,10 +41,10 @@ func newServerInstallCmd(a *app.App) *cobra.Command {
 		Short: "Install the server as a Windows service",
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := installService(); err != nil {
-				fmt.Println(color.RedString("Failed to install service: %v", err))
+				a.Events.Dispatch(events.Errorf("server", "Failed to install service: %v", err))
 				os.Exit(1)
 			}
-			fmt.Println(color.GreenString("Service '%s' installed successfully.", serviceName))
+			a.Events.Dispatch(events.Infof("server", "Service '%s' installed successfully.", serviceName))
 		},
 	}
 }
@@ -55,10 +55,10 @@ func newServerUninstallCmd(a *app.App) *cobra.Command {
 		Short: "Uninstall the Windows service",
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := uninstallService(); err != nil {
-				fmt.Println(color.RedString("Failed to uninstall service: %v", err))
+				a.Events.Dispatch(events.Errorf("server", "Failed to uninstall service: %v", err))
 				os.Exit(1)
 			}
-			fmt.Println(color.GreenString("Service '%s' uninstalled successfully.", serviceName))
+			a.Events.Dispatch(events.Infof("server", "Service '%s' uninstalled successfully.", serviceName))
 		},
 	}
 }

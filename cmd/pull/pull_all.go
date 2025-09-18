@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 
-	"github.com/fatih/color"
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 )
@@ -59,11 +58,11 @@ func runPullGroup(a *app.App, top int) {
 			if bar != nil {
 				bar.Clear()
 			}
-			log.Printf(color.RedString("An error occurred during pull: %v"), err)
+			a.Events.Dispatch(events.Errorf("pull", "An error occurred during pull: %v", err))
 		case events.PullGroupComplete:
 			if bar != nil {
 				bar.Finish()
-				fmt.Println(color.GreenString("✔ Pull for %s complete.", e.Source))
+				a.Events.Dispatch(events.Infof("pull", "✔ Pull for %s complete.", e.Source))
 			}
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"badgermaps/app"
 	"badgermaps/app/push"
 	"badgermaps/database"
+	"badgermaps/events"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -51,7 +52,7 @@ func listCmd(App *app.App) *cobra.Command {
 					return fmt.Errorf("unexpected type for account changes")
 				}
 				if len(changes) == 0 {
-					fmt.Println("No pending account changes found.")
+					App.Events.Dispatch(events.Infof("push", "No pending account changes found."))
 					return nil
 				}
 				fmt.Fprintln(w, "ID\tAccount ID\tType\tStatus\tCreated At\tChanges")
@@ -64,7 +65,7 @@ func listCmd(App *app.App) *cobra.Command {
 					return fmt.Errorf("unexpected type for checkin changes")
 				}
 				if len(changes) == 0 {
-					fmt.Println("No pending check-in changes found.")
+					App.Events.Dispatch(events.Infof("push", "No pending check-in changes found."))
 					return nil
 				}
 				fmt.Fprintln(w, "ID\tCheckin ID\tAccount ID\tType\tStatus\tCreated At\tChanges")

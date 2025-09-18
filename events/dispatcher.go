@@ -32,8 +32,9 @@ func (d *EventDispatcher) Dispatch(e Event) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if d.app.GetState().Debug {
-		fmt.Printf("Dispatching event: %s (Source: %s)\n", e.Type.String(), e.Source)
+	// We don't dispatch a debug event here to avoid an infinite loop of dispatching debug events.
+	if d.app.GetState().Debug && e.Type != Debug {
+		d.Dispatch(Debugf("dispatcher", "Dispatching event: %s (Source: %s)", e.Type.String(), e.Source))
 	}
 
 	// Execute configured event actions

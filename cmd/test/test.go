@@ -2,18 +2,17 @@ package test
 
 import (
 	"badgermaps/app"
+	"badgermaps/events"
 	"badgermaps/utils"
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
@@ -42,10 +41,10 @@ func TestCmd(App *app.App) *cobra.Command {
 }
 
 func runTests(App *app.App) {
-	fmt.Println(color.CyanString("Running all tests..."))
+	App.Events.Dispatch(events.Infof("test", "Running all tests..."))
 	testDatabase(App)
 	testApi(App, false)
-	fmt.Println(color.GreenString("All tests completed successfully"))
+	App.Events.Dispatch(events.Infof("test", "All tests completed successfully"))
 }
 
 func testDatabaseCmd(App *app.App) *cobra.Command {
@@ -75,47 +74,45 @@ func testApiCmd(App *app.App) *cobra.Command {
 }
 
 func testApi(App *app.App, save bool) {
-	var output io.Writer = os.Stdout
 	var testDir string
 
 	if save {
 		timestamp := time.Now().Format("2006-01-02_15-04-05")
 		testDir = fmt.Sprintf("test-run-%s", timestamp)
 		if err := os.Mkdir(testDir, 0755); err != nil {
-			fmt.Println(color.RedString("FAILED: Could not create test output directory: %v", err))
+			App.Events.Dispatch(events.Errorf("test", "FAILED: Could not create test output directory: %v", err))
 			os.Exit(1)
 		}
 
 		logFilePath := filepath.Join(testDir, "test-run.log")
 		logFile, err := os.Create(logFilePath)
 		if err != nil {
-			fmt.Println(color.RedString("FAILED: Could not create log file: %v", err))
+			App.Events.Dispatch(events.Errorf("test", "FAILED: Could not create log file: %v", err))
 			os.Exit(1)
 		}
 		defer logFile.Close()
 
-		output = io.MultiWriter(os.Stdout, logFile)
-		fmt.Fprintf(output, "Saving test results to %s\n", testDir)
+		App.Events.Dispatch(events.Infof("test", "Saving test results to %s", testDir))
 	}
 
-	fmt.Fprintln(output, color.CyanString("Testing API..."))
+	App.Events.Dispatch(events.Infof("test", "Testing API..."))
 	api := App.API
 	if api == nil {
-		fmt.Fprintln(output, color.RedString("FAILED: API client not initialized in App state"))
+		App.Events.Dispatch(events.Errorf("test", "FAILED: API client not initialized in App state"))
 		os.Exit(1)
 	}
 
-	fmt.Fprintln(output, color.CyanString("Connecting to API..."))
+	App.Events.Dispatch(events.Infof("test", "Connecting to API..."))
 	start := time.Now()
 	if err := api.TestAPIConnection(); err != nil {
-		fmt.Fprintln(output, color.RedString("FAILED: Could not connect to API"))
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		App.Events.Dispatch(events.Errorf("test", "FAILED: Could not connect to API"))
+		App.Events.Dispatch(events.Errorf("test", "Error: %v", err))
 		os.Exit(1)
 	}
 	duration := time.Since(start)
-	fmt.Fprintln(output, color.GreenString("PASSED: API connection successful (%dms)", duration.Milliseconds()))
+	App.Events.Dispatch(events.Infof("test", "PASSED: API connection successful (%dms)", duration.Milliseconds()))
 
-	fmt.Fprintln(output, color.CyanString("\nTesting all API endpoints..."))
+	App.Events.Dispatch(events.Infof("test", "\nTesting all API endpoints..."))
 
 	results := []EndpointTestResult{}
 
@@ -167,28 +164,28 @@ func testApi(App *app.App, save bool) {
 	for _, result := range results {
 		if !result.Passed {
 			hasErrors = true
-			fmt.Fprintf(output, "%s: %s (%dms)\n", result.Endpoint, color.RedString("FAILED"), result.Duration.Milliseconds())
+			App.Events.Dispatch(events.Errorf("test", "%s: FAILED (%dms)", result.Endpoint, result.Duration.Milliseconds()))
 			if App.State.Debug {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", result.Error)
-				fmt.Fprintf(os.Stderr, "Response: %s\n", result.Response)
+				App.Events.Dispatch(events.Debugf("test", "Error: %v", result.Error))
+				App.Events.Dispatch(events.Debugf("test", "Response: %s", result.Response))
 			}
 		} else {
-			fmt.Fprintf(output, "%s: %s (%dms)\n", result.Endpoint, color.GreenString("PASSED"), result.Duration.Milliseconds())
+			App.Events.Dispatch(events.Infof("test", "%s: PASSED (%dms)", result.Endpoint, result.Duration.Milliseconds()))
 		}
 		if save && result.Response != "" {
 			responseFileName := fmt.Sprintf("%s_response.json", strings.ReplaceAll(result.Endpoint, " ", "_"))
 			responseFilePath := filepath.Join(testDir, responseFileName)
 			if err := os.WriteFile(responseFilePath, []byte(result.Response), 0644); err != nil {
-				fmt.Fprintf(output, color.RedString("FAILED: Could not save response for %s: %v\n", result.Endpoint, err))
+				App.Events.Dispatch(events.Errorf("test", "FAILED: Could not save response for %s: %v", result.Endpoint, err))
 			}
 		}
 	}
 
 	if hasErrors {
-		fmt.Fprintln(output, color.RedString("\nSome API endpoint tests failed."))
+		App.Events.Dispatch(events.Errorf("test", "\nSome API endpoint tests failed."))
 		os.Exit(1)
 	}
-	fmt.Fprintln(output, color.GreenString("\nPASSED: All API endpoints responded successfully"))
+	App.Events.Dispatch(events.Infof("test", "\nPASSED: All API endpoints responded successfully"))
 }
 
 func testCustomersEndpoint(App *app.App) EndpointTestResult {
@@ -424,53 +421,53 @@ func testDeleteAccount(App *app.App, accountId int) EndpointTestResult {
 }
 
 func testDatabase(App *app.App) {
-	fmt.Println(color.CyanString("Testing database..."))
+	App.Events.Dispatch(events.Infof("test", "Testing database..."))
 	db := App.DB
 	if db == nil {
-		fmt.Println(color.RedString("FAILED: Database not initialized in App state"))
+		App.Events.Dispatch(events.Errorf("test", "FAILED: Database not initialized in App state"))
 		os.Exit(1)
 	}
 
-	fmt.Println(color.CyanString("Connecting to %s database...", db.GetType()))
+	App.Events.Dispatch(events.Infof("test", "Connecting to %s database...", db.GetType()))
 	if err := db.TestConnection(); err != nil {
-		fmt.Println(color.RedString("FAILED: Could not connect to database"))
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		App.Events.Dispatch(events.Errorf("test", "FAILED: Could not connect to database"))
+		App.Events.Dispatch(events.Errorf("test", "Error: %v", err))
 		os.Exit(1)
 	}
-	fmt.Println(color.GreenString("PASSED: Database connection successful"))
+	App.Events.Dispatch(events.Infof("test", "PASSED: Database connection successful"))
 
-	fmt.Println(color.CyanString("\nValidating database schema..."))
+	App.Events.Dispatch(events.Infof("test", "\nValidating database schema..."))
 	if err := db.ValidateSchema(App.State); err != nil {
-		fmt.Println(color.RedString("FAILED: Schema validation failed"))
+		App.Events.Dispatch(events.Errorf("test", "FAILED: Schema validation failed"))
 		if App.State.Debug {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			App.Events.Dispatch(events.Debugf("test", "Error: %v", err))
 		}
 
 		reader := bufio.NewReader(os.Stdin)
 		if utils.PromptBool(reader, "Would you like to drop all tables and re-initialize the schema?", false) {
-			fmt.Println(color.YellowString("Dropping all tables..."))
+			App.Events.Dispatch(events.Warningf("test", "Dropping all tables..."))
 			if err := db.DropAllTables(); err != nil {
-				fmt.Println(color.RedString("FAILED: Could not drop tables"))
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				App.Events.Dispatch(events.Errorf("test", "FAILED: Could not drop tables"))
+				App.Events.Dispatch(events.Errorf("test", "Error: %v", err))
 				os.Exit(1)
 			}
-			fmt.Println(color.GreenString("Tables dropped successfully."))
+			App.Events.Dispatch(events.Infof("test", "Tables dropped successfully."))
 
-			fmt.Println(color.CyanString("Re-initializing schema..."))
+			App.Events.Dispatch(events.Infof("test", "Re-initializing schema..."))
 			if err := db.EnforceSchema(App.State); err != nil {
-				fmt.Println(color.RedString("FAILED: Could not enforce schema"))
+				App.Events.Dispatch(events.Errorf("test", "FAILED: Could not enforce schema"))
 				if App.State.Debug {
-					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+					App.Events.Dispatch(events.Debugf("test", "Error: %v", err))
 				}
 				os.Exit(1)
 			}
-			fmt.Println(color.GreenString("Schema re-initialized successfully."))
+			App.Events.Dispatch(events.Infof("test", "Schema re-initialized successfully."))
 
-			fmt.Println(color.CyanString("\nRe-validating database schema..."))
+			App.Events.Dispatch(events.Infof("test", "\nRe-validating database schema..."))
 			if err := db.ValidateSchema(App.State); err != nil {
-				fmt.Println(color.RedString("FAILED: Schema validation failed again after re-initialization"))
+				App.Events.Dispatch(events.Errorf("test", "FAILED: Schema validation failed again after re-initialization"))
 				if App.State.Debug {
-					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+					App.Events.Dispatch(events.Debugf("test", "Error: %v", err))
 				}
 				os.Exit(1)
 			}
@@ -478,5 +475,5 @@ func testDatabase(App *app.App) {
 			os.Exit(1)
 		}
 	}
-	fmt.Println(color.GreenString("PASSED: All required tables exist"))
+	App.Events.Dispatch(events.Infof("test", "PASSED: All required tables exist"))
 }

@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"badgermaps/api"
 	"badgermaps/app"
 	"badgermaps/app/pull"
 	"badgermaps/app/push"
@@ -964,9 +965,15 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 	apiKeyEntry.SetText(ui.app.API.APIKey)
 	baseURLEntry := widget.NewEntry()
 	baseURLEntry.SetText(ui.app.API.BaseURL)
-	apiCard := widget.NewCard("API Configuration", "", widget.NewForm(
-		widget.NewFormItem("API Key", apiKeyEntry),
-		widget.NewFormItem("Base URL", baseURLEntry),
+	testApiButton := widget.NewButtonWithIcon("Test Connection", theme.HelpIcon(), func() {
+		go ui.testAPIConnection(apiKeyEntry.Text, baseURLEntry.Text)
+	})
+	apiCard := widget.NewCard("API Configuration", "", container.NewVBox(
+		widget.NewForm(
+			widget.NewFormItem("API Key", apiKeyEntry),
+			widget.NewFormItem("Base URL", baseURLEntry),
+		),
+		testApiButton,
 	))
 
 	// Database Settings
@@ -1018,9 +1025,18 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 	}
 	dbTypeSelect.SetSelected(ui.app.DB.GetType())
 
+	testDbButton := widget.NewButtonWithIcon("Test Connection", theme.HelpIcon(), nil)
+	testDbButton.OnTapped = func() {
+		go ui.testDBConnection(
+			testDbButton, dbTypeSelect.Selected, dbPathEntry.Text, dbHostEntry.Text,
+			dbPortEntry.Text, dbUserEntry.Text, dbPassEntry.Text, dbNameEntry.Text,
+		)
+	}
+
 	dbCard := widget.NewCard("Database Configuration", "", container.NewVBox(
 		container.NewGridWithColumns(2, widget.NewLabel("Database Type"), dbTypeSelect),
 		dbForm,
+		testDbButton,
 	))
 
 	// Server Settings
@@ -1067,14 +1083,6 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 	otherCard := widget.NewCard("Other Settings", "", verboseCheck)
 
 	// Buttons
-	testButton := widget.NewButtonWithIcon("Test Connection", theme.HelpIcon(), nil)
-	testButton.OnTapped = func() {
-		go ui.testDBConnection(
-			testButton, dbTypeSelect.Selected, dbPathEntry.Text, dbHostEntry.Text,
-			dbPortEntry.Text, dbUserEntry.Text, dbPassEntry.Text, dbNameEntry.Text,
-		)
-	}
-
 	saveButton := NewSecondaryButton("Save Configuration", theme.ConfirmIcon(), func() {
 		ui.saveConfig(
 			apiKeyEntry.Text, baseURLEntry.Text, dbTypeSelect.Selected, dbPathEntry.Text,
@@ -1105,7 +1113,7 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 
 	schemaCard := widget.NewCard("Schema Management", "", schemaButton)
 
-	topButtons := container.NewGridWithColumns(3, viewButton, testButton, saveButton)
+	topButtons := container.NewGridWithColumns(2, viewButton, saveButton)
 
 	return container.NewVBox(
 		NewSpacer(fyne.NewSize(0, 10)),
@@ -1116,6 +1124,24 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 		otherCard,
 		schemaCard,
 	)
+}
+
+func (ui *Gui) testAPIConnection(apiKey, baseURL string) {
+	ui.app.Events.Dispatch(events.Debugf("gui", "testAPIConnection called"))
+	ui.log("Testing API connection...")
+
+	// Create a temporary API client for testing
+	apiClient := api.NewAPIClient(&api.APIConfig{
+		APIKey:  apiKey,
+		BaseURL: baseURL,
+	})
+
+	if err := apiClient.TestAPIConnection(); err != nil {
+		ui.log(fmt.Sprintf("API connection failed: %v", err))
+		return
+	}
+
+	ui.log("API connection successful!")
 }
 
 // log adds a message to the log view

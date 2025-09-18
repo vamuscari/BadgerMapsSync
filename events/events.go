@@ -142,6 +142,11 @@ func Infof(source, format string, a ...interface{}) Event {
 	return NewLogEvent(LogLevelInfo, source, fmt.Sprintf(format, a...), nil)
 }
 
+// Warningf creates a new warning log event with formatted message.
+func Warningf(source, format string, a ...interface{}) Event {
+	return NewLogEvent(LogLevelWarn, source, fmt.Sprintf(format, a...), nil)
+}
+
 // Debugf creates a new debug log event with formatted message.
 func Debugf(source, format string, a ...interface{}) Event {
 	return NewLogEvent(LogLevelDebug, source, fmt.Sprintf(format, a...), nil)

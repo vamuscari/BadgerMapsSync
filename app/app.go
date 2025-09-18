@@ -249,20 +249,20 @@ func (a *App) TriggerEventAction(action string) error {
 	case "db":
 		go func(functionName string) {
 			if err := a.DB.RunFunction(functionName); err != nil {
-				fmt.Printf("Error executing db function '%s': %v\n", functionName, err)
+				a.Events.Dispatch(events.Errorf("app", "Error executing db function '%s': %v", functionName, err))
 			}
 		}(actionValue)
 	case "api":
 		go func(endpoint string) {
 			if _, err := a.API.GetRaw(endpoint); err != nil {
-				fmt.Printf("Error executing api action '%s': %v\n", endpoint, err)
+				a.Events.Dispatch(events.Errorf("app", "Error executing api action '%s': %v", endpoint, err))
 			}
 		}(actionValue)
 	case "exec":
 		go func(command string) {
 			cmd := exec.Command("sh", "-c", command)
 			if err := cmd.Run(); err != nil {
-				fmt.Printf("Error executing command '%s': %v\n", command, err)
+				a.Events.Dispatch(events.Errorf("app", "Error executing command '%s': %v", command, err))
 			}
 		}(actionValue)
 	default:
@@ -278,7 +278,7 @@ func (a *App) EnsureConfig(isGui bool) {
 
 	path, ok, err := a.GetConfigFilePath()
 	if err != nil {
-		fmt.Println(utils.Colors.Red("Error getting config file path: %v", err))
+		a.Events.Dispatch(events.Errorf("config", "Error getting config file path: %v", err))
 		os.Exit(1)
 	}
 
@@ -302,36 +302,36 @@ func (a *App) EnsureConfig(isGui bool) {
 	// If running in GUI mode and no config is found, just load the defaults and continue.
 	if isGui {
 		if a.State.Verbose || a.State.Debug {
-			fmt.Println(utils.Colors.Yellow("No configuration file found. Loading default settings for GUI."))
+			a.Events.Dispatch(events.Warningf("config", "No configuration file found. Loading default settings for GUI."))
 		}
 		// LoadConfig with no path will initialize with defaults
 		if err := a.LoadConfig(); err != nil {
-			fmt.Println(utils.Colors.Red("Error loading default configuration: %v", err))
+			a.Events.Dispatch(events.Errorf("config", "Error loading default configuration: %v", err))
 			// In GUI mode, we might still want to continue with a broken config to allow fixing it.
 		}
 		return
 	}
 
 	if a.State.Verbose || a.State.Debug {
-		fmt.Println(utils.Colors.Yellow("No configuration file found (config.yaml)."))
+		a.Events.Dispatch(events.Warningf("config", "No configuration file found (config.yaml)."))
 	}
 
 	if a.State.NoInput {
-		fmt.Println(utils.Colors.Red("No configuration file found and interactive prompts are disabled. Exiting."))
+		a.Events.Dispatch(events.Errorf("config", "No configuration file found and interactive prompts are disabled. Exiting."))
 		os.Exit(1)
 	}
 
 	if promptForSetup() {
 		if a.InteractiveSetup() {
 			if err := a.LoadConfig(); err != nil {
-				fmt.Println(utils.Colors.Red("Error reloading configuration after setup: %v", err))
+				a.Events.Dispatch(events.Errorf("config", "Error reloading configuration after setup: %v", err))
 				os.Exit(1)
 			}
 			return
 		}
 	}
 
-	fmt.Println(utils.Colors.Yellow("Setup is required to use this command. Exiting."))
+	a.Events.Dispatch(events.Warningf("config", "Setup is required to use this command. Exiting."))
 	os.Exit(0)
 }
 
@@ -388,15 +388,15 @@ func (a *App) InteractiveSetup() bool {
 	var err error
 	a.DB, err = database.NewDB(&a.Config.DB)
 	if err != nil {
-		fmt.Println(utils.Colors.Red("Failed to load database settings: %v", err))
+		a.Events.Dispatch(events.Errorf("setup", "Failed to load database settings: %v", err))
 		return false
 	}
 	if err := a.DB.TestConnection(); err != nil {
-		fmt.Println(utils.Colors.Red("Database connection failed: %v", err))
-		fmt.Println(utils.Colors.Yellow("Please check your database settings and try again."))
+		a.Events.Dispatch(events.Errorf("setup", "Database connection failed: %v", err))
+		a.Events.Dispatch(events.Warningf("setup", "Please check your database settings and try again."))
 		return false
 	}
-	fmt.Println(utils.Colors.Green("Database connection successful."))
+	a.Events.Dispatch(events.Infof("setup", "Database connection successful."))
 
 	// Advanced Settings
 	fmt.Println(utils.Colors.Blue("---" + " Advanced Settings ---"))
@@ -404,41 +404,41 @@ func (a *App) InteractiveSetup() bool {
 
 	// Save configuration
 	if err := a.SaveConfig(); err != nil {
-		fmt.Println(utils.Colors.Red("Error saving config file: %v", err))
+		a.Events.Dispatch(events.Errorf("setup", "Error saving config file: %v", err))
 		return false
 	}
 
 	fmt.Println()
-	fmt.Println(utils.Colors.Green("✓ Setup completed successfully!"))
-	fmt.Println(utils.Colors.Green("Configuration saved to: %s", a.ConfigFile))
+	a.Events.Dispatch(events.Infof("setup", "✓ Setup completed successfully!"))
+	a.Events.Dispatch(events.Infof("setup", "Configuration saved to: %s", a.ConfigFile))
 
 	// Check if the database schema is valid
 	if err := a.DB.ValidateSchema(a.State); err == nil {
-		fmt.Println(utils.Colors.Yellow("Database schema already exists and is valid."))
+		a.Events.Dispatch(events.Warningf("setup", "Database schema already exists and is valid."))
 		reinitialize := utils.PromptBool(reader, "Do you want to reinitialize the database? (This will delete all existing data)", false)
 		if reinitialize {
-			fmt.Println(utils.Colors.Yellow("Reinitializing database..."))
+			a.Events.Dispatch(events.Warningf("setup", "Reinitializing database..."))
 			if err := a.DB.DropAllTables(); err != nil {
-				fmt.Println(utils.Colors.Red("Error dropping tables: %v", err))
+				a.Events.Dispatch(events.Errorf("setup", "Error dropping tables: %v", err))
 				return false
 			}
 			if err := a.DB.EnforceSchema(a.State); err != nil {
-				fmt.Println(utils.Colors.Red("Error enforcing schema: %v", err))
+				a.Events.Dispatch(events.Errorf("setup", "Error enforcing schema: %v", err))
 				return false
 			}
-			fmt.Println(utils.Colors.Green("Database reinitialized successfully."))
+			a.Events.Dispatch(events.Infof("setup", "Database reinitialized successfully."))
 		}
 	} else {
 		// Schema is invalid or does not exist
-		fmt.Println(utils.Colors.Yellow("Database schema is invalid or missing."))
+		a.Events.Dispatch(events.Warningf("setup", "Database schema is invalid or missing."))
 		enforce := utils.PromptBool(reader, "Do you want to create/update the database schema now?", true)
 		if enforce {
-			fmt.Println(utils.Colors.Yellow("Enforcing schema..."))
+			a.Events.Dispatch(events.Warningf("setup", "Enforcing schema..."))
 			if err := a.DB.EnforceSchema(a.State); err != nil {
-				fmt.Println(utils.Colors.Red("Error enforcing schema: %v", err))
+				a.Events.Dispatch(events.Errorf("setup", "Error enforcing schema: %v", err))
 				return false
 			}
-			fmt.Println(utils.Colors.Green("Database schema created/updated successfully."))
+			a.Events.Dispatch(events.Infof("setup", "Database schema created/updated successfully."))
 		}
 	}
 

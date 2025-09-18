@@ -16,7 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
@@ -70,11 +69,11 @@ func newServerStartCmd(a *app.App) *cobra.Command {
 		Short: "Start the webhook server in the background",
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := server.StartServer(a); err != nil {
-				fmt.Println(color.RedString("Failed to start server: %v", err))
+				a.Events.Dispatch(events.Errorf("server", "Failed to start server: %v", err))
 				os.Exit(1)
 			}
 			pid, _ := server.GetServerStatus(a)
-			fmt.Println(color.GreenString("Server started successfully with PID %d.", pid))
+			a.Events.Dispatch(events.Infof("server", "Server started successfully with PID %d.", pid))
 		},
 	}
 }
@@ -85,10 +84,10 @@ func newServerStopCmd(a *app.App) *cobra.Command {
 		Short: "Stop the webhook server",
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := server.StopServer(a); err != nil {
-				fmt.Println(color.RedString("Failed to stop server: %v", err))
+				a.Events.Dispatch(events.Errorf("server", "Failed to stop server: %v", err))
 				os.Exit(1)
 			}
-			fmt.Println(color.GreenString("Server stopped successfully."))
+			a.Events.Dispatch(events.Infof("server", "Server stopped successfully."))
 		},
 	}
 }
@@ -99,9 +98,9 @@ func newServerStatusCmd(a *app.App) *cobra.Command {
 		Short: "Check the status of the webhook server",
 		Run: func(cmd *cobra.Command, args []string) {
 			if pid, running := server.GetServerStatus(a); running {
-				fmt.Println(color.GreenString("Server is running with PID %d.", pid))
+				a.Events.Dispatch(events.Infof("server", "Server is running with PID %d.", pid))
 			} else {
-				fmt.Println(color.YellowString("Server is not running."))
+				a.Events.Dispatch(events.Warningf("server", "Server is not running."))
 			}
 		},
 	}
