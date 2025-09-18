@@ -37,9 +37,9 @@ const (
 	PullError
 
 	// Group Pull Events
-	PullAllStart
-	PullAllComplete
-	PullAllError
+	PullGroupStart
+	PullGroupComplete
+	PullGroupError
 
 	// Push Events
 	PushScanStart
@@ -154,12 +154,22 @@ type EventListener func(e Event)
 func AllEventTypes() []string {
 	return []string{
 		PullComplete.String(),
-		PullAllStart.String(),
-		PullAllComplete.String(),
+		PullGroupStart.String(),
+		PullGroupComplete.String(),
 		PushScanComplete.String(),
 		PushComplete.String(),
 		ActionSuccess.String(),
 		ActionError.String(),
+	}
+}
+
+// AllEventSources returns a slice of all event source strings suitable for user configuration.
+func AllEventSources() []string {
+	return []string{
+		"",
+		"accounts",
+		"checkins",
+		"routes",
 	}
 }
 

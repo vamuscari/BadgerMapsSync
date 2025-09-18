@@ -36,14 +36,14 @@ func PullAccount(a *app.App, accountID int) (err error) {
 	return nil
 }
 
-func PullAllAccounts(a *app.App, top int, progressCallback func(current, total int)) (err error) {
-	a.Events.Dispatch(events.Event{Type: events.PullAllStart, Source: "accounts"})
+func PullGroupAccounts(a *app.App, top int, progressCallback func(current, total int)) (err error) {
+	a.Events.Dispatch(events.Event{Type: events.PullGroupStart, Source: "accounts"})
 
 	defer func() {
 		if err != nil {
-			a.Events.Dispatch(events.Event{Type: events.PullAllError, Source: "accounts", Payload: err})
+			a.Events.Dispatch(events.Event{Type: events.PullGroupError, Source: "accounts", Payload: err})
 		} else {
-			a.Events.Dispatch(events.Event{Type: events.PullAllComplete, Source: "accounts"})
+			a.Events.Dispatch(events.Event{Type: events.PullGroupComplete, Source: "accounts"})
 		}
 	}()
 
@@ -136,14 +136,14 @@ func PullCheckin(a *app.App, checkinID int) (err error) {
 	return nil
 }
 
-func PullAllCheckins(a *app.App, progressCallback func(current, total int)) (err error) {
-	a.Events.Dispatch(events.Event{Type: events.PullAllStart, Source: "checkins"})
+func PullGroupCheckins(a *app.App, progressCallback func(current, total int)) (err error) {
+	a.Events.Dispatch(events.Event{Type: events.PullGroupStart, Source: "checkins"})
 
 	defer func() {
 		if err != nil {
-			a.Events.Dispatch(events.Event{Type: events.PullAllError, Source: "checkins", Payload: err})
+			a.Events.Dispatch(events.Event{Type: events.PullGroupError, Source: "checkins", Payload: err})
 		} else {
-			a.Events.Dispatch(events.Event{Type: events.PullAllComplete, Source: "checkins"})
+			a.Events.Dispatch(events.Event{Type: events.PullGroupComplete, Source: "checkins"})
 		}
 	}()
 
@@ -250,14 +250,14 @@ func PullRoute(a *app.App, routeID int) (err error) {
 	return nil
 }
 
-func PullAllRoutes(a *app.App, progressCallback func(current, total int)) (err error) {
-	a.Events.Dispatch(events.Event{Type: events.PullAllStart, Source: "routes"})
+func PullGroupRoutes(a *app.App, progressCallback func(current, total int)) (err error) {
+	a.Events.Dispatch(events.Event{Type: events.PullGroupStart, Source: "routes"})
 
 	defer func() {
 		if err != nil {
-			a.Events.Dispatch(events.Event{Type: events.PullAllError, Source: "routes", Payload: err})
+			a.Events.Dispatch(events.Event{Type: events.PullGroupError, Source: "routes", Payload: err})
 		} else {
-			a.Events.Dispatch(events.Event{Type: events.PullAllComplete, Source: "routes"})
+			a.Events.Dispatch(events.Event{Type: events.PullGroupComplete, Source: "routes"})
 		}
 	}()
 

@@ -23,7 +23,7 @@ func PullAllCmd(a *app.App) *cobra.Command {
 		Short: "Pull all accounts, checkins, and routes from BadgerMaps.",
 		Long:  `Pulls all data including accounts, check-ins, and routes from the BadgerMaps API and stores it in the local database.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			runPullAll(a, top)
+			runPullGroup(a, top)
 		},
 	}
 
@@ -32,12 +32,12 @@ func PullAllCmd(a *app.App) *cobra.Command {
 	return cmd
 }
 
-func runPullAll(a *app.App, top int) {
+func runPullGroup(a *app.App, top int) {
 	log.SetOutput(os.Stderr) // Configure logger to write to stderr
 
 	pullListener := func(e events.Event) {
 		switch e.Type {
-		case events.PullAllStart:
+		case events.PullGroupStart:
 			bar = progressbar.NewOptions(-1,
 				progressbar.OptionSetDescription(fmt.Sprintf("Starting pull for %s...", e.Source)),
 				progressbar.OptionSetWriter(os.Stderr),
@@ -54,13 +54,13 @@ func runPullAll(a *app.App, top int) {
 			if bar != nil {
 				bar.Add(1)
 			}
-		case events.PullAllError:
+		case events.PullGroupError:
 			err := e.Payload.(error)
 			if bar != nil {
 				bar.Clear()
 			}
 			log.Printf(color.RedString("An error occurred during pull: %v"), err)
-		case events.PullAllComplete:
+		case events.PullGroupComplete:
 			if bar != nil {
 				bar.Finish()
 				fmt.Println(color.GreenString("✔ Pull for %s complete.", e.Source))
@@ -69,26 +69,26 @@ func runPullAll(a *app.App, top int) {
 	}
 
 	// Subscribe the listener to all relevant events
-	a.Events.Subscribe(events.PullAllStart, pullListener)
+	a.Events.Subscribe(events.PullGroupStart, pullListener)
 	a.Events.Subscribe(events.ResourceIDsFetched, pullListener)
 	a.Events.Subscribe(events.StoreSuccess, pullListener)
-	a.Events.Subscribe(events.PullAllError, pullListener)
-	a.Events.Subscribe(events.PullAllComplete, pullListener)
+	a.Events.Subscribe(events.PullGroupError, pullListener)
+	a.Events.Subscribe(events.PullGroupComplete, pullListener)
 
 	// --- Execute Pull Operations ---
 	a.Events.Dispatch(events.Infof("pull", "Starting data pull from BadgerMaps API..."))
 
-	if err := pull.PullAllAccounts(a, top, nil); err != nil {
+	if err := pull.PullGroupAccounts(a, top, nil); err != nil {
 		a.Events.Dispatch(events.Errorf("pull", "Failed to pull accounts: %v", err))
 		os.Exit(1)
 	}
 
-	if err := pull.PullAllCheckins(a, nil); err != nil {
+	if err := pull.PullGroupCheckins(a, nil); err != nil {
 		a.Events.Dispatch(events.Errorf("pull", "Failed to pull checkins: %v", err))
 		os.Exit(1)
 	}
 
-	if err := pull.PullAllRoutes(a, nil); err != nil {
+	if err := pull.PullGroupRoutes(a, nil); err != nil {
 		a.Events.Dispatch(events.Errorf("pull", "Failed to pull routes: %v", err))
 		os.Exit(1)
 	}

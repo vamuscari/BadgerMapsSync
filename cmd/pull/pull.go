@@ -84,7 +84,7 @@ func pullAccountsCmd(App *app.App) *cobra.Command {
 					return
 				}
 				switch e.Type {
-				case events.PullAllStart:
+				case events.PullGroupStart:
 					bar = progressbar.NewOptions(-1,
 						progressbar.OptionSetDescription("Pulling accounts..."),
 						progressbar.OptionSetWriter(os.Stderr),
@@ -101,13 +101,13 @@ func pullAccountsCmd(App *app.App) *cobra.Command {
 					if bar != nil {
 						bar.Add(1)
 					}
-				case events.PullAllError:
+				case events.PullGroupError:
 					err := e.Payload.(error)
 					if bar != nil {
 						bar.Clear()
 					}
 					log.Printf(color.RedString("An error occurred during pull: %v"), err)
-				case events.PullAllComplete:
+				case events.PullGroupComplete:
 					if bar != nil {
 						bar.Finish()
 						fmt.Println(color.GreenString("✔ Pull for %s complete.", e.Source))
@@ -116,13 +116,13 @@ func pullAccountsCmd(App *app.App) *cobra.Command {
 			}
 
 			// Subscribe the listener to all relevant events
-			App.Events.Subscribe(events.PullAllStart, pullListener)
+			App.Events.Subscribe(events.PullGroupStart, pullListener)
 			App.Events.Subscribe(events.ResourceIDsFetched, pullListener)
 			App.Events.Subscribe(events.StoreSuccess, pullListener)
-			App.Events.Subscribe(events.PullAllError, pullListener)
-			App.Events.Subscribe(events.PullAllComplete, pullListener)
+			App.Events.Subscribe(events.PullGroupError, pullListener)
+			App.Events.Subscribe(events.PullGroupComplete, pullListener)
 
-			err := pull.PullAllAccounts(App, 0, nil)
+			err := pull.PullGroupAccounts(App, 0, nil)
 			if bar != nil && !bar.IsFinished() {
 				bar.Finish()
 			}
@@ -178,7 +178,7 @@ func pullCheckinsCmd(App *app.App) *cobra.Command {
 					return
 				}
 				switch e.Type {
-				case events.PullAllStart:
+				case events.PullGroupStart:
 					bar = progressbar.NewOptions(-1,
 						progressbar.OptionSetDescription("Pulling checkins..."),
 						progressbar.OptionSetWriter(os.Stderr),
@@ -195,13 +195,13 @@ func pullCheckinsCmd(App *app.App) *cobra.Command {
 					if bar != nil {
 						bar.Add(1)
 					}
-				case events.PullAllError:
+				case events.PullGroupError:
 					err := e.Payload.(error)
 					if bar != nil {
 						bar.Clear()
 					}
 					log.Printf(color.RedString("An error occurred during pull: %v"), err)
-				case events.PullAllComplete:
+				case events.PullGroupComplete:
 					if bar != nil {
 						bar.Finish()
 						fmt.Println(color.GreenString("✔ Pull for %s complete.", e.Source))
@@ -210,13 +210,13 @@ func pullCheckinsCmd(App *app.App) *cobra.Command {
 			}
 
 			// Subscribe the listener to all relevant events
-			App.Events.Subscribe(events.PullAllStart, pullListener)
+			App.Events.Subscribe(events.PullGroupStart, pullListener)
 			App.Events.Subscribe(events.ResourceIDsFetched, pullListener)
 			App.Events.Subscribe(events.StoreSuccess, pullListener)
-			App.Events.Subscribe(events.PullAllError, pullListener)
-			App.Events.Subscribe(events.PullAllComplete, pullListener)
+			App.Events.Subscribe(events.PullGroupError, pullListener)
+			App.Events.Subscribe(events.PullGroupComplete, pullListener)
 
-			err := pull.PullAllCheckins(App, nil)
+			err := pull.PullGroupCheckins(App, nil)
 			if bar != nil && !bar.IsFinished() {
 				bar.Finish()
 			}
@@ -272,7 +272,7 @@ func pullRoutesCmd(App *app.App) *cobra.Command {
 					return
 				}
 				switch e.Type {
-				case events.PullAllStart:
+				case events.PullGroupStart:
 					bar = progressbar.NewOptions(-1,
 						progressbar.OptionSetDescription("Pulling routes..."),
 						progressbar.OptionSetWriter(os.Stderr),
@@ -289,13 +289,13 @@ func pullRoutesCmd(App *app.App) *cobra.Command {
 					if bar != nil {
 						bar.Add(1)
 					}
-				case events.PullAllError:
+				case events.PullGroupError:
 					err := e.Payload.(error)
 					if bar != nil {
 						bar.Clear()
 					}
 					log.Printf(color.RedString("An error occurred during pull: %v"), err)
-				case events.PullAllComplete:
+				case events.PullGroupComplete:
 					if bar != nil {
 						bar.Finish()
 						fmt.Println(color.GreenString("✔ Pull for %s complete.", e.Source))
@@ -304,13 +304,13 @@ func pullRoutesCmd(App *app.App) *cobra.Command {
 			}
 
 			// Subscribe the listener to all relevant events
-			App.Events.Subscribe(events.PullAllStart, pullListener)
+			App.Events.Subscribe(events.PullGroupStart, pullListener)
 			App.Events.Subscribe(events.ResourceIDsFetched, pullListener)
 			App.Events.Subscribe(events.StoreSuccess, pullListener)
-			App.Events.Subscribe(events.PullAllError, pullListener)
-			App.Events.Subscribe(events.PullAllComplete, pullListener)
+			App.Events.Subscribe(events.PullGroupError, pullListener)
+			App.Events.Subscribe(events.PullGroupComplete, pullListener)
 
-			err := pull.PullAllRoutes(App, nil)
+			err := pull.PullGroupRoutes(App, nil)
 			if bar != nil && !bar.IsFinished() {
 				bar.Finish()
 			}
