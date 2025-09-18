@@ -8,7 +8,10 @@ import (
 	"badgermaps/database"
 	"badgermaps/events"
 	"fmt"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/data/binding"
+	"gopkg.in/yaml.v2"
+	"image/color"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,6 +25,125 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
+
+const (
+	// SecondaryButtonImportance is a custom importance level for buttons
+	SecondaryButtonImportance widget.ButtonImportance = 99
+)
+
+// SecondaryButton is a custom button that can be styled with a secondary color
+type SecondaryButton struct {
+	widget.Button
+}
+
+// NewSecondaryButton creates a new SecondaryButton
+func NewSecondaryButton(label string, icon fyne.Resource, tapped func()) *SecondaryButton {
+	b := &SecondaryButton{}
+	b.Text = label
+	b.Icon = icon
+	b.OnTapped = tapped
+	b.ExtendBaseWidget(b)
+	return b
+}
+
+// CreateRenderer implements the Widget interface
+func (b *SecondaryButton) CreateRenderer() fyne.WidgetRenderer {
+	r := &secondaryButtonRenderer{
+		button:     b,
+		label:      widget.NewLabel(b.Text),
+		icon:       widget.NewIcon(b.Icon),
+		background: canvas.NewRectangle(theme.ButtonColor()),
+	}
+	r.objects = []fyne.CanvasObject{r.background, r.icon, r.label}
+	return r
+}
+
+type secondaryButtonRenderer struct {
+	button     *SecondaryButton
+	label      *widget.Label
+	icon       *widget.Icon
+	background *canvas.Rectangle
+	objects    []fyne.CanvasObject
+}
+
+func (r *secondaryButtonRenderer) Layout(size fyne.Size) {
+	r.background.Resize(size)
+	padding := theme.Padding()
+	if r.button.Icon != nil {
+		iconSize := theme.IconInlineSize()
+		r.icon.Resize(fyne.NewSize(iconSize, iconSize))
+		r.icon.Move(fyne.NewPos(padding, (size.Height-iconSize)/2))
+		r.label.Move(fyne.NewPos(padding*2+iconSize, (size.Height-r.label.MinSize().Height)/2))
+	} else {
+		r.label.Move(fyne.NewPos(padding, (size.Height-r.label.MinSize().Height)/2))
+	}
+}
+
+func (r *secondaryButtonRenderer) MinSize() fyne.Size {
+	iconSize := theme.IconInlineSize()
+	padding := theme.Padding()
+	min := r.label.MinSize()
+	if r.button.Icon != nil {
+		min.Width += iconSize + padding
+	}
+	min.Width += padding * 2
+	min.Height += padding * 2
+	return min
+}
+
+func (r *secondaryButtonRenderer) Refresh() {
+	r.label.SetText(r.button.Text)
+	r.icon.SetResource(r.button.Icon)
+	r.background.FillColor = color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0xff} // A dark grey for secondary buttons
+	if r.button.Disabled() {
+		r.background.FillColor = theme.DisabledButtonColor()
+	}
+	r.background.Refresh()
+	r.label.Refresh()
+	r.icon.Refresh()
+}
+
+func (r *secondaryButtonRenderer) Objects() []fyne.CanvasObject {
+	return r.objects
+}
+
+func (r *secondaryButtonRenderer) Destroy() {}
+
+// Spacer is a simple widget that creates a fixed-size empty space
+type Spacer struct {
+	widget.BaseWidget
+	minSize fyne.Size
+}
+
+// NewSpacer creates a new Spacer
+func NewSpacer(size fyne.Size) *Spacer {
+	s := &Spacer{minSize: size}
+	s.ExtendBaseWidget(s)
+	return s
+}
+
+// CreateRenderer implements the Widget interface
+func (s *Spacer) CreateRenderer() fyne.WidgetRenderer {
+	return &spacerRenderer{spacer: s}
+}
+
+type spacerRenderer struct {
+	spacer *Spacer
+}
+
+func (r *spacerRenderer) Layout(size fyne.Size) {}
+
+func (r *spacerRenderer) MinSize() fyne.Size {
+	return r.spacer.minSize
+}
+
+func (r *spacerRenderer) Refresh() {}
+
+func (r *spacerRenderer) Objects() []fyne.CanvasObject {
+	return nil
+}
+
+func (r *spacerRenderer) Destroy() {}
 
 type logEntry struct {
 	widget.BaseWidget
@@ -960,12 +1082,21 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 		)
 	}
 
-	saveButton := widget.NewButtonWithIcon("Save Configuration", theme.ConfirmIcon(), func() {
+	saveButton := NewSecondaryButton("Save Configuration", theme.ConfirmIcon(), func() {
 		ui.saveConfig(
 			apiKeyEntry.Text, baseURLEntry.Text, dbTypeSelect.Selected, dbPathEntry.Text,
 			dbHostEntry.Text, dbPortEntry.Text, dbUserEntry.Text, dbPassEntry.Text, dbNameEntry.Text,
 			serverHostEntry.Text, serverPortEntry.Text, tlsEnabledCheck.Checked, tlsCertEntry.Text, tlsKeyEntry.Text,
 		)
+	})
+
+	viewButton := widget.NewButtonWithIcon("View", theme.VisibilityIcon(), func() {
+		configData, err := yaml.Marshal(ui.app.Config)
+		if err != nil {
+			ui.log(fmt.Sprintf("Error marshaling config: %v", err))
+			return
+		}
+		ui.showDetails(widget.NewLabel(string(configData)))
 	})
 
 	// Schema Management
@@ -981,13 +1112,16 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 
 	schemaCard := widget.NewCard("Schema Management", "", schemaButton)
 
+	topButtons := container.NewGridWithColumns(3, viewButton, testButton, saveButton)
+
 	return container.NewVBox(
+		NewSpacer(fyne.NewSize(0, 10)),
+		topButtons,
 		apiCard,
 		dbCard,
 		serverCard,
 		otherCard,
 		schemaCard,
-		container.NewGridWithColumns(2, testButton, saveButton),
 	)
 }
 
