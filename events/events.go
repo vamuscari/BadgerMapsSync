@@ -34,6 +34,7 @@ const (
 	FetchDetailSuccess
 	StoreSuccess
 	PullComplete
+	PullError
 
 	// Group Pull Events
 	PullAllStart
@@ -47,6 +48,7 @@ const (
 	PushItemSuccess
 	PushItemError
 	PushComplete
+	PushError
 
 	// Action Config Events (for GUI refresh)
 	ActionConfigCreated
@@ -71,6 +73,7 @@ func (e EventType) String() string {
 		"FetchDetailSuccess",
 		"StoreSuccess",
 		"PullComplete",
+		"PullError",
 		"PullAllStart",
 		"PullAllComplete",
 		"PullAllError",
@@ -80,6 +83,7 @@ func (e EventType) String() string {
 		"PushItemSuccess",
 		"PushItemError",
 		"PushComplete",
+		"PushError",
 		"ActionConfigCreated",
 		"ActionConfigUpdated",
 		"ActionConfigDeleted",

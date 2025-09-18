@@ -144,13 +144,13 @@ func TestEnforceSchema(t *testing.T) {
 	}
 
 	s := state.NewState()
-	db, err := NewDB(config, s)
+	db, err := NewDB(config)
 	if err != nil {
 		t.Fatalf("Failed to load database settings: %v", err)
 	}
 	defer db.Close()
 
-	if err := db.EnforceSchema(); err != nil {
+	if err := db.EnforceSchema(s); err != nil {
 		t.Fatalf("EnforceSchema failed: %v", err)
 	}
 

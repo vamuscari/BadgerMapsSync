@@ -30,11 +30,11 @@ func TestPullAccountCmd(t *testing.T) {
 	db, err := database.NewDB(&database.DBConfig{
 		Type: "sqlite3",
 		Path: dbPath,
-	}, &state.State{})
+	})
 	if err != nil {
 		t.Fatalf("Failed to create temporary database: %v", err)
 	}
-	if err := db.EnforceSchema(); err != nil {
+	if err := db.EnforceSchema(&state.State{}); err != nil {
 		t.Fatalf("Failed to enforce schema: %v", err)
 	}
 

@@ -170,7 +170,7 @@ func (s *httpServer) handleAccountCreateWebhook(w http.ResponseWriter, r *http.R
 		http.Error(w, "failed to store account", http.StatusInternalServerError)
 		return
 	}
-	s.App.Events.Dispatch(events.Infof("server", "Received and processed account webhook for account: %s", acc.FullName))
+	s.App.Events.Dispatch(events.Infof("server", "Received and processed account webhook for account: %s", acc.FullName.String))
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "Account webhook processed")
 }
@@ -199,7 +199,7 @@ func (s *httpServer) handleCheckinWebhook(w http.ResponseWriter, r *http.Request
 		http.Error(w, "failed to store checkin", http.StatusInternalServerError)
 		return
 	}
-	s.App.Events.Dispatch(events.Infof("server", "Received and processed checkin webhook for checkin: %d", checkin.CheckinId))
+	s.App.Events.Dispatch(events.Infof("server", "Received and processed checkin webhook for checkin: %d", checkin.CheckinId.Int64))
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "Checkin webhook processed")
 }

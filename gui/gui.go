@@ -83,6 +83,7 @@ type Gui struct {
 
 // Launch initializes and runs the GUI
 func Launch(a *app.App, icon fyne.Resource) {
+	a.Events.Dispatch(events.Debugf("gui", "GUI initiated"))
 	fyneApp := fapp.New()
 	fyneApp.SetIcon(icon)
 	fyneApp.Settings().SetTheme(newModernTheme())
@@ -112,8 +113,8 @@ func Launch(a *app.App, icon fyne.Resource) {
 			}
 		}
 	}
-	a.Events.Subscribe(events.EventCreate, eventListener)
-	a.Events.Subscribe(events.EventDelete, eventListener)
+	a.Events.Subscribe(events.ActionConfigCreated, eventListener)
+	a.Events.Subscribe(events.ActionConfigDeleted, eventListener)
 
 	// Subscribe to logging and action events
 	logListener := func(e events.Event) {
@@ -312,6 +313,9 @@ func (ui *Gui) createPullTab() fyne.CanvasObject {
 
 // createPushTab creates the content for the "Push" tab
 func (ui *Gui) createPushTab() fyne.CanvasObject {
+	if ui.app.DB == nil || ui.app.DB.GetDB() == nil {
+		return widget.NewLabel("Database not configured. Please configure it in the Configuration tab.")
+	}
 	pushAccountsButton := widget.NewButtonWithIcon("Push Account Changes", theme.UploadIcon(), func() { go ui.runPushAccounts() })
 	pushCheckinsButton := widget.NewButtonWithIcon("Push Check-in Changes", theme.UploadIcon(), func() { go ui.runPushCheckins() })
 	pushAllButton := widget.NewButtonWithIcon("Push All Changes", theme.ViewRefreshIcon(), func() { go ui.runPushAll() })
@@ -445,21 +449,20 @@ func (ui *Gui) createEventsTab() fyne.CanvasObject {
 		eventActions := ui.app.GetEventActions()
 
 		// Create a sorted list of event names for consistent order
-		var sortedEvents []string
-		for eventName := range eventActions {
-			sortedEvents = append(sortedEvents, eventName)
-		}
+		sort.Slice(eventActions, func(i, j int) bool {
+			return eventActions[i].Name < eventActions[j].Name
+		})
 
-		for _, eventName := range sortedEvents {
-			actions := eventActions[eventName]
+		for _, eventAction := range eventActions {
+			actions := eventAction.Run
 
-			eventLabel := widget.NewLabelWithStyle(eventName, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+			eventLabel := widget.NewLabelWithStyle(eventAction.Name, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 			eventsContent.Add(eventLabel)
 
 			for _, action := range actions {
 				actionLabel := widget.NewLabel(fmt.Sprintf("%s: %v", action.Type, action.Args))
 				// Use function closure to capture the correct eventName and action
-				currentEventKey := eventName
+				currentEventKey := eventAction.Name
 				currentAction := action
 				removeButton := widget.NewButtonWithIcon("", theme.DeleteIcon(), func() {
 					trimmedKey := strings.TrimPrefix(currentEventKey, "on_")
@@ -613,6 +616,9 @@ func (ui *Gui) createEventsTab() fyne.CanvasObject {
 
 // createExplorerTab creates the content for the "Explorer" tab
 func (ui *Gui) createExplorerTab() fyne.CanvasObject {
+	if ui.app.DB == nil || ui.app.DB.GetDB() == nil {
+		return widget.NewLabel("Database not configured. Please configure it in the Configuration tab.")
+	}
 	tableContainer := container.NewMax() // Use NewMax to fill available space
 	tableSelect := widget.NewSelect([]string{}, func(tableName string) {
 		ui.log(fmt.Sprintf("Explorer: Loading table '%s'", tableName))
@@ -964,8 +970,10 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 
 	// Schema Management
 	schemaLabel := "Initialize Schema"
-	if err := ui.app.DB.ValidateSchema(ui.app.State); err == nil {
-		schemaLabel = "Re-initialize Schema"
+	if ui.app.DB != nil && ui.app.DB.GetDB() != nil {
+		if err := ui.app.DB.ValidateSchema(ui.app.State); err == nil {
+			schemaLabel = "Re-initialize Schema"
+		}
 	}
 	schemaButton := widget.NewButtonWithIcon(schemaLabel, theme.StorageIcon(), func() {
 		go ui.runSchemaEnforcement()
@@ -993,6 +1001,9 @@ func (ui *Gui) log(message string) {
 	}
 	if ui.logView != nil {
 		ui.logView.ScrollToBottom()
+	}
+	if strings.HasPrefix(message, "ERROR") {
+		ui.app.Events.Dispatch(events.Errorf("gui", message))
 	}
 }
 
@@ -1041,6 +1052,7 @@ func (ui *Gui) setProgress(value float64) {
 }
 
 func (ui *Gui) runPullAll() {
+	ui.app.Events.Dispatch(events.Debugf("gui", "runPullAll called"))
 	ui.log("Starting full data pull...")
 	ui.showProgressBar("Running Full Pull...")
 	ui.setProgress(0)
@@ -1055,7 +1067,7 @@ func (ui *Gui) runPullAll() {
 		ui.setProgress(progress)
 	}
 	if err := pull.PullAllAccounts(ui.app, 0, accountsCallback); err != nil {
-		ui.log(fmt.Sprintf("Error pulling accounts: %v", err))
+		ui.app.Events.Dispatch(events.Errorf("gui", "Error pulling accounts: %v", err))
 		ui.showToast("Error: The data pull failed.")
 		return
 	}
@@ -1067,7 +1079,7 @@ func (ui *Gui) runPullAll() {
 		ui.setProgress(progress)
 	}
 	if err := pull.PullAllCheckins(ui.app, checkinsCallback); err != nil {
-		ui.log(fmt.Sprintf("Error pulling checkins: %v", err))
+		ui.app.Events.Dispatch(events.Errorf("gui", "Error pulling checkins: %v", err))
 		ui.showToast("Error: The data pull failed.")
 		return
 	}
@@ -1079,7 +1091,7 @@ func (ui *Gui) runPullAll() {
 		ui.setProgress(progress)
 	}
 	if err := pull.PullAllRoutes(ui.app, routesCallback); err != nil {
-		ui.log(fmt.Sprintf("Error pulling routes: %v", err))
+		ui.app.Events.Dispatch(events.Errorf("gui", "Error pulling routes: %v", err))
 		ui.showToast("Error: The data pull failed.")
 		return
 	}
@@ -1091,7 +1103,7 @@ func (ui *Gui) runPullAll() {
 		ui.setProgress(progress)
 	}
 	if err := pull.PullProfile(ui.app, profileCallback); err != nil {
-		ui.log(fmt.Sprintf("Error pulling user profile: %v", err))
+		ui.app.Events.Dispatch(events.Errorf("gui", "Error pulling user profile: %v", err))
 		ui.showToast("Error: The data pull failed.")
 		return
 	}
@@ -1102,6 +1114,7 @@ func (ui *Gui) runPullAll() {
 }
 
 func (ui *Gui) runPullAccount(idStr string) {
+	ui.app.Events.Dispatch(events.Debugf("gui", "runPullAccount called with id: %s", idStr))
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		ui.log(fmt.Sprintf("Invalid Account ID: '%s'", idStr))
@@ -1118,6 +1131,7 @@ func (ui *Gui) runPullAccount(idStr string) {
 
 func (ui *Gui) runPullAccounts() {
 	go func() {
+		ui.app.Events.Dispatch(events.Debugf("gui", "runPullAccounts called"))
 		ui.log("Starting pull for all accounts...")
 		ui.showProgressBar("Pulling Accounts...")
 		ui.setProgress(0)
@@ -1137,6 +1151,7 @@ func (ui *Gui) runPullAccounts() {
 }
 
 func (ui *Gui) runPullCheckin(idStr string) {
+	ui.app.Events.Dispatch(events.Debugf("gui", "runPullCheckin called with id: %s", idStr))
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		ui.log(fmt.Sprintf("Invalid Check-in ID: '%s'", idStr))
@@ -1153,6 +1168,7 @@ func (ui *Gui) runPullCheckin(idStr string) {
 
 func (ui *Gui) runPullCheckins() {
 	go func() {
+		ui.app.Events.Dispatch(events.Debugf("gui", "runPullCheckins called"))
 		ui.log("Starting pull for all check-ins...")
 		ui.showProgressBar("Pulling Check-ins...")
 		ui.setProgress(0)
@@ -1172,6 +1188,7 @@ func (ui *Gui) runPullCheckins() {
 }
 
 func (ui *Gui) runPullRoute(idStr string) {
+	ui.app.Events.Dispatch(events.Debugf("gui", "runPullRoute called with id: %s", idStr))
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		ui.log(fmt.Sprintf("Invalid Route ID: '%s'", idStr))
@@ -1188,6 +1205,7 @@ func (ui *Gui) runPullRoute(idStr string) {
 
 func (ui *Gui) runPullRoutes() {
 	go func() {
+		ui.app.Events.Dispatch(events.Debugf("gui", "runPullRoutes called"))
 		ui.log("Starting pull for all routes...")
 		ui.showProgressBar("Pulling Routes...")
 		ui.setProgress(0)
@@ -1209,6 +1227,7 @@ func (ui *Gui) runPullRoutes() {
 
 func (ui *Gui) runPullProfile() {
 	go func() {
+		ui.app.Events.Dispatch(events.Debugf("gui", "runPullProfile called"))
 		ui.log("Starting pull for user profile...")
 		ui.showProgressBar("Pulling User Profile...")
 		ui.setProgress(0)
@@ -1229,6 +1248,7 @@ func (ui *Gui) runPullProfile() {
 
 // --- Push Functions ---
 func (ui *Gui) runPushAccounts() {
+	ui.app.Events.Dispatch(events.Debugf("gui", "runPushAccounts called"))
 	ui.log("Starting push for account changes...")
 	if err := push.RunPushAccounts(ui.app); err != nil {
 		ui.log(fmt.Sprintf("ERROR: %v", err))
@@ -1239,6 +1259,7 @@ func (ui *Gui) runPushAccounts() {
 }
 
 func (ui *Gui) runPushCheckins() {
+	ui.app.Events.Dispatch(events.Debugf("gui", "runPushCheckins called"))
 	ui.log("Starting push for check-in changes...")
 	if err := push.RunPushCheckins(ui.app); err != nil {
 		ui.log(fmt.Sprintf("ERROR: %v", err))
@@ -1249,6 +1270,7 @@ func (ui *Gui) runPushCheckins() {
 }
 
 func (ui *Gui) runPushAll() {
+	ui.app.Events.Dispatch(events.Debugf("gui", "runPushAll called"))
 	ui.log("Starting push for all changes...")
 	if err := push.RunPushAccounts(ui.app); err != nil {
 		ui.log(fmt.Sprintf("ERROR during account push: %v", err))
@@ -1264,6 +1286,7 @@ func (ui *Gui) saveConfig(
 	apiKey, baseURL, dbType, dbPath, dbHost, dbPortStr, dbUser, dbPass, dbName,
 	serverHost, serverPortStr string, tlsEnabled bool, tlsCert, tlsKey string,
 ) {
+	ui.app.Events.Dispatch(events.Debugf("gui", "saveConfig called"))
 	ui.log("Saving configuration...")
 
 	// Update API config in memory
@@ -1341,6 +1364,7 @@ func (ui *Gui) refreshConfigTab() {
 
 // testDBConnection tests the database connection with the provided credentials
 func (ui *Gui) testDBConnection(button *widget.Button, dbType, dbPath, dbHost, dbPortStr, dbUser, dbPass, dbName string) {
+	ui.app.Events.Dispatch(events.Debugf("gui", "testDBConnection called"))
 	ui.log(fmt.Sprintf("Testing connection for %s...", dbType))
 	button.SetText("Testing...")
 	button.Disable()
@@ -1390,6 +1414,7 @@ func (ui *Gui) testDBConnection(button *widget.Button, dbType, dbPath, dbHost, d
 }
 
 func (ui *Gui) runSchemaEnforcement() {
+	ui.app.Events.Dispatch(events.Debugf("gui", "runSchemaEnforcement called"))
 	if err := ui.app.DB.ValidateSchema(ui.app.State); err == nil {
 		// Schema exists, confirm re-initialization
 		dialog.ShowConfirm("Re-initialize Schema?", "This will delete all existing data. Are you sure?", func(ok bool) {

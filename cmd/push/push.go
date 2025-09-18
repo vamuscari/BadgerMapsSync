@@ -41,27 +41,19 @@ func pushAccountsCmd(a *app.App) *cobra.Command {
 			var bar *progressbar.ProgressBar
 
 			pushListener := func(e events.Event) {
+				if e.Source != "accounts" {
+					return
+				}
 				switch e.Type {
 				case events.PushScanStart:
 					fmt.Println(color.CyanString("Scanning for pending %s changes...", e.Source))
-				case events.PushScanComplete:
-					changes := e.Payload.([]database.AccountPendingChange)
-					if len(changes) > 0 {
-						bar = progressbar.NewOptions(len(changes),
-							progressbar.OptionSetDescription(fmt.Sprintf("Pushing %d %s changes", len(changes), e.Source)),
-							progressbar.OptionSetWriter(os.Stderr),
-							progressbar.OptionEnableColorCodes(true),
-						)
-					}
-				case events.PushItemSuccess:
-					if bar != nil {
-						bar.Add(1)
-					}
-				case events.PushItemError:
-					err := e.Payload.(error)
-					fmt.Println(color.RedString("An error occurred during push: %v", err))
-				case events.PushComplete:
-					if bar != nil {
+				                case events.PushItemError:
+				                    err := e.Payload.(error)
+				                    fmt.Println(color.RedString("An error occurred during push: %v", err))
+				                case events.PushError:
+				                    err := e.Payload.(error)
+				                    fmt.Println(color.RedString("An error occurred during push scan: %v", err))
+				                case events.PushComplete:					if bar != nil {
 						bar.Finish()
 					}
 					errorCount := e.Payload.(int)
@@ -114,6 +106,9 @@ func pushCheckinsCmd(a *app.App) *cobra.Command {
 				case events.PushItemError:
 					err := e.Payload.(error)
 					fmt.Println(color.RedString("An error occurred during push: %v", err))
+				case events.PushError:
+					err := e.Payload.(error)
+					fmt.Println(color.RedString("An error occurred during push scan: %v", err))
 				case events.PushComplete:
 					if bar != nil {
 						bar.Finish()

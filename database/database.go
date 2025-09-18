@@ -213,6 +213,9 @@ func (db *SQLiteConfig) TestConnection() error {
 }
 
 func (db *SQLiteConfig) ValidateSchema(s *state.State) error {
+	if db.db == nil {
+		return nil
+	}
 	expectedSchema := GetExpectedSchema()
 	for _, tableName := range RequiredTables() {
 		if s.Verbose && !s.Quiet {
@@ -583,6 +586,9 @@ func (db *PostgreSQLConfig) TestConnection() error {
 	return db.GetDB().Ping()
 }
 func (db *PostgreSQLConfig) ValidateSchema(s *state.State) error {
+	if db.db == nil {
+		return nil
+	}
 	expectedSchema := GetExpectedSchema()
 	for _, tableName := range RequiredTables() {
 		if s.Verbose && !s.Quiet {
@@ -1028,6 +1034,9 @@ func (db *MSSQLConfig) TestConnection() error {
 	return db.GetDB().Ping()
 }
 func (db *MSSQLConfig) ValidateSchema(s *state.State) error {
+	if db.db == nil {
+		return nil
+	}
 	expectedSchema := GetExpectedSchema()
 	for _, tableName := range RequiredTables() {
 		if s.Verbose && !s.Quiet {
@@ -1310,12 +1319,40 @@ func NewDB(config *DBConfig) (DB, error) {
 
 	db.LoadConfig(config)
 
-	if err := db.Connect(); err != nil {
-		return nil, fmt.Errorf("error connecting to database: %w", err)
-	}
-
 	return db, nil
 }
+
+func (db *PostgreSQLConfig) DatabaseConnectionWithTimeout() string {
+	u := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(db.Username, db.Password),
+		Host:   fmt.Sprintf("%s:%d", db.Host, db.Port),
+		Path:   db.Database,
+	}
+	q := u.Query()
+	q.Set("sslmode", db.SSLMode)
+	q.Set("connect_timeout", "5")
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func (db *MSSQLConfig) DatabaseConnectionWithTimeout() string {
+	u := &url.URL{
+		Scheme: "sqlserver",
+		User:   url.UserPassword(db.Username, db.Password),
+		Host:   fmt.Sprintf("%s:%d", db.Host, db.Port),
+	}
+	q := u.Query()
+	q.Set("database", db.Database)
+	q.Set("connect timeout", "5")
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func (db *SQLiteConfig) DatabaseConnectionWithTimeout() string {
+	return db.DatabaseConnection()
+}
+
 
 func RequiredTables() []string {
 	return []string{

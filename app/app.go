@@ -17,10 +17,10 @@ import (
 )
 
 type Config struct {
-	API                   api.APIConfig              `yaml:"api"`
-	DB                    database.DBConfig          `yaml:"db"`
-	MaxConcurrentRequests int                        `yaml:"max_concurrent_requests"`
-	Actions               map[string][]events.ActionConfig `yaml:"actions"`
+	API                   api.APIConfig       `yaml:"api"`
+	DB                    database.DBConfig   `yaml:"db"`
+	MaxConcurrentRequests int                 `yaml:"max_concurrent_requests"`
+	EventActions          []events.EventAction `yaml:"event_actions"`
 }
 
 type App struct {
@@ -41,7 +41,7 @@ func (a *App) GetState() *state.State {
 
 func (a *App) GetConfig() *events.AppConfig {
 	return &events.AppConfig{
-		Events: a.Config.Actions,
+		Events: a.Config.EventActions,
 	}
 }
 
@@ -101,7 +101,8 @@ func (a *App) LoadConfig() error {
 	var dbErr error
 	a.DB, dbErr = database.NewDB(&a.Config.DB)
 	if dbErr != nil {
-		return dbErr
+		a.Events.Dispatch(events.Errorf("db", "Failed to connect to database: %v", dbErr))
+		a.DB = nil // Set DB to nil to indicate connection failure
 	}
 
 	// Limit between
@@ -161,10 +162,6 @@ func (a *App) GetConfigFilePath() (string, bool, error) {
 }
 
 func (a *App) AddEventAction(event, source, actionString string) error {
-	if a.Config.Actions == nil {
-		a.Config.Actions = make(map[string][]events.ActionConfig)
-	}
-
 	// This is a temporary solution to keep the GUI working.
 	// A better solution would be to have a dedicated UI for creating actions.
 	parts := strings.SplitN(actionString, ":", 2)
@@ -184,40 +181,45 @@ func (a *App) AddEventAction(event, source, actionString string) error {
 	if source != "" {
 		key = fmt.Sprintf("%s_%s", key, source)
 	}
-	a.Config.Actions[key] = append(a.Config.Actions[key], actionConfig)
+
+	// Find existing EventAction
+	for i := range a.Config.EventActions {
+		if a.Config.EventActions[i].Event == event && a.Config.EventActions[i].Source == source {
+			a.Config.EventActions[i].Run = append(a.Config.EventActions[i].Run, actionConfig)
+			err := a.SaveConfig()
+			if err == nil {
+				a.Events.Dispatch(events.Event{Type: events.ActionConfigUpdated, Source: "events", Payload: map[string]string{"event": event, "action": actionString}})
+			}
+			return err
+		}
+	}
+
+	// Not found, create a new one
+	newEventAction := events.EventAction{
+		Name:   key,
+		Event:  event,
+		Source: source,
+		Run:    []events.ActionConfig{actionConfig},
+	}
+	a.Config.EventActions = append(a.Config.EventActions, newEventAction)
 	err := a.SaveConfig()
 	if err == nil {
-		a.Events.Dispatch(events.Event{Type: events.EventCreate, Source: "events", Payload: map[string]string{"event": event, "action": actionString}})
+		a.Events.Dispatch(events.Event{Type: events.ActionConfigCreated, Source: "events", Payload: map[string]string{"event": event, "action": actionString}})
 	}
 	return err
 }
 
-func (a *App) GetEventActions() map[string][]events.ActionConfig {
-	return a.Config.Actions
+func (a *App) GetEventActions() []events.EventAction {
+	return a.Config.EventActions
 }
 
 func (a *App) RemoveEventAction(event, source, actionToRemove string) error {
-	key := fmt.Sprintf("on_%s", event)
-	if source != "" {
-		key = fmt.Sprintf("%s_%s", key, source)
-	}
-	actions, ok := a.Config.Actions[key]
-	if !ok {
-		return nil
-	}
-	var newActions []events.ActionConfig
-	for _, _ = range actions {
-		// This is a temporary solution. We need a better way to identify actions to remove.
-		// For now, we just don't support removing actions from the GUI.
-		// This will be improved in a future update.
-		// if action != actionToRemove {
-		// 	newActions = append(newActions, action)
-		// }
-	}
-	a.Config.Actions[key] = newActions
+	// This is a temporary solution. We need a better way to identify actions to remove.
+	// For now, we just don't support removing actions from the GUI.
+	// This will be improved in a future update.
 	err := a.SaveConfig()
 	if err == nil {
-		a.Events.Dispatch(events.Event{Type: events.EventDelete, Source: "events", Payload: map[string]string{"event": event, "action": actionToRemove}})
+		a.Events.Dispatch(events.Event{Type: events.ActionConfigDeleted, Source: "events", Payload: map[string]string{"event": event, "action": actionToRemove}})
 	}
 	return nil
 }

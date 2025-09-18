@@ -49,15 +49,15 @@ func validateEventsCmd(a *app.App) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fmt.Println("Validating event actions...")
 
-			if a.Config.Actions == nil {
+			if a.Config.EventActions == nil {
 				fmt.Println("No event actions found in configuration.")
 				return nil
 			}
 
 			valid := true
-			for event, actionConfigs := range a.Config.Actions {
-				fmt.Printf("Event: %s\n", event)
-				for i, config := range actionConfigs {
+			for _, eventAction := range a.Config.EventActions {
+				fmt.Printf("Event: %s (Source: %s)\n", eventAction.Event, eventAction.Source)
+				for i, config := range eventAction.Run {
 					action, err := events.NewActionFromConfig(config)
 					if err != nil {
 						fmt.Printf("  - Action %d: Error creating action: %v\n", i+1, err)

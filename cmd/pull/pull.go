@@ -77,15 +77,56 @@ func pullAccountsCmd(App *app.App) *cobra.Command {
 		Short: "Pull all accounts from BadgerMaps",
 		Long:  `Pull all accounts from the BadgerMaps API and store them in the local database.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			bar := progressbar.NewOptions(-1,
-				progressbar.OptionSetDescription("Pulling accounts..."),
-				progressbar.OptionSetWriter(os.Stderr),
-				progressbar.OptionSpinnerType(14),
-				progressbar.OptionEnableColorCodes(true),
-			)
-			defer bar.Close()
+			var bar *progressbar.ProgressBar
 
-			return pull.PullAllAccounts(App, 0, nil)
+			pullListener := func(e events.Event) {
+				if e.Source != "accounts" {
+					return
+				}
+				switch e.Type {
+				case events.PullAllStart:
+					bar = progressbar.NewOptions(-1,
+						progressbar.OptionSetDescription("Pulling accounts..."),
+						progressbar.OptionSetWriter(os.Stderr),
+						progressbar.OptionSpinnerType(14),
+						progressbar.OptionEnableColorCodes(true),
+					)
+				case events.ResourceIDsFetched:
+					count := e.Payload.(int)
+					if bar != nil {
+						bar.ChangeMax(count)
+						bar.Describe(fmt.Sprintf("Found %d accounts to pull.", count))
+					}
+				case events.StoreSuccess:
+					if bar != nil {
+						bar.Add(1)
+					}
+				case events.PullAllError:
+					err := e.Payload.(error)
+					if bar != nil {
+						bar.Clear()
+					}
+					log.Printf(color.RedString("An error occurred during pull: %v"), err)
+				case events.PullAllComplete:
+					if bar != nil {
+						bar.Finish()
+						fmt.Println(color.GreenString("✔ Pull for %s complete.", e.Source))
+					}
+				}
+			}
+
+			// Subscribe the listener to all relevant events
+			App.Events.Subscribe(events.PullAllStart, pullListener)
+			App.Events.Subscribe(events.ResourceIDsFetched, pullListener)
+			App.Events.Subscribe(events.StoreSuccess, pullListener)
+			App.Events.Subscribe(events.PullAllError, pullListener)
+			App.Events.Subscribe(events.PullAllComplete, pullListener)
+
+			err := pull.PullAllAccounts(App, 0, nil)
+			if bar != nil && !bar.IsFinished() {
+				bar.Finish()
+			}
+			return err
 		},
 	}
 	return cmd
@@ -102,14 +143,23 @@ func pullCheckinCmd(App *app.App) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("invalid checkin ID: %s", args[0])
 			}
-			err = pull.PullCheckin(App, checkinID)
-			if err != nil {
-				// Provide a cleaner error message to the user
-				fmt.Println(color.RedString("Error: Failed to pull check-in %d. The API returned an error.", checkinID))
-				fmt.Println(color.YellowString("Details: %v", err))
-				return nil // Return nil to prevent Cobra from printing usage
+
+			listener := func(e events.Event) {
+				if e.Source != "check-in" {
+					return
+				}
+				switch e.Type {
+				case events.PullComplete:
+					fmt.Println(color.GreenString("Successfully pulled check-in %d.", e.Payload.(int)))
+				case events.PullError:
+					fmt.Println(color.RedString("Error: Failed to pull check-in %d. The API returned an error.", checkinID))
+					fmt.Println(color.YellowString("Details: %v", e.Payload.(error)))
+				}
 			}
-			return nil
+			App.Events.Subscribe(events.PullComplete, listener)
+			App.Events.Subscribe(events.PullError, listener)
+
+			return pull.PullCheckin(App, checkinID)
 		},
 	}
 	return cmd
@@ -187,14 +237,23 @@ func pullRouteCmd(App *app.App) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("invalid route ID: %s", args[0])
 			}
-			err = pull.PullRoute(App, routeID)
-			if err != nil {
-				// Provide a cleaner error message to the user
-				fmt.Println(color.RedString("Error: Failed to pull route %d. The API returned an error.", routeID))
-				fmt.Println(color.YellowString("Details: %v", err))
-				return nil // Return nil to prevent Cobra from printing usage
+
+			listener := func(e events.Event) {
+				if e.Source != "route" {
+					return
+				}
+				switch e.Type {
+				case events.PullComplete:
+					fmt.Println(color.GreenString("Successfully pulled route %d.", e.Payload.(int)))
+				case events.PullError:
+					fmt.Println(color.RedString("Error: Failed to pull route %d. The API returned an error.", routeID))
+					fmt.Println(color.YellowString("Details: %v", e.Payload.(error)))
+				}
 			}
-			return nil
+			App.Events.Subscribe(events.PullComplete, listener)
+			App.Events.Subscribe(events.PullError, listener)
+
+			return pull.PullRoute(App, routeID)
 		},
 	}
 	return cmd
@@ -206,15 +265,56 @@ func pullRoutesCmd(App *app.App) *cobra.Command {
 		Short: "Pull all routes from BadgerMaps",
 		Long:  `Pull all routes from the BadgerMaps API and store them in the local database.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			bar := progressbar.NewOptions(-1,
-				progressbar.OptionSetDescription("Pulling routes..."),
-				progressbar.OptionSetWriter(os.Stderr),
-				progressbar.OptionSpinnerType(14),
-				progressbar.OptionEnableColorCodes(true),
-			)
-			defer bar.Close()
+			var bar *progressbar.ProgressBar
 
-			return pull.PullAllRoutes(App, nil)
+			pullListener := func(e events.Event) {
+				if e.Source != "routes" {
+					return
+				}
+				switch e.Type {
+				case events.PullAllStart:
+					bar = progressbar.NewOptions(-1,
+						progressbar.OptionSetDescription("Pulling routes..."),
+						progressbar.OptionSetWriter(os.Stderr),
+						progressbar.OptionSpinnerType(14),
+						progressbar.OptionEnableColorCodes(true),
+					)
+				case events.ResourceIDsFetched:
+					count := e.Payload.(int)
+					if bar != nil {
+						bar.ChangeMax(count)
+						bar.Describe(fmt.Sprintf("Found %d routes to pull.", count))
+					}
+				case events.StoreSuccess:
+					if bar != nil {
+						bar.Add(1)
+					}
+				case events.PullAllError:
+					err := e.Payload.(error)
+					if bar != nil {
+						bar.Clear()
+					}
+					log.Printf(color.RedString("An error occurred during pull: %v"), err)
+				case events.PullAllComplete:
+					if bar != nil {
+						bar.Finish()
+						fmt.Println(color.GreenString("✔ Pull for %s complete.", e.Source))
+					}
+				}
+			}
+
+			// Subscribe the listener to all relevant events
+			App.Events.Subscribe(events.PullAllStart, pullListener)
+			App.Events.Subscribe(events.ResourceIDsFetched, pullListener)
+			App.Events.Subscribe(events.StoreSuccess, pullListener)
+			App.Events.Subscribe(events.PullAllError, pullListener)
+			App.Events.Subscribe(events.PullAllComplete, pullListener)
+
+			err := pull.PullAllRoutes(App, nil)
+			if bar != nil && !bar.IsFinished() {
+				bar.Finish()
+			}
+			return err
 		},
 	}
 	return cmd
@@ -226,6 +326,21 @@ func pullProfileCmd(App *app.App) *cobra.Command {
 		Short: "Pull user profile from BadgerMaps",
 		Long:  `Pull the user profile from the BadgerMaps API and store it in the local database.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			listener := func(e events.Event) {
+				if e.Source != "user profile" {
+					return
+				}
+				switch e.Type {
+				case events.PullComplete:
+					fmt.Println(color.GreenString("Successfully pulled user profile."))
+				case events.PullError:
+					fmt.Println(color.RedString("Error: Failed to pull user profile. The API returned an error."))
+					fmt.Println(color.YellowString("Details: %v", e.Payload.(error)))
+				}
+			}
+			App.Events.Subscribe(events.PullComplete, listener)
+			App.Events.Subscribe(events.PullError, listener)
+
 			return pull.PullProfile(App, nil)
 		},
 	}

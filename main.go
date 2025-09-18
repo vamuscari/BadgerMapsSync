@@ -13,6 +13,7 @@ import (
 	"badgermaps/cmd/test"
 	"badgermaps/cmd/version"
 	"badgermaps/database"
+	"badgermaps/events"
 	"badgermaps/gui"
 	"badgermaps/utils"
 
@@ -41,14 +42,15 @@ func createRootCmd() *cobra.Command {
 		Long: `BadgerMaps CLI is a command line interface for interacting with the BadgerMaps API.
 It allows you to push and pull data, run in server mode, and perform various utility operations.`,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			// Don't load config for version or help commands
-			if cmd.Name() == "version" || cmd.Name() == "help" {
+			// Don't load config for version, help, or gui commands
+			if cmd.Name() == "version" || cmd.Name() == "help" || (cmd.Name() == "badgermaps" && guiFlag) {
 				return
 			}
 			App.EnsureConfig(false)
 		},
 		Run: func(cmd *cobra.Command, args []string) {
 			if guiFlag && gui.Enabled {
+				App.EnsureConfig(true) // Load config specifically for GUI
 				App.State.IsGui = true
 				gui.Run(App, AppIcon)
 			} else {
@@ -107,9 +109,7 @@ func main() {
 	// Otherwise, run the command-line interface
 	rootCmd := createRootCmd()
 	if err := rootCmd.Execute(); err != nil {
-		if App.State.Debug {
-			fmt.Printf("Error: %v\n", err)
-		}
+		App.Events.Dispatch(events.Errorf("main", "command execution failed: %v", err))
 		os.Exit(1)
 	}
 }
