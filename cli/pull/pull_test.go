@@ -1,11 +1,10 @@
-package server
+package pull
 
 import (
 	"badgermaps/api"
 	"badgermaps/app"
 	"badgermaps/app/state"
 	"badgermaps/database"
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,7 +13,14 @@ import (
 	"testing"
 )
 
-func TestHandleAccountCreateWebhook(t *testing.T) {
+func TestPullAccountCmd(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"id": 123, "full_name": "Test Account"})
+	}))
+	defer server.Close()
+
 	// Create a temporary directory for the test database
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "test.db")
@@ -36,19 +42,13 @@ func TestHandleAccountCreateWebhook(t *testing.T) {
 	}
 
 	app.DB = db
-	app.API = api.NewAPIClient(&api.APIConfig{})
+	app.API = api.NewAPIClient(&api.APIConfig{BaseURL: server.URL})
 
-	s := &httpServer{App: app}
-	account := map[string]interface{}{
-		"id":        123456,
-		"full_name": "Test Account",
-	}
-	body, _ := json.Marshal(account)
-	req, _ := http.NewRequest("POST", "/webhook/account/create", bytes.NewBuffer(body))
-	rr := httptest.NewRecorder()
-	s.handleAccountCreateWebhook(rr, req)
-	if status := rr.Code; status != http.StatusOK {
-		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
+	presenter := NewCliPresenter(app)
+	cmd := pullAccountCmd(presenter)
+	cmd.SetArgs([]string{"123"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("pullAccountCmd() failed with error: %v", err)
 	}
 }
 

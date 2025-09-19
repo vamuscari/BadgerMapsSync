@@ -1,7 +1,6 @@
 package events
 
 import (
-	"fmt"
 	"sync"
 )
 
@@ -29,58 +28,55 @@ func (d *EventDispatcher) Subscribe(eventType EventType, listener EventListener)
 
 // Dispatch sends an event to all registered listeners of its type.
 func (d *EventDispatcher) Dispatch(e Event) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	// We don't dispatch a debug event here to avoid an infinite loop of dispatching debug events.
-	if d.app.GetState().Debug && e.Type != Debug {
+	if d.app.GetState() != nil && d.app.GetState().Debug && e.Type != Debug {
+		// Dispatching this in a goroutine to avoid blocking the main event dispatch
 		go d.Dispatch(Debugf("dispatcher", "Dispatching event: %s (Source: %s)", e.Type.String(), e.Source))
 	}
 
 	// Execute configured event actions
-	for _, eventAction := range d.app.GetConfig().Events {
-		// Check if the event type matches
-		if eventAction.Event != e.Type.String() {
-			continue
-		}
-
-		// Check if the source matches (if a source is specified in the action)
-		if eventAction.Source != "" && eventAction.Source != e.Source {
-			continue
-		}
-
-		// If we reach here, the event matches, so run the actions
-		for _, actionConfig := range eventAction.Run {
-			action, err := NewActionFromConfig(actionConfig)
-			if err != nil {
-				d.Dispatch(Event{Type: ActionError, Source: e.Source, Payload: fmt.Errorf("error creating action: %w", err)})
-				continue
-			}
-
-			if err := action.Validate(); err != nil {
-				d.Dispatch(Event{Type: ActionError, Source: e.Source, Payload: fmt.Errorf("invalid action configuration: %w", err)})
-				continue
-			}
-
-			go d.Dispatch(Event{Type: ActionStart, Source: e.Source, Payload: fmt.Sprintf("Executing action type '%s' from '%s'", actionConfig.Type, eventAction.Name)})
-
-			go func(action Action, actionConfig ActionConfig) {
-				if err := action.Execute(d.app); err != nil {
-					go d.Dispatch(Event{Type: ActionError, Source: e.Source, Payload: err})
-				} else {
-					go d.Dispatch(Event{Type: ActionSuccess, Source: e.Source, Payload: fmt.Sprintf("Action '%s' from '%s' completed successfully", actionConfig.Type, eventAction.Name)})
+	if d.app.GetConfig() != nil {
+		for _, eventAction := range d.app.GetConfig().Events {
+			if eventAction.Event == e.Type.String() && (eventAction.Source == "" || eventAction.Source == e.Source) {
+				for _, actionConfig := range eventAction.Run {
+					go d.executeAction(e, eventAction, actionConfig)
 				}
-			}(action, actionConfig)
+			}
 		}
 	}
 
-	// Notify listeners
+	// Copy listeners to call them outside the lock
+	d.mu.Lock()
+	listenersToCall := make([]EventListener, 0, len(d.listeners[e.Type]))
 	if listeners, found := d.listeners[e.Type]; found {
-		for _, listener := range listeners {
-			// Listeners are called synchronously.
-			// If a listener needs to perform a long-running task, it should do so in its own goroutine.
-			listener(e)
-		}
+		listenersToCall = append(listenersToCall, listeners...)
+	}
+	d.mu.Unlock()
+
+	// Notify listeners asynchronously
+	for _, listener := range listenersToCall {
+		go listener(e)
+	}
+}
+
+func (d *EventDispatcher) executeAction(e Event, eventAction EventAction, actionConfig ActionConfig) {
+	action, err := NewActionFromConfig(actionConfig)
+	if err != nil {
+		d.Dispatch(ActionErrorf(e.Source, "error creating action: %w", err))
+		return
+	}
+
+	if err := action.Validate(); err != nil {
+		d.Dispatch(ActionErrorf(e.Source, "invalid action configuration: %w", err))
+		return
+	}
+
+	d.Dispatch(ActionStartf(e.Source, "Executing action type '%s' from '%s'", actionConfig.Type, eventAction.Name))
+
+	if err := action.Execute(d.app); err != nil {
+		d.Dispatch(ActionErrorf(e.Source, "action '%s' from '%s' failed: %w", actionConfig.Type, eventAction.Name, err))
+	} else {
+		d.Dispatch(ActionSuccessf(e.Source, "Action '%s' from '%s' completed successfully", actionConfig.Type, eventAction.Name))
 	}
 }
 

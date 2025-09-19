@@ -151,6 +151,10 @@ func (db *MockDB) IsConnected() bool {
 	return true
 }
 
+func (db *MockDB) SetConnected(b bool) {
+	// Do nothing for mock
+}
+
 // MockAPI is a mock implementation of the API interface.
 type MockAPI struct {
 	api.APIClient

@@ -2,47 +2,48 @@ package test
 
 import (
 	"badgermaps/app"
-	"badgermaps/app/test"
 
 	"github.com/spf13/cobra"
 )
 
 // TestCmd creates a new test command
 func TestCmd(App *app.App) *cobra.Command {
+	presenter := NewCliPresenter(App)
+
 	testCmd := &cobra.Command{
 		Use:   "test",
 		Short: "Run tests and diagnostics",
 		Long:  `Test the BadgerMaps CLI functionality, including API connectivity and database functionality.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			test.RunTests(App)
+			presenter.HandleRunTests()
 		},
 	}
 
-	testCmd.AddCommand(testDatabaseCmd(App))
-	testCmd.AddCommand(testApiCmd(App))
+	testCmd.AddCommand(testDatabaseCmd(presenter))
+	testCmd.AddCommand(testApiCmd(presenter))
 	return testCmd
 }
 
-func testDatabaseCmd(App *app.App) *cobra.Command {
+func testDatabaseCmd(presenter *CliPresenter) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "database",
 		Short: "Test database functionality",
 		Long:  `Test database connectivity and verify that all required tables exist with the correct schema.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			test.TestDatabase(App)
+			presenter.HandleTestDatabase()
 		},
 	}
 	return cmd
 }
 
-func testApiCmd(App *app.App) *cobra.Command {
+func testApiCmd(presenter *CliPresenter) *cobra.Command {
 	var save bool
 	cmd := &cobra.Command{
 		Use:   "api",
 		Short: "Test API functionality",
 		Long:  `Test API connectivity and verify that all endpoints are responding correctly.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			test.TestApi(App, save)
+			presenter.HandleTestApi(save)
 		},
 	}
 	cmd.Flags().BoolVarP(&save, "save", "s", false, "Save test output to a log file and separate files for each endpoint response")

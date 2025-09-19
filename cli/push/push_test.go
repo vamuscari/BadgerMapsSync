@@ -52,6 +52,7 @@ func TestPushAccountsCmd(t *testing.T) {
 	}
 	app.DB = db
 	app.API = api.NewAPIClient(&api.APIConfig{BaseURL: server.URL})
+
 	cmd := PushCmd(app)
 	cmd.SetArgs([]string{"accounts"})
 	if err := cmd.Execute(); err != nil {
