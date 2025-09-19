@@ -1,86 +1,154 @@
 package action
 
 import (
-	"badgermaps/app"
-	"badgermaps/events"
+	"badgermaps/api"
+	"badgermaps/database"
 	"fmt"
+	"os"
+	"os/exec"
 
-	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
-func ActionCmd(a *app.App) *cobra.Command {
-	longDescription := `Configure actions to be taken when specific events occur.
-Actions are configured in the config.yaml file.
-`
-	cmd := &cobra.Command{
-		Use:   "action",
-		Short: "Manage event-driven actions",
-		Long:  longDescription,
-		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Help()
-		},
-	}
-
-	cmd.AddCommand(listEventsCmd(a))
-	cmd.AddCommand(validateEventsCmd(a))
-
-	return cmd
+// Executor is responsible for executing actions.
+type Executor struct {
+	DB  database.DB
+	API *api.APIClient
 }
 
-func listEventsCmd(a *app.App) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List all available events",
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("Available events:")
-			for _, eventType := range events.AllEventTypes() {
-				fmt.Printf("- %s\n", eventType)
-			}
-		},
+// NewExecutor creates a new Executor.
+func NewExecutor(db database.DB, api *api.APIClient) *Executor {
+	return &Executor{
+		DB:  db,
+		API: api,
 	}
-
-	return cmd
 }
 
-func validateEventsCmd(a *app.App) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "validate",
-		Short: "Validate the event actions in the configuration file",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			a.Events.Dispatch(events.Infof("action", "Validating event actions..."))
+// Action is the interface for all event actions.
+type Action interface {
+	Execute(executor *Executor) error
+	Validate() error
+}
 
-			if a.Config.EventActions == nil {
-				a.Events.Dispatch(events.Warningf("action", "No event actions found in configuration."))
-				return nil
-			}
+// ActionConfig is a generic struct for unmarshalling actions from YAML.
+type ActionConfig struct {
+	Type string                 `yaml:"type"`
+	Args map[string]interface{} `yaml:"args"`
+}
 
-			valid := true
-			for _, eventAction := range a.Config.EventActions {
-				a.Events.Dispatch(events.Infof("action", "Event: %s (Source: %s)", eventAction.Event, eventAction.Source))
-				for i, config := range eventAction.Run {
-					action, err := events.NewActionFromConfig(config)
-					if err != nil {
-						a.Events.Dispatch(events.Errorf("action", "  - Action %d: Error creating action: %v", i+1, err))
-						valid = false
-						continue
-					}
-					if err := action.Validate(); err != nil {
-						a.Events.Dispatch(events.Errorf("action", "  - Action %d: Invalid configuration: %v", i+1, err))
-						valid = false
-					} else {
-						a.Events.Dispatch(events.Infof("action", "  - Action %d (%s): OK", i+1, config.Type))
-					}
-				}
-			}
+// EventAction is the top-level struct for an event-triggered action.
+type EventAction struct {
+	Name   string         `yaml:"name"`
+	Event  string         `yaml:"event"`
+	Source string         `yaml:"source,omitempty"`
+	Run    []ActionConfig `yaml:"run"`
+}
 
-			if valid {
-				a.Events.Dispatch(events.Infof("action", "\nAll event actions are valid."))
-			} else {
-				return fmt.Errorf("\none or more event actions are invalid")
-			}
-
-			return nil
-		},
+// NewActionFromConfig creates a specific action implementation from a generic ActionConfig.
+func NewActionFromConfig(config ActionConfig) (Action, error) {
+	bytes, err := yaml.Marshal(config.Args)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal action args: %w", err)
 	}
-	return cmd
+
+	var action Action
+	switch config.Type {
+	case "exec":
+		action = &ExecAction{}
+	case "db":
+		action = &DbAction{}
+	case "api":
+		action = &ApiAction{}
+	default:
+		return nil, fmt.Errorf("unknown action type: %s", config.Type)
+	}
+
+	if err := yaml.Unmarshal(bytes, action); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal args for action type '%s': %w", config.Type, err)
+	}
+
+	return action, nil
+}
+
+// ExecAction executes a shell command.
+type ExecAction struct {
+	Command string   `yaml:"command"`
+	Args    []string `yaml:"args"`
+}
+
+// Execute runs the command.
+func (a *ExecAction) Execute(executor *Executor) error {
+	cmd := exec.Command("sh", "-c", a.Command)
+	cmd.Dir, _ = os.Getwd()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, string(output))
+	}
+	return nil
+}
+
+// Validate checks if the action is configured correctly.
+func (a *ExecAction) Validate() error {
+	if a.Command == "" {
+		return fmt.Errorf("exec action requires a 'command'")
+	}
+	return nil
+}
+
+// DbAction executes a database function, procedure, or raw query.
+type DbAction struct {
+	config ActionConfig
+}
+
+// Execute runs the database action.
+func (a *DbAction) Execute(executor *Executor) error {
+	dbActionConfig := database.ActionConfig{
+		Type: a.config.Type,
+		Args: a.config.Args,
+	}
+	return executor.DB.RunAction(dbActionConfig)
+}
+
+// Validate checks if the action is configured correctly.
+func (a *DbAction) Validate() error {
+	args := a.config.Args
+	_, hasCommand := args["command"]
+	_, hasFunction := args["function"]
+	_, hasProcedure := args["procedure"]
+	_, hasQuery := args["query"]
+
+	if !hasCommand && !hasFunction && !hasProcedure && !hasQuery {
+		return fmt.Errorf("db action requires one of 'command', 'function', 'procedure', or 'query'")
+	}
+	return nil
+}
+
+// UnmarshalYAML is a custom unmarshaler to capture the raw config.
+func (a *DbAction) UnmarshalYAML(value *yaml.Node) error {
+	a.config.Type = "db"
+	return value.Decode(&a.config.Args)
+}
+
+// ApiAction makes an API call.
+type ApiAction struct {
+	Endpoint string            `yaml:"endpoint"`
+	Method   string            `yaml:"method"`
+	Data     map[string]string `yaml:"data,omitempty"`
+}
+
+// Execute makes the API call.
+func (a *ApiAction) Execute(executor *Executor) error {
+	_, err := executor.API.RawRequest(a.Method, a.Endpoint, a.Data)
+	return err
+}
+
+// Validate checks if the action is configured correctly.
+func (a *ApiAction) Validate() error {
+	if a.Endpoint == "" {
+		return fmt.Errorf("api action requires an 'endpoint'")
+	}
+	if a.Method == "" {
+		return fmt.Errorf("api action requires a 'method'")
+	}
+	return nil
 }

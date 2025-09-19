@@ -58,7 +58,7 @@ type DB interface {
 	Close() error
 	GetDB() *sql.DB
 	GetSQL(command string) string
-	RunFunction(functionName string) error
+	RunAction(action ActionConfig) error
 	GetTables() ([]string, error)
 	ExecuteQuery(query string) (*sql.Rows, error)
 	IsConnected() bool
@@ -369,9 +369,28 @@ func (db *SQLiteConfig) DropAllTables() error {
 	return nil
 }
 
-func (db *SQLiteConfig) RunFunction(functionName string) error {
-	// SQLite does not have stored procedures, so we'll just log a message
-	return nil
+func (db *SQLiteConfig) RunAction(action ActionConfig) error {
+	var query string
+	var args []interface{}
+
+	if cmd, ok := action.Args["command"].(string); ok {
+		query = db.GetSQL(cmd)
+	} else if q, ok := action.Args["query"].(string); ok {
+		query = q
+	} else {
+		return fmt.Errorf("sqlite action requires 'command' or 'query'")
+	}
+
+	if query == "" {
+		return fmt.Errorf("SQL command not found or query is empty")
+	}
+
+	if params, ok := action.Args["args"].([]interface{}); ok {
+		args = params
+	}
+
+	_, err := db.db.Exec(query, args...)
+	return err
 }
 
 func (db *SQLiteConfig) GetTables() ([]string, error) {
@@ -833,10 +852,33 @@ func (db *PostgreSQLConfig) DropAllTables() error {
 	return nil
 }
 
-func (db *PostgreSQLConfig) RunFunction(functionName string) error {
-	sqlDB := db.GetDB()
-	query := fmt.Sprintf("SELECT %s()", functionName)
-	_, err := sqlDB.Exec(query)
+func (db *PostgreSQLConfig) RunAction(action ActionConfig) error {
+	var query string
+	var args []interface{}
+
+	if cmd, ok := action.Args["command"].(string); ok {
+		query = db.GetSQL(cmd)
+	} else if fn, ok := action.Args["function"].(string); ok {
+		// Note: This is a simplified approach. For functions with arguments,
+		// a more robust solution would be needed to handle placeholders.
+		query = fmt.Sprintf("SELECT %s()", fn)
+	} else if proc, ok := action.Args["procedure"].(string); ok {
+		query = fmt.Sprintf("CALL %s()", proc)
+	} else if q, ok := action.Args["query"].(string); ok {
+		query = q
+	} else {
+		return fmt.Errorf("postgres action requires 'command', 'function', 'procedure', or 'query'")
+	}
+
+	if query == "" {
+		return fmt.Errorf("SQL command not found or query is empty")
+	}
+
+	if params, ok := action.Args["args"].([]interface{}); ok {
+		args = params
+	}
+
+	_, err := db.db.Exec(query, args...)
 	return err
 }
 
@@ -1323,10 +1365,29 @@ func (db *MSSQLConfig) DropAllTables() error {
 	return nil
 }
 
-func (db *MSSQLConfig) RunFunction(functionName string) error {
-	sqlDB := db.GetDB()
-	query := fmt.Sprintf("EXEC %s", functionName)
-	_, err := sqlDB.Exec(query)
+func (db *MSSQLConfig) RunAction(action ActionConfig) error {
+	var query string
+	var args []interface{}
+
+	if cmd, ok := action.Args["command"].(string); ok {
+		query = db.GetSQL(cmd)
+	} else if proc, ok := action.Args["procedure"].(string); ok {
+		query = fmt.Sprintf("EXEC %s", proc)
+	} else if q, ok := action.Args["query"].(string); ok {
+		query = q
+	} else {
+		return fmt.Errorf("mssql action requires 'command', 'procedure', or 'query'")
+	}
+
+	if query == "" {
+		return fmt.Errorf("SQL command not found or query is empty")
+	}
+
+	if params, ok := action.Args["args"].([]interface{}); ok {
+		args = params
+	}
+
+	_, err := db.db.Exec(query, args...)
 	return err
 }
 

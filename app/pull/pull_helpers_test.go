@@ -49,10 +49,8 @@ func setupTestApp(t *testing.T, apiHandler http.Handler) (*app.App, func()) {
 		State:  testState,
 		DB:     db,
 		API:    apiClient,
-		Events: events.NewEventDispatcher(nil), // Dispatcher is tricky, might need a mock app interface
+		Events: events.NewEventDispatcher(), // Dispatcher is tricky, might need a mock app interface
 	}
-	// A bit of a hack to avoid a nil pointer in the dispatcher, since it needs an AppInterface
-	testApp.Events = events.NewEventDispatcher(testApp)
 
 	// Initialize the database schema
 	if err := testApp.DB.Connect(); err != nil {

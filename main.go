@@ -74,7 +74,7 @@ It allows you to push and pull data, run in server mode, and perform various uti
 	testCmd := test.TestCmd(App)
 	configCmd := config.ConfigCmd(App)
 	versionCmd := version.VersionCmd()
-	actionCmd := action.ActionCmd(App)
+	actionCmd := action.ActionCmd
 
 	rootCmd.AddCommand(pushCmd, pullCmd, serverCmd, testCmd, configCmd, versionCmd, actionCmd)
 

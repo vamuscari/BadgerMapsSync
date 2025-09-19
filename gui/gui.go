@@ -3,6 +3,7 @@ package gui
 import (
 	"badgermaps/app"
 	"badgermaps/app/push"
+	"badgermaps/cli/action"
 	"badgermaps/database"
 	"badgermaps/events"
 	"fmt"
@@ -786,7 +787,7 @@ func (ui *Gui) createPendingChangesTable(entityType string) fyne.CanvasObject {
 func (ui *Gui) createActionsTab() fyne.CanvasObject {
 	actionsContent := container.NewVBox()
 
-	eventActions := ui.app.GetEventActions()
+	eventActions := ui.app.Config.EventActions
 	sort.Slice(eventActions, func(i, j int) bool {
 		return eventActions[i].Name < eventActions[j].Name
 	})
@@ -856,9 +857,9 @@ func (ui *Gui) createActionsTab() fyne.CanvasObject {
 	return container.NewBorder(nil, addButton, nil, nil, container.NewVScroll(actionsContent))
 }
 
-func (ui *Gui) createActionPopup(eventAction *events.EventAction, actionIndex int) {
+func (ui *Gui) createActionPopup(eventAction *action.EventAction, actionIndex int) {
 	var event, source string
-	var actionConfig events.ActionConfig
+	var actionConfig action.ActionConfig
 
 	if eventAction != nil {
 		event = eventAction.Event
@@ -988,7 +989,7 @@ func (ui *Gui) createActionPopup(eventAction *events.EventAction, actionIndex in
 			return
 		}
 
-		var newAction events.ActionConfig
+		var newAction action.ActionConfig
 		newAction.Args = make(map[string]interface{})
 
 		selectedTab := actionTabs.Selected()

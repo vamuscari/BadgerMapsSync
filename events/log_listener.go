@@ -1,6 +1,7 @@
 package events
 
 import (
+	"badgermaps/app/state"
 	"badgermaps/utils"
 	"fmt"
 	"strings"
@@ -9,24 +10,23 @@ import (
 
 // LogListener handles log events and prints them to the console.
 type LogListener struct {
-	App AppInterface
+	State *state.State
 }
 
 // NewLogListener creates a new LogListener.
-func NewLogListener(app AppInterface) *LogListener {
-	return &LogListener{App: app}
+func NewLogListener(state *state.State) *LogListener {
+	return &LogListener{State: state}
 }
 
 // Handle processes the log event.
 func (l *LogListener) Handle(e Event) {
-	state := l.App.GetState()
-	if state.Quiet {
+	if l.State.Quiet {
 		return
 	}
 
 	// Handle Debug events separately as they have a different payload
 	if e.Type == Debug {
-		if !state.Debug {
+		if !l.State.Debug {
 			return
 		}
 		msg, ok := e.Payload.(string)
@@ -52,7 +52,7 @@ func (l *LogListener) Handle(e Event) {
 	}
 
 	// Respect quiet and verbosity settings
-	if payload.Level == LogLevelDebug && !state.Debug {
+	if payload.Level == LogLevelDebug && !l.State.Debug {
 		return
 	}
 

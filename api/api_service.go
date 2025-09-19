@@ -1136,3 +1136,24 @@ func (api *APIClient) DeleteCheckin(checkinID int) error {
 
 	return nil
 }
+
+func (api *APIClient) RawRequest(method, endpoint string, data map[string]string) ([]byte, error) {
+	var body string
+	var err error
+	switch strings.ToUpper(method) {
+	case "GET":
+		body, err = api.GetRaw(endpoint)
+	case "POST":
+		body, err = api.PostRaw(endpoint, data)
+	case "PATCH":
+		body, err = api.PatchRaw(endpoint, data)
+	case "DELETE":
+		body, err = api.DeleteRaw(endpoint)
+	default:
+		return nil, fmt.Errorf("unsupported HTTP method: %s", method)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return []byte(body), nil
+}

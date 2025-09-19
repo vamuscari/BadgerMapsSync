@@ -64,6 +64,7 @@ const (
 	Debug
 	ConnectionStatusChanged
 	TestEvent
+	Wildcard
 )
 
 func (e EventType) String() string {
@@ -95,6 +96,7 @@ func (e EventType) String() string {
 		"Debug",
 		"ConnectionStatusChanged",
 		"TestEvent",
+		"Wildcard",
 	}[e]
 }
 

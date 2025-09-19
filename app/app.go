@@ -4,13 +4,13 @@ import (
 	"badgermaps/api"
 	"badgermaps/app/server"
 	"badgermaps/app/state"
+	"badgermaps/cli/action"
 	"badgermaps/database"
 	"badgermaps/events"
 	"badgermaps/utils"
 	"bufio"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -21,29 +21,25 @@ type Config struct {
 	API                   api.APIConfig        `yaml:"api"`
 	DB                    database.DBConfig    `yaml:"db"`
 	MaxConcurrentRequests int                  `yaml:"max_concurrent_requests"`
-	EventActions          []events.EventAction `yaml:"event_actions"`
+	EventActions          []action.EventAction `yaml:"event_actions"`
 }
 
 type App struct {
 	ConfigFile string
 
-	State  *state.State
-	Config *Config
-	DB     database.DB
-	API    *api.APIClient
-	Events *events.EventDispatcher
-	Server *server.ServerManager
+	State          *state.State
+	Config         *Config
+	DB             database.DB
+	API            *api.APIClient
+	Events         *events.EventDispatcher
+	Server         *server.ServerManager
+	ActionExecutor *action.Executor
 
 	MaxConcurrentRequests int
 }
 
 func (a *App) GetState() *state.State {
 	return a.State
-}
-func (a *App) GetConfig() *events.Config {
-	return &events.Config{
-		Events: a.Config.EventActions,
-	}
 }
 func (a *App) GetDB() database.DB {
 	return a.DB
@@ -86,11 +82,11 @@ func NewApp() *App {
 		},
 	}
 	a.State.PIDFile = utils.GetConfigDirFile(".badgermaps.pid")
-	a.Events = events.NewEventDispatcher(a)
+	a.Events = events.NewEventDispatcher()
 	a.Server = server.NewServerManager(a.State)
 
 	// Register the log listener
-	logListener := events.NewLogListener(a)
+	logListener := events.NewLogListener(a.State)
 	a.Events.Subscribe(events.LogEvent, logListener.Handle)
 	a.Events.Subscribe(events.Debug, logListener.Handle)
 
@@ -130,6 +126,21 @@ func (a *App) LoadConfig() error {
 			a.DB.TestConnection()
 		}
 	}
+
+	a.ActionExecutor = action.NewExecutor(a.DB, a.API)
+	a.Events.Subscribe(events.Wildcard, func(event events.Event) {
+		for _, eventAction := range a.Config.EventActions {
+			if eventAction.Event == event.Type.String() && (eventAction.Source == "" || eventAction.Source == event.Source) {
+				for _, actionConfig := range eventAction.Run {
+					go func(ac action.ActionConfig) {
+						if err := a.ExecuteAction(ac); err != nil {
+							a.Events.Dispatch(events.Errorf("action", "Error executing action: %v", err))
+						}
+					}(actionConfig)
+				}
+			}
+		}
+	})
 
 	// Limit between
 	if a.MaxConcurrentRequests < 1 || a.MaxConcurrentRequests > 10 {
@@ -173,13 +184,13 @@ func (a *App) migrateActionNames() {
 }
 
 func (a *App) validateAndCleanActions() {
-	var validEventActions []events.EventAction
+	var validEventActions []action.EventAction
 	actionsModified := false
 
 	for _, eventAction := range a.Config.EventActions {
-		var validRuns []events.ActionConfig
+		var validRuns []action.ActionConfig
 		for _, actionConfig := range eventAction.Run {
-			action, err := events.NewActionFromConfig(actionConfig)
+			action, err := action.NewActionFromConfig(actionConfig)
 			if err != nil {
 				a.Events.Dispatch(events.Warningf("config", "Invalid action config for event '%s': %v. Removing.", eventAction.Name, err))
 				actionsModified = true
@@ -248,7 +259,7 @@ func (a *App) GetConfigFilePath() (string, bool, error) {
 	return "", false, nil
 }
 
-func (a *App) AddEventAction(event, source string, actionConfig events.ActionConfig) error {
+func (a *App) AddEventAction(event, source string, actionConfig action.ActionConfig) error {
 	key := event
 	if source != "" {
 		key = fmt.Sprintf("%s_%s", key, source)
@@ -267,11 +278,11 @@ func (a *App) AddEventAction(event, source string, actionConfig events.ActionCon
 	}
 
 	// Not found, create a new one
-	newEventAction := events.EventAction{
+	newEventAction := action.EventAction{
 		Name:   key,
 		Event:  event,
 		Source: source,
-		Run:    []events.ActionConfig{actionConfig},
+		Run:    []action.ActionConfig{actionConfig},
 	}
 	a.Config.EventActions = append(a.Config.EventActions, newEventAction)
 	err := a.SaveConfig()
@@ -280,7 +291,7 @@ func (a *App) AddEventAction(event, source string, actionConfig events.ActionCon
 	}
 	return err
 }
-func (a *App) UpdateEventAction(eventName string, actionIndex int, actionConfig events.ActionConfig) error {
+func (a *App) UpdateEventAction(eventName string, actionIndex int, actionConfig action.ActionConfig) error {
 	for i := range a.Config.EventActions {
 		if a.Config.EventActions[i].Name == eventName {
 			if actionIndex < 0 || actionIndex >= len(a.Config.EventActions[i].Run) {
@@ -320,12 +331,8 @@ func (a *App) RemoveEventAction(eventName string, actionIndex int) error {
 	return fmt.Errorf("event action not found: %s", eventName)
 }
 
-func (a *App) GetEventActions() []events.EventAction {
-	return a.Config.EventActions
-}
-
-func (a *App) ExecuteAction(actionConfig events.ActionConfig) error {
-	action, err := events.NewActionFromConfig(actionConfig)
+func (a *App) ExecuteAction(actionConfig action.ActionConfig) error {
+	action, err := action.NewActionFromConfig(actionConfig)
 	if err != nil {
 		a.Events.Dispatch(events.Errorf("manual_run", "error creating action: %v", err))
 		return err
@@ -339,7 +346,7 @@ func (a *App) ExecuteAction(actionConfig events.ActionConfig) error {
 	a.Events.Dispatch(events.Debugf("manual_run", "Executing action type '%s'", actionConfig.Type))
 
 	go func() { // run in a goroutine to not block the GUI
-		if err := action.Execute(a); err != nil {
+		if err := action.Execute(a.ActionExecutor); err != nil {
 			a.Events.Dispatch(events.Errorf("manual_run", "action '%s' failed: %v", actionConfig.Type, err))
 		} else {
 			a.Events.Dispatch(events.Debugf("manual_run", "Action '%s' completed successfully", actionConfig.Type))
@@ -350,38 +357,35 @@ func (a *App) ExecuteAction(actionConfig events.ActionConfig) error {
 }
 
 // TriggerEventAction executes a specific action string (e.g., "db:my_function", "exec:ls").
-func (a *App) TriggerEventAction(action string) error {
-	parts := strings.SplitN(action, ":", 2)
+func (a *App) TriggerEventAction(actionString string) error {
+	parts := strings.SplitN(actionString, ":", 2)
 	if len(parts) != 2 {
-		return fmt.Errorf("invalid action format: %s", action)
+		return fmt.Errorf("invalid action format: %s", actionString)
 	}
 	actionType := parts[0]
 	actionValue := parts[1]
 
+	var actionConfig action.ActionConfig
 	switch actionType {
 	case "db":
-		go func(functionName string) {
-			if err := a.DB.RunFunction(functionName); err != nil {
-				a.Events.Dispatch(events.Errorf("app", "Error executing db function '%s': %v", functionName, err))
-			}
-		}(actionValue)
+		actionConfig = action.ActionConfig{
+			Type: "db",
+			Args: map[string]interface{}{"command": actionValue},
+		}
 	case "api":
-		go func(endpoint string) {
-			if _, err := a.API.GetRaw(endpoint); err != nil {
-				a.Events.Dispatch(events.Errorf("app", "Error executing api action '%s': %v", endpoint, err))
-			}
-		}(actionValue)
+		actionConfig = action.ActionConfig{
+			Type: "api",
+			Args: map[string]interface{}{"endpoint": actionValue},
+		}
 	case "exec":
-		go func(command string) {
-			cmd := exec.Command("sh", "-c", command)
-			if err := cmd.Run(); err != nil {
-				a.Events.Dispatch(events.Errorf("app", "Error executing command '%s': %v", command, err))
-			}
-		}(actionValue)
+		actionConfig = action.ActionConfig{
+			Type: "exec",
+			Args: map[string]interface{}{"command": actionValue},
+		}
 	default:
 		return fmt.Errorf("unknown action type: %s", actionType)
 	}
-	return nil
+	return a.ExecuteAction(actionConfig)
 }
 
 func (a *App) EnsureConfig(isGui bool) {
