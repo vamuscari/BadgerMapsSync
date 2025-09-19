@@ -17,9 +17,9 @@ import (
 )
 
 type Config struct {
-	API                   api.APIConfig       `yaml:"api"`
-	DB                    database.DBConfig   `yaml:"db"`
-	MaxConcurrentRequests int                 `yaml:"max_concurrent_requests"`
+	API                   api.APIConfig        `yaml:"api"`
+	DB                    database.DBConfig    `yaml:"db"`
+	MaxConcurrentRequests int                  `yaml:"max_concurrent_requests"`
 	EventActions          []events.EventAction `yaml:"event_actions"`
 }
 
@@ -96,6 +96,7 @@ func NewApp() *App {
 	// Register the log listener
 	logListener := events.NewLogListener(a)
 	a.Events.Subscribe(events.LogEvent, logListener.Handle)
+	a.Events.Subscribe(events.Debug, logListener.Handle)
 
 	return a
 }
@@ -330,22 +331,22 @@ func (a *App) GetEventActions() []events.EventAction {
 func (a *App) ExecuteAction(actionConfig events.ActionConfig) error {
 	action, err := events.NewActionFromConfig(actionConfig)
 	if err != nil {
-		a.Events.Dispatch(events.ActionErrorf("manual_run", "error creating action: %w", err))
+		a.Events.Dispatch(events.Errorf("manual_run", "error creating action: %v", err))
 		return err
 	}
 
 	if err := action.Validate(); err != nil {
-		a.Events.Dispatch(events.ActionErrorf("manual_run", "invalid action configuration: %w", err))
+		a.Events.Dispatch(events.Errorf("manual_run", "invalid action configuration: %v", err))
 		return err
 	}
 
-	a.Events.Dispatch(events.ActionStartf("manual_run", "Executing action type '%s'", actionConfig.Type))
+	a.Events.Dispatch(events.Debugf("manual_run", "Executing action type '%s'", actionConfig.Type))
 
 	go func() { // run in a goroutine to not block the GUI
 		if err := action.Execute(a); err != nil {
-			a.Events.Dispatch(events.ActionErrorf("manual_run", "action '%s' failed: %w", actionConfig.Type, err))
+			a.Events.Dispatch(events.Errorf("manual_run", "action '%s' failed: %v", actionConfig.Type, err))
 		} else {
-			a.Events.Dispatch(events.ActionSuccessf("manual_run", "Action '%s' completed successfully", actionConfig.Type))
+			a.Events.Dispatch(events.Debugf("manual_run", "Action '%s' completed successfully", actionConfig.Type))
 		}
 	}()
 

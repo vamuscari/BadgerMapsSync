@@ -881,12 +881,12 @@ func (ui *Gui) createActionPopup(eventAction *events.EventAction, actionIndex in
 		if cmd, ok := actionConfig.Args["command"].(string); ok {
 			execCommandEntry.SetText(cmd)
 		}
-		if args, ok := actionConfig.Args["args"].([]interface{}); ok {
+		if args, ok := actionConfig.Args["args"].([]interface{}); ok && len(args) > 0 {
 			var argStrings []string
 			for _, arg := range args {
-				argStrings = append(argStrings, arg.(string))
+				argStrings = append(argStrings, fmt.Sprintf("%v", arg))
 			}
-			execArgsEntry.SetText(strings.Join(argStrings, " "))
+			execCommandEntry.SetText(execCommandEntry.Text + " " + strings.Join(argStrings, " "))
 		}
 	}
 	execForm := widget.NewForm(
@@ -996,8 +996,11 @@ func (ui *Gui) createActionPopup(eventAction *events.EventAction, actionIndex in
 		switch selectedTab.Text {
 		case "Exec":
 			newAction.Type = "exec"
-			newAction.Args["command"] = execCommandEntry.Text
-			newAction.Args["args"] = strings.Fields(execArgsEntry.Text)
+			command := execCommandEntry.Text
+			if execArgsEntry.Text != "" {
+				command += " " + execArgsEntry.Text
+			}
+			newAction.Args["command"] = command
 		case "Database":
 			newAction.Type = "db"
 			newAction.Args["function"] = dbFunctionEntry.Text

@@ -62,22 +62,20 @@ func (d *EventDispatcher) Dispatch(e Event) {
 func (d *EventDispatcher) executeAction(e Event, eventAction EventAction, actionConfig ActionConfig) {
 	action, err := NewActionFromConfig(actionConfig)
 	if err != nil {
-		d.Dispatch(ActionErrorf(e.Source, "error creating action: %w", err))
+		d.Dispatch(Errorf(e.Source, "error creating action: %v", err))
 		return
 	}
 
 	if err := action.Validate(); err != nil {
-		d.Dispatch(ActionErrorf(e.Source, "invalid action configuration: %w", err))
+		d.Dispatch(Errorf(e.Source, "invalid action configuration: %v", err))
 		return
 	}
 
-	d.Dispatch(ActionStartf(e.Source, "Executing action type '%s' from '%s'", actionConfig.Type, eventAction.Name))
+	d.Dispatch(Debugf(e.Source, "Executing action type '%s' from '%s'", actionConfig.Type, eventAction.Name))
 
 	if err := action.Execute(d.app); err != nil {
-		d.Dispatch(ActionErrorf(e.Source, "action '%s' from '%s' failed: %w", actionConfig.Type, eventAction.Name, err))
+		d.Dispatch(Errorf(e.Source, "action '%s' from '%s' failed: %v", actionConfig.Type, eventAction.Name, err))
 	} else {
-		d.Dispatch(ActionSuccessf(e.Source, "Action '%s' from '%s' completed successfully", actionConfig.Type, eventAction.Name))
+		d.Dispatch(Debugf(e.Source, "Action '%s' from '%s' completed successfully", actionConfig.Type, eventAction.Name))
 	}
 }
-
-

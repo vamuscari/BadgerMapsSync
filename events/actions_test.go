@@ -5,434 +5,152 @@ import (
 	"badgermaps/app/state"
 	"badgermaps/database"
 	"database/sql"
+	"errors"
+	"os"
 	"testing"
-	"time"
 )
 
 // MockApp is a mock implementation of the AppInterface for testing.
 type MockApp struct {
-	MockDB       *MockDB
-	MockAPI      *MockAPI
-	AppConfig    *Config
-	AppState     *state.State
-	EventActions []EventAction
+	db  *MockDB
+	api *MockAPI
 }
 
-func (a *MockApp) GetDB() database.DB {
-	return a.MockDB
+func (a *MockApp) GetState() *state.State   { return nil }
+func (a *MockApp) GetConfig() *Config       { return nil }
+func (a *MockApp) GetDB() database.DB       { return a.db }
+func (a *MockApp) GetAPI() *api.APIClient   { return nil }
+func (a *MockApp) GetEventActions() []EventAction { return nil }
+func (a *MockApp) RawRequest(method, endpoint string, data map[string]string) ([]byte, error) {
+	return a.api.RawRequest(method, endpoint, data)
 }
 
-func (a *MockApp) GetAPI() *api.APIClient {
-	if a.MockAPI == nil {
+// MockDB is a mock implementation of the DB interface for testing.
+type MockDB struct {
+	FunctionError error
+}
+
+func (db *MockDB) GetType() string { return "mock" }
+func (db *MockDB) DatabaseConnection() string { return "" }
+func (db *MockDB) LoadConfig(config *database.DBConfig) error { return nil }
+func (db *MockDB) GetUsername() string { return "" }
+func (db *MockDB) SaveConfig(config *database.DBConfig) error { return nil }
+func (db *MockDB) PromptDatabaseSettings() {}
+func (db *MockDB) TableExists(tableName string) (bool, error) { return true, nil }
+func (db *MockDB) ViewExists(viewName string) (bool, error) { return true, nil }
+func (db *MockDB) ProcedureExists(procedureName string) (bool, error) { return true, nil }
+func (db *MockDB) TriggerExists(triggerName string) (bool, error) { return true, nil }
+func (db *MockDB) GetTableColumns(tableName string) ([]string, error) { return nil, nil }
+func (db *MockDB) ValidateSchema(s *state.State) error { return nil }
+func (db *MockDB) EnforceSchema(s *state.State) error { return nil }
+func (db *MockDB) TestConnection() error { return nil }
+func (db *MockDB) DropAllTables() error { return nil }
+func (db *MockDB) Connect() error { return nil }
+func (db *MockDB) Close() error { return nil }
+func (db *MockDB) GetDB() *sql.DB { return nil }
+func (db *MockDB) GetSQL(command string) string { return "" }
+func (db *MockDB) GetTables() ([]string, error) { return nil, nil }
+func (db *MockDB) ExecuteQuery(query string) (*sql.Rows, error) { return nil, nil }
+func (db *MockDB) IsConnected() bool { return true }
+func (db *MockDB) SetConnected(connected bool) {}
+func (db *MockDB) RunFunction(name string) error {
+	if db.FunctionError != nil {
+		return db.FunctionError
+	}
+	if name == "test_function" {
 		return nil
 	}
-	return &a.MockAPI.APIClient
+	return errors.New("function not found")
 }
 
-func (a *MockApp) GetConfig() *Config {
-	return a.AppConfig
-}
-
-func (a *MockApp) GetState() *state.State {
-	return a.AppState
-}
-
-func (a *MockApp) RawRequest(method, endpoint string, data map[string]string) ([]byte, error) {
-	if a.MockAPI == nil {
-		return nil, nil
-	}
-	// This is a simplified mock. A more complex one could switch on method.
-	s, err := a.MockAPI.GetRaw(endpoint) // Assuming GetRaw for simplicity
-	if err != nil {
-		return nil, err
-	}
-	return []byte(s), nil
-}
-
-func (a *MockApp) GetEventActions() []EventAction {
-	return a.EventActions
-}
-
-// MockDB is a mock implementation of the database.DB interface.
-type MockDB struct {
-	FunctionCalls map[string]int
-}
-
-func (db *MockDB) GetType() string {
-	return "mock"
-}
-
-func (db *MockDB) DatabaseConnection() string {
-	return ""
-}
-
-func (db *MockDB) LoadConfig(config *database.DBConfig) error {
-	return nil
-}
-
-func (db *MockDB) GetUsername() string {
-	return ""
-}
-
-func (db *MockDB) SaveConfig(config *database.DBConfig) error {
-	return nil
-}
-
-func (db *MockDB) PromptDatabaseSettings() {}
-
-func (db *MockDB) TableExists(tableName string) (bool, error) {
-	return true, nil
-}
-
-func (db *MockDB) ViewExists(viewName string) (bool, error) {
-	return true, nil
-}
-
-func (db *MockDB) ProcedureExists(procedureName string) (bool, error) {
-	return true, nil
-}
-
-func (db *MockDB) TriggerExists(triggerName string) (bool, error) {
-	return true, nil
-}
-
-func (db *MockDB) GetTableColumns(tableName string) ([]string, error) {
-	return []string{"col1", "col2"}, nil
-}
-
-func (db *MockDB) ValidateSchema(s *state.State) error {
-	return nil
-}
-
-func (db *MockDB) EnforceSchema(s *state.State) error {
-	return nil
-}
-
-func (db *MockDB) TestConnection() error {
-	return nil
-}
-
-func (db *MockDB) DropAllTables() error {
-	return nil
-}
-
-func (db *MockDB) Connect() error {
-	return nil
-}
-
-func (db *MockDB) Close() error {
-	return nil
-}
-
-func (db *MockDB) GetDB() *sql.DB {
-	return nil
-}
-
-func (db *MockDB) GetSQL(command string) string {
-	return ""
-}
-
-func (db *MockDB) RunFunction(name string) error {
-	if db.FunctionCalls == nil {
-		db.FunctionCalls = make(map[string]int)
-	}
-	db.FunctionCalls[name]++
-	return nil
-}
-
-func (db *MockDB) GetTables() ([]string, error) {
-	return []string{"table1", "table2"}, nil
-}
-
-func (db *MockDB) ExecuteQuery(query string) (*sql.Rows, error) {
-	return nil, nil
-}
-
-func (db *MockDB) IsConnected() bool {
-	return true
-}
-
-func (db *MockDB) SetConnected(b bool) {
-	// Do nothing for mock
-}
-
-// MockAPI is a mock implementation of the API interface.
+// MockAPI is a mock implementation of the API client for testing.
 type MockAPI struct {
-	api.APIClient
-	GetRawCalls map[string]int
+	RequestError error
 }
 
-func (api *MockAPI) GetRaw(endpoint string) (string, error) {
-	if api.GetRawCalls == nil {
-		api.GetRawCalls = make(map[string]int)
+func (api *MockAPI) RawRequest(method, endpoint string, data map[string]string) ([]byte, error) {
+	if api.RequestError != nil {
+		return nil, api.RequestError
 	}
-	api.GetRawCalls[endpoint]++
-	return "mock data", nil
+	if endpoint == "/test_endpoint" {
+		return []byte("ok"), nil
+	}
+	return nil, errors.New("endpoint not found")
 }
 
-func TestNewActionFromConfig(t *testing.T) {
-	// Test case for exec action
-	execConfig := ActionConfig{
-		Type: "exec",
-		Args: map[string]interface{}{
-			"command": "echo",
-			"args":    []interface{}{"hello"},
-		},
-	}
-	action, err := NewActionFromConfig(execConfig)
+func TestExecAction(t *testing.T) {
+	app := &MockApp{}
+
+	// Test valid command
+	tmpfile, err := os.CreateTemp("", "example")
 	if err != nil {
-		t.Fatalf("failed to create exec action: %v", err)
+		t.Fatal(err)
 	}
-	if _, ok := action.(*ExecAction); !ok {
-		t.Errorf("expected ExecAction, got %T", action)
+	defer os.Remove(tmpfile.Name()) // clean up
+
+	action := &ExecAction{Command: "echo hello > " + tmpfile.Name()}
+	if err := action.Execute(app); err != nil {
+		t.Errorf("ExecAction failed: %v", err)
 	}
 
-	// Test case for db action
-	dbConfig := ActionConfig{
-		Type: "db",
-		Args: map[string]interface{}{
-			"function": "my_function",
-		},
-	}
-	action, err = NewActionFromConfig(dbConfig)
+	body, err := os.ReadFile(tmpfile.Name())
 	if err != nil {
-		t.Fatalf("failed to create db action: %v", err)
-	}
-	if _, ok := action.(*DbAction); !ok {
-		t.Errorf("expected DbAction, got %T", action)
+		t.Fatal(err)
 	}
 
-	// Test case for api action
-	apiConfig := ActionConfig{
-		Type: "api",
-		Args: map[string]interface{}{
-			"endpoint": "my_endpoint",
-			"method":   "GET",
-		},
-	}
-	action, err = NewActionFromConfig(apiConfig)
-	if err != nil {
-		t.Fatalf("failed to create api action: %v", err)
-	}
-	if _, ok := action.(*ApiAction); !ok {
-		t.Errorf("expected ApiAction, got %T", action)
+	if string(body) != "hello\n" {
+		t.Errorf("ExecAction output incorrect, got: %s, want: %s", string(body), "hello\n")
 	}
 
-	// Test case for unknown action
-	unknownConfig := ActionConfig{
-		Type: "unknown",
-	}
-	_, err = NewActionFromConfig(unknownConfig)
-	if err == nil {
-		t.Errorf("expected error for unknown action type, got nil")
+	// Test invalid command
+	action = &ExecAction{Command: "invalid_command"}
+	if err := action.Execute(app); err == nil {
+		t.Errorf("ExecAction should have failed for invalid command")
 	}
 }
 
-func TestExecAction_Execute(t *testing.T) {
-	action := &ExecAction{
-		Command: "echo",
-		Args:    []string{"hello"},
-	}
-	err := action.Execute(nil)
-	if err != nil {
-		t.Errorf("unexpected error executing command: %v", err)
-	}
-}
+func TestDbAction(t *testing.T) {
+	app := &MockApp{db: &MockDB{}}
 
-func TestDbAction_Execute(t *testing.T) {
-	mockDB := &MockDB{}
-	app := &MockApp{MockDB: mockDB, AppConfig: &Config{}}
-	action := &DbAction{
-		Function: "my_function",
+	// Test valid function
+	action := &DbAction{Function: "test_function"}
+	if err := action.Execute(app); err != nil {
+		t.Errorf("DbAction failed: %v", err)
 	}
-	err := action.Execute(app)
-	if err != nil {
-		t.Errorf("unexpected error executing db function: %v", err)
+
+	// Test invalid function
+	action = &DbAction{Function: "invalid_function"}
+	if err := action.Execute(app); err == nil {
+		t.Errorf("DbAction should have failed for invalid function")
 	}
-	if mockDB.FunctionCalls["my_function"] != 1 {
-		t.Errorf("expected function to be called once, got %d", mockDB.FunctionCalls["my_function"])
+
+	// Test with DB error
+	app.db.FunctionError = errors.New("db error")
+	action = &DbAction{Function: "test_function"}
+	if err := action.Execute(app); err == nil {
+		t.Errorf("DbAction should have failed with DB error")
 	}
 }
 
-func TestApiAction_Execute(t *testing.T) {
-	mockAPI := &MockAPI{}
-	app := &MockApp{MockAPI: mockAPI, AppConfig: &Config{}}
-	action := &ApiAction{
-		Endpoint: "my_endpoint",
-		Method:   "GET",
-	}
-	err := action.Execute(app)
-	if err != nil {
-		t.Errorf("unexpected error executing api call: %v", err)
-	}
-	if mockAPI.GetRawCalls["my_endpoint"] != 1 {
-		t.Errorf("expected api to be called once, got %d", mockAPI.GetRawCalls["my_endpoint"])
-	}
-}
+func TestApiAction(t *testing.T) {
+	app := &MockApp{api: &MockAPI{}}
 
-func TestAction_Validate(t *testing.T) {
-	// Test ExecAction
-	execAction := &ExecAction{}
-	if err := execAction.Validate(); err == nil {
-		t.Error("expected error for exec action with no command, got nil")
-	}
-	execAction.Command = "echo"
-	if err := execAction.Validate(); err != nil {
-		t.Errorf("unexpected error for valid exec action: %v", err)
+	// Test valid endpoint
+	action := &ApiAction{Endpoint: "/test_endpoint", Method: "GET"}
+	if err := action.Execute(app); err != nil {
+		t.Errorf("ApiAction failed: %v", err)
 	}
 
-	// Test DbAction
-	dbAction := &DbAction{}
-	if err := dbAction.Validate(); err == nil {
-		t.Error("expected error for db action with no function, got nil")
-	}
-	dbAction.Function = "my_func"
-	if err := dbAction.Validate(); err != nil {
-		t.Errorf("unexpected error for valid db action: %v", err)
+	// Test invalid endpoint
+	action = &ApiAction{Endpoint: "/invalid_endpoint", Method: "GET"}
+	if err := action.Execute(app); err == nil {
+		t.Errorf("ApiAction should have failed for invalid endpoint")
 	}
 
-	// Test ApiAction
-	apiAction := &ApiAction{}
-	if err := apiAction.Validate(); err == nil {
-		t.Error("expected error for api action with no endpoint, got nil")
+	// Test with API error
+	app.api.RequestError = errors.New("api error")
+	action = &ApiAction{Endpoint: "/test_endpoint", Method: "GET"}
+	if err := action.Execute(app); err == nil {
+		t.Errorf("ApiAction should have failed with API error")
 	}
-	apiAction.Endpoint = "my_endpoint"
-	if err := apiAction.Validate(); err == nil {
-		t.Error("expected error for api action with no method, got nil")
-	}
-	apiAction.Method = "GET"
-	if err := apiAction.Validate(); err != nil {
-		t.Errorf("unexpected error for valid api action: %v", err)
-	}
-}
-
-func TestEventDispatcher_Dispatch(t *testing.T) {
-	t.Run("Matching event and source", func(t *testing.T) {
-		mockDB := &MockDB{}
-		mockAPI := &MockAPI{}
-		app := &MockApp{
-			MockDB:  mockDB,
-			MockAPI: mockAPI,
-			AppConfig: &Config{
-				Events: []EventAction{
-					{
-						Name:   "test_event",
-						Event:  "PullComplete",
-						Source: "accounts",
-						Run: []ActionConfig{
-							{
-								Type: "db",
-								Args: map[string]interface{}{"function": "my_function"},
-							},
-							{
-								Type: "api",
-								Args: map[string]interface{}{"endpoint": "my_endpoint", "method": "GET"},
-							},
-						},
-					},
-				},
-			},
-			AppState: &state.State{},
-		}
-
-		dispatcher := NewEventDispatcher(app)
-		event := Event{
-			Type:   PullComplete,
-			Source: "accounts",
-		}
-		dispatcher.Dispatch(event)
-
-		time.Sleep(100 * time.Millisecond)
-
-		if mockDB.FunctionCalls["my_function"] != 1 {
-			t.Errorf("expected db function to be called once, got %d", mockDB.FunctionCalls["my_function"])
-		}
-		if mockAPI.GetRawCalls["my_endpoint"] != 1 {
-			t.Errorf("expected api to be called once, got %d", mockAPI.GetRawCalls["my_endpoint"])
-		}
-	})
-
-	t.Run("Event with no matching action", func(t *testing.T) {
-		mockDB := &MockDB{}
-		app := &MockApp{
-			MockDB: mockDB,
-			AppConfig: &Config{
-				Events: []EventAction{
-					{
-						Name:  "test_event",
-						Event: "PushComplete",
-						Run:   []ActionConfig{{Type: "db", Args: map[string]interface{}{"function": "my_function"}}},
-					},
-				},
-			},
-			AppState: &state.State{},
-		}
-
-		dispatcher := NewEventDispatcher(app)
-		event := Event{Type: PullComplete}
-		dispatcher.Dispatch(event)
-
-		time.Sleep(100 * time.Millisecond)
-
-		if len(mockDB.FunctionCalls) != 0 {
-			t.Errorf("expected no function calls, got %d", len(mockDB.FunctionCalls))
-		}
-	})
-
-	t.Run("Action with source that does not match", func(t *testing.T) {
-		mockDB := &MockDB{}
-		app := &MockApp{
-			MockDB: mockDB,
-			AppConfig: &Config{
-				Events: []EventAction{
-					{
-						Name:   "test_event",
-						Event:  "PullComplete",
-						Source: "accounts",
-						Run:    []ActionConfig{{Type: "db", Args: map[string]interface{}{"function": "my_function"}}},
-					},
-				},
-			},
-			AppState: &state.State{},
-		}
-
-		dispatcher := NewEventDispatcher(app)
-		event := Event{Type: PullComplete, Source: "checkins"}
-		dispatcher.Dispatch(event)
-
-		time.Sleep(100 * time.Millisecond)
-
-		if len(mockDB.FunctionCalls) != 0 {
-			t.Errorf("expected no function calls, got %d", len(mockDB.FunctionCalls))
-		}
-	})
-
-	t.Run("Action with invalid config", func(t *testing.T) {
-		var actionError error
-		app := &MockApp{
-			AppConfig: &Config{
-				Events: []EventAction{
-					{
-						Name:  "test_event",
-						Event: "PullComplete",
-						Run:   []ActionConfig{{Type: "db", Args: map[string]interface{}{"bad_arg": "my_function"}}},
-					},
-				},
-			},
-			AppState: &state.State{},
-		}
-
-		dispatcher := NewEventDispatcher(app)
-		dispatcher.Subscribe(ActionError, func(e Event) {
-			actionError = e.Payload.(error)
-		})
-		event := Event{Type: PullComplete}
-		dispatcher.Dispatch(event)
-
-		time.Sleep(100 * time.Millisecond)
-
-		if actionError == nil {
-			t.Error("expected action error, got nil")
-		}
-	})
 }

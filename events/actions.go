@@ -2,6 +2,7 @@ package events
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 
 	"gopkg.in/yaml.v3"
@@ -62,8 +63,13 @@ type ExecAction struct {
 
 // Execute runs the command.
 func (a *ExecAction) Execute(app AppInterface) error {
-	cmd := exec.Command(a.Command, a.Args...)
-	return cmd.Run()
+	cmd := exec.Command("sh", "-c", a.Command)
+	cmd.Dir, _ = os.Getwd()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, string(output))
+	}
+	return nil
 }
 
 // Validate checks if the action is configured correctly.

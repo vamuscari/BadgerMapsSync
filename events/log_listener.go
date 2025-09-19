@@ -19,17 +19,39 @@ func NewLogListener(app AppInterface) *LogListener {
 
 // Handle processes the log event.
 func (l *LogListener) Handle(e Event) {
+	state := l.App.GetState()
+	if state.Quiet {
+		return
+	}
+
+	// Handle Debug events separately as they have a different payload
+	if e.Type == Debug {
+		if !state.Debug {
+			return
+		}
+		msg, ok := e.Payload.(string)
+		if !ok {
+			return
+		}
+		timestamp := time.Now().Format("2006-01-02 15:04:05")
+		var sb strings.Builder
+		sb.WriteString(utils.Colors.Gray("%s", timestamp))
+		sb.WriteString(" ")
+		sb.WriteString(utils.Colors.Gray("%-5s", "DEBUG")) // Padded level
+		sb.WriteString(" ")
+		sb.WriteString(utils.Colors.Cyan("[%s]", e.Source))
+		sb.WriteString(" ")
+		sb.WriteString(msg)
+		fmt.Println(sb.String())
+		return
+	}
+
 	payload, ok := e.Payload.(LogEventPayload)
 	if !ok {
 		return // Not a log event we can handle
 	}
 
-	state := l.App.GetState()
-
 	// Respect quiet and verbosity settings
-	if state.Quiet {
-		return
-	}
 	if payload.Level == LogLevelDebug && !state.Debug {
 		return
 	}

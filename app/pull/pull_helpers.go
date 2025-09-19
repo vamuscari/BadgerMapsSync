@@ -42,8 +42,6 @@ func PullGroupAccounts(a *app.App, top int, progressCallback func(current, total
 	defer func() {
 		if err != nil {
 			a.Events.Dispatch(events.Event{Type: events.PullGroupError, Source: "accounts", Payload: err})
-		} else {
-			a.Events.Dispatch(events.Event{Type: events.PullGroupComplete, Source: "accounts"})
 		}
 	}()
 
@@ -142,8 +140,6 @@ func PullGroupCheckins(a *app.App, progressCallback func(current, total int)) (e
 	defer func() {
 		if err != nil {
 			a.Events.Dispatch(events.Event{Type: events.PullGroupError, Source: "checkins", Payload: err})
-		} else {
-			a.Events.Dispatch(events.Event{Type: events.PullGroupComplete, Source: "checkins"})
 		}
 	}()
 
@@ -256,8 +252,6 @@ func PullGroupRoutes(a *app.App, progressCallback func(current, total int)) (err
 	defer func() {
 		if err != nil {
 			a.Events.Dispatch(events.Event{Type: events.PullGroupError, Source: "routes", Payload: err})
-		} else {
-			a.Events.Dispatch(events.Event{Type: events.PullGroupComplete, Source: "routes"})
 		}
 	}()
 

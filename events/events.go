@@ -63,6 +63,7 @@ const (
 	// System Events
 	Debug
 	ConnectionStatusChanged
+	TestEvent
 )
 
 func (e EventType) String() string {
@@ -93,6 +94,7 @@ func (e EventType) String() string {
 		"ActionError",
 		"Debug",
 		"ConnectionStatusChanged",
+		"TestEvent",
 	}[e]
 }
 
@@ -155,33 +157,6 @@ func Debugf(source, format string, a ...interface{}) Event {
 		Type:    Debug,
 		Source:  source,
 		Payload: fmt.Sprintf(format, a...),
-	}
-}
-
-// ActionStartf creates a new ActionStart event with a formatted message.
-func ActionStartf(source, format string, a ...interface{}) Event {
-	return Event{
-		Type:    ActionStart,
-		Source:  source,
-		Payload: fmt.Sprintf(format, a...),
-	}
-}
-
-// ActionSuccessf creates a new ActionSuccess event with a formatted message.
-func ActionSuccessf(source, format string, a ...interface{}) Event {
-	return Event{
-		Type:    ActionSuccess,
-		Source:  source,
-		Payload: fmt.Sprintf(format, a...),
-	}
-}
-
-// ActionErrorf creates a new ActionError event with a formatted error.
-func ActionErrorf(source, format string, a ...interface{}) Event {
-	return Event{
-		Type:    ActionError,
-		Source:  source,
-		Payload: fmt.Errorf(format, a...),
 	}
 }
 
