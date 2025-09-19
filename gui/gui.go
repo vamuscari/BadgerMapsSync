@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/data/binding"
-	"image/color"
+
 	"sort"
 	"strings"
 	"sync"
@@ -85,7 +85,7 @@ func (r *secondaryButtonRenderer) MinSize() fyne.Size {
 func (r *secondaryButtonRenderer) Refresh() {
 	r.label.SetText(r.button.Text)
 	r.icon.SetResource(r.button.Icon)
-	r.background.FillColor = color.NRGBA{R: 0x33, G: 0x33, B: 0x33, A: 0xff} // A dark grey for secondary buttons
+	r.background.FillColor = theme.ButtonColor()
 	if r.button.Disabled() {
 		r.background.FillColor = theme.DisabledButtonColor()
 	}
@@ -404,30 +404,30 @@ func (ui *Gui) createHomeTab() fyne.CanvasObject {
 	// Config Status
 	configValid := ui.app.API != nil && ui.app.DB != nil
 	configStatusText := "Invalid"
-	configColor := color.NRGBA{R: 200, G: 0, B: 0, A: 255} // Red
+	configColor := theme.ErrorColor()
 	if configValid {
 		configStatusText = "Valid"
-		configColor = color.NRGBA{R: 0, G: 200, B: 0, A: 255} // Green
+		configColor = theme.PrimaryColor()
 	}
 	configStatusLabel := canvas.NewText(configStatusText, configColor)
 
 	// API Status
 	apiConnected := ui.app.API != nil && ui.app.API.IsConnected()
 	apiStatusText := "Not Connected"
-	apiColor := color.NRGBA{R: 200, G: 0, B: 0, A: 255} // Red
+	apiColor := theme.ErrorColor()
 	if apiConnected {
 		apiStatusText = "Connected"
-		apiColor = color.NRGBA{R: 0, G: 200, B: 0, A: 255} // Green
+		apiColor = theme.PrimaryColor()
 	}
 	apiStatusLabel := canvas.NewText(apiStatusText, apiColor)
 
 	// DB Status
 	dbConnected := ui.app.DB != nil && ui.app.DB.IsConnected()
 	dbStatusText := "Not Connected"
-	dbColor := color.NRGBA{R: 200, G: 0, B: 0, A: 255} // Red
+	dbColor := theme.ErrorColor()
 	if dbConnected {
 		dbStatusText = "Connected"
-		dbColor = color.NRGBA{R: 0, G: 200, B: 0, A: 255} // Green
+		dbColor = theme.PrimaryColor()
 	}
 	dbStatusLabel := canvas.NewText(dbStatusText, dbColor)
 
@@ -447,10 +447,10 @@ func (ui *Gui) createHomeTab() fyne.CanvasObject {
 		}
 	}
 	schemaStatusText := "Invalid"
-	schemaColor := color.NRGBA{R: 200, G: 0, B: 0, A: 255} // Red
+	schemaColor := theme.ErrorColor()
 	if schemaValid {
 		schemaStatusText = "Valid"
-		schemaColor = color.NRGBA{R: 0, G: 200, B: 0, A: 255} // Green
+		schemaColor = theme.PrimaryColor()
 	}
 	schemaStatusLabel := canvas.NewText(schemaStatusText, schemaColor)
 
