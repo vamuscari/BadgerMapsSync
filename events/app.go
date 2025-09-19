@@ -6,16 +6,18 @@ import (
 	"badgermaps/database"
 )
 
-// AppConfig defines the configuration for the event dispatcher.
-type AppConfig struct {
-	Events []EventAction `yaml:"event_actions"`
-}
-
-// AppInterface defines the methods that the event system needs to access from the main app.
-// This decouples the events package from the main app package.
+// AppInterface defines the methods that the application must implement
+// for the event system to interact with it.
 type AppInterface interface {
-	GetState() *state.State
-	GetConfig() *AppConfig
 	GetDB() database.DB
 	GetAPI() *api.APIClient
+	GetConfig() *Config
+	GetState() *state.State
+	GetEventActions() []EventAction
+	GetRawFromAPI(endpoint string) ([]byte, error)
+}
+
+// Config defines the structure of the application's configuration.
+type Config struct {
+	Events []EventAction `yaml:"actions"`
 }

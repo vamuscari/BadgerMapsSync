@@ -26,6 +26,7 @@ type APIClient struct {
 	UserID    int
 	client    *http.Client
 	endpoints *Endpoints
+	connected bool
 }
 
 // NewAPIClient creates a new BadgerMaps API client
@@ -37,7 +38,21 @@ func NewAPIClient(config *APIConfig) *APIClient {
 		endpoints: NewEndpoints(config.BaseURL),
 	}
 
+	if err := client.TestAPIConnection(); err == nil {
+		client.connected = true
+	}
+
 	return client
+}
+
+// IsConnected returns true if the client has successfully connected to the API
+func (api *APIClient) IsConnected() bool {
+	return api.connected
+}
+
+// SetConnected sets the connected status of the API client
+func (api *APIClient) SetConnected(connected bool) {
+	api.connected = connected
 }
 
 
@@ -473,6 +488,7 @@ func (api *APIClient) TestAPIConnection() error {
 			return fmt.Errorf("failed to decode profile response: %w", err)
 		}
 		api.UserID = profile.ID
+		api.connected = true
 		return nil
 	}
 

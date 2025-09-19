@@ -34,7 +34,7 @@ func (d *EventDispatcher) Dispatch(e Event) {
 
 	// We don't dispatch a debug event here to avoid an infinite loop of dispatching debug events.
 	if d.app.GetState().Debug && e.Type != Debug {
-		d.Dispatch(Debugf("dispatcher", "Dispatching event: %s (Source: %s)", e.Type.String(), e.Source))
+		go d.Dispatch(Debugf("dispatcher", "Dispatching event: %s (Source: %s)", e.Type.String(), e.Source))
 	}
 
 	// Execute configured event actions
@@ -62,13 +62,13 @@ func (d *EventDispatcher) Dispatch(e Event) {
 				continue
 			}
 
-			d.Dispatch(Event{Type: ActionStart, Source: e.Source, Payload: fmt.Sprintf("Executing action type '%s' from '%s'", actionConfig.Type, eventAction.Name)})
+			go d.Dispatch(Event{Type: ActionStart, Source: e.Source, Payload: fmt.Sprintf("Executing action type '%s' from '%s'", actionConfig.Type, eventAction.Name)})
 
 			go func(action Action, actionConfig ActionConfig) {
 				if err := action.Execute(d.app); err != nil {
-					d.Dispatch(Event{Type: ActionError, Source: e.Source, Payload: err})
+					go d.Dispatch(Event{Type: ActionError, Source: e.Source, Payload: err})
 				} else {
-					d.Dispatch(Event{Type: ActionSuccess, Source: e.Source, Payload: fmt.Sprintf("Action '%s' from '%s' completed successfully", actionConfig.Type, eventAction.Name)})
+					go d.Dispatch(Event{Type: ActionSuccess, Source: e.Source, Payload: fmt.Sprintf("Action '%s' from '%s' completed successfully", actionConfig.Type, eventAction.Name)})
 				}
 			}(action, actionConfig)
 		}

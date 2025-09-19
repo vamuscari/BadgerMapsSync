@@ -62,6 +62,7 @@ type DB interface {
 	GetTables() ([]string, error)
 	ExecuteQuery(query string) (*sql.Rows, error)
 	IsConnected() bool
+	SetConnected(connected bool)
 }
 
 // SQLiteConfig represents a SQLite database configuration
@@ -73,6 +74,10 @@ type SQLiteConfig struct {
 
 func (db *SQLiteConfig) IsConnected() bool {
 	return db.connected
+}
+
+func (db *SQLiteConfig) SetConnected(connected bool) {
+	db.connected = connected
 }
 
 func (db *SQLiteConfig) GetSQL(command string) string {
@@ -405,6 +410,10 @@ type PostgreSQLConfig struct {
 
 func (db *PostgreSQLConfig) IsConnected() bool {
 	return db.connected
+}
+
+func (db *PostgreSQLConfig) SetConnected(connected bool) {
+	db.connected = connected
 }
 
 func (db *PostgreSQLConfig) GetSQL(command string) string {
@@ -866,6 +875,10 @@ type MSSQLConfig struct {
 
 func (db *MSSQLConfig) IsConnected() bool {
 	return db.connected
+}
+
+func (db *MSSQLConfig) SetConnected(connected bool) {
+	db.connected = connected
 }
 
 func (db *MSSQLConfig) GetSQL(command string) string {

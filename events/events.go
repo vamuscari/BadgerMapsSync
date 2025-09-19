@@ -62,6 +62,7 @@ const (
 
 	// System Events
 	Debug
+	ConnectionStatusChanged
 )
 
 func (e EventType) String() string {
@@ -91,6 +92,7 @@ func (e EventType) String() string {
 		"ActionSuccess",
 		"ActionError",
 		"Debug",
+		"ConnectionStatusChanged",
 	}[e]
 }
 
@@ -149,7 +151,11 @@ func Warningf(source, format string, a ...interface{}) Event {
 
 // Debugf creates a new debug log event with formatted message.
 func Debugf(source, format string, a ...interface{}) Event {
-	return NewLogEvent(LogLevelDebug, source, fmt.Sprintf(format, a...), nil)
+	return Event{
+		Type:    Debug,
+		Source:  source,
+		Payload: fmt.Sprintf(format, a...),
+	}
 }
 
 // EventListener is a function that can handle an event.

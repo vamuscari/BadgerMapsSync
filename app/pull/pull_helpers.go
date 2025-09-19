@@ -292,7 +292,7 @@ func PullGroupRoutes(a *app.App, progressCallback func(current, total int)) (err
 		}
 	}
 
-	a.Events.Dispatch(events.Event{Type: events.PullComplete, Source: "routes", Payload: errorCount})
+	a.Events.Dispatch(events.Event{Type: events.PullGroupComplete, Source: "routes", Payload: errorCount})
 	a.Events.Dispatch(events.Infof("pull", "Successfully pulled all routes"))
 	return nil
 }

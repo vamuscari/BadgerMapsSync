@@ -39,8 +39,8 @@ func (a *App) GetState() *state.State {
 	return a.State
 }
 
-func (a *App) GetConfig() *events.AppConfig {
-	return &events.AppConfig{
+func (a *App) GetConfig() *events.Config {
+	return &events.Config{
 		Events: a.Config.EventActions,
 	}
 }
@@ -51,6 +51,14 @@ func (a *App) GetDB() database.DB {
 
 func (a *App) GetAPI() *api.APIClient {
 	return a.API
+}
+
+func (a *App) GetRawFromAPI(endpoint string) ([]byte, error) {
+	body, err := a.API.GetRaw(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(body), nil
 }
 
 func NewApp() *App {

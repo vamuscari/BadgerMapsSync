@@ -101,7 +101,7 @@ type ApiAction struct {
 // Execute makes the API call.
 func (a *ApiAction) Execute(app AppInterface) error {
 	// This can be expanded to support different methods.
-	_, err := app.GetAPI().GetRaw(a.Endpoint)
+	_, err := app.GetRawFromAPI(a.Endpoint)
 	return err
 }
 
