@@ -53,8 +53,23 @@ func (a *App) GetAPI() *api.APIClient {
 	return a.API
 }
 
-func (a *App) GetRawFromAPI(endpoint string) ([]byte, error) {
-	body, err := a.API.GetRaw(endpoint)
+func (a *App) RawRequest(method, endpoint string, data map[string]string) ([]byte, error) {
+	var body string
+	var err error
+
+	switch strings.ToUpper(method) {
+	case "GET":
+		body, err = a.API.GetRaw(endpoint)
+	case "POST":
+		body, err = a.API.PostRaw(endpoint, data)
+	case "PATCH":
+		body, err = a.API.PatchRaw(endpoint, data)
+	case "DELETE":
+		body, err = a.API.DeleteRaw(endpoint)
+	default:
+		return nil, fmt.Errorf("unsupported HTTP method: %s", method)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -102,6 +117,8 @@ func (a *App) LoadConfig() error {
 		if err != nil {
 			return err
 		}
+		a.migrateActionNames()
+		a.validateAndCleanActions()
 	}
 
 	a.API = api.NewAPIClient(&a.Config.API)
@@ -140,6 +157,67 @@ func (a *App) writeYamlFile(path string) error {
 	return os.WriteFile(path, data, 0644)
 }
 
+func (a *App) migrateActionNames() {
+	actionsModified := false
+	for i := range a.Config.EventActions {
+		if strings.HasPrefix(a.Config.EventActions[i].Name, "on_") {
+			a.Config.EventActions[i].Name = strings.TrimPrefix(a.Config.EventActions[i].Name, "on_")
+			actionsModified = true
+		}
+	}
+
+	if actionsModified {
+		if err := a.SaveConfig(); err != nil {
+			a.Events.Dispatch(events.Warningf("config", "Failed to save config after migrating action names: %v", err))
+		} else {
+			a.Events.Dispatch(events.Infof("config", "Configuration updated to remove 'on_' prefix from action names."))
+		}
+	}
+}
+
+func (a *App) validateAndCleanActions() {
+	var validEventActions []events.EventAction
+	actionsModified := false
+
+	for _, eventAction := range a.Config.EventActions {
+		var validRuns []events.ActionConfig
+		for _, actionConfig := range eventAction.Run {
+			action, err := events.NewActionFromConfig(actionConfig)
+			if err != nil {
+				a.Events.Dispatch(events.Warningf("config", "Invalid action config for event '%s': %v. Removing.", eventAction.Name, err))
+				actionsModified = true
+				continue
+			}
+			if err := action.Validate(); err != nil {
+				a.Events.Dispatch(events.Warningf("config", "Invalid action for event '%s': %v. Removing.", eventAction.Name, err))
+				actionsModified = true
+				continue
+			}
+			validRuns = append(validRuns, actionConfig)
+		}
+
+		if len(validRuns) > 0 {
+			eventAction.Run = validRuns
+			validEventActions = append(validEventActions, eventAction)
+			if len(validRuns) < len(eventAction.Run) {
+				actionsModified = true // Some actions were removed from this event
+			}
+		} else {
+			a.Events.Dispatch(events.Warningf("config", "Event action '%s' has no valid actions left. Removing.", eventAction.Name))
+			actionsModified = true
+		}
+	}
+
+	if actionsModified {
+		a.Config.EventActions = validEventActions
+		if err := a.SaveConfig(); err != nil {
+			a.Events.Dispatch(events.Warningf("config", "Failed to save config after removing invalid actions: %v", err))
+		} else {
+			a.Events.Dispatch(events.Infof("config", "Configuration updated to remove invalid actions."))
+		}
+	}
+}
+
 func (a *App) ReloadDB() error {
 	if a.DB != nil {
 		a.DB.Close()
@@ -174,7 +252,7 @@ func (a *App) GetConfigFilePath() (string, bool, error) {
 }
 
 func (a *App) AddEventAction(event, source string, actionConfig events.ActionConfig) error {
-	key := fmt.Sprintf("on_%s", event)
+	key := event
 	if source != "" {
 		key = fmt.Sprintf("%s_%s", key, source)
 	}
@@ -205,7 +283,6 @@ func (a *App) AddEventAction(event, source string, actionConfig events.ActionCon
 	}
 	return err
 }
-
 func (a *App) UpdateEventAction(eventName string, actionIndex int, actionConfig events.ActionConfig) error {
 	for i := range a.Config.EventActions {
 		if a.Config.EventActions[i].Name == eventName {
@@ -230,6 +307,12 @@ func (a *App) RemoveEventAction(eventName string, actionIndex int) error {
 				return fmt.Errorf("invalid action index")
 			}
 			a.Config.EventActions[i].Run = append(a.Config.EventActions[i].Run[:actionIndex], a.Config.EventActions[i].Run[actionIndex+1:]...)
+
+			// If the event has no more actions, remove the event itself
+			if len(a.Config.EventActions[i].Run) == 0 {
+				a.Config.EventActions = append(a.Config.EventActions[:i], a.Config.EventActions[i+1:]...)
+			}
+
 			err := a.SaveConfig()
 			if err == nil {
 				a.Events.Dispatch(events.Event{Type: events.ActionConfigDeleted, Source: "events"})
@@ -242,6 +325,31 @@ func (a *App) RemoveEventAction(eventName string, actionIndex int) error {
 
 func (a *App) GetEventActions() []events.EventAction {
 	return a.Config.EventActions
+}
+
+func (a *App) ExecuteAction(actionConfig events.ActionConfig) error {
+	action, err := events.NewActionFromConfig(actionConfig)
+	if err != nil {
+		a.Events.Dispatch(events.ActionErrorf("manual_run", "error creating action: %w", err))
+		return err
+	}
+
+	if err := action.Validate(); err != nil {
+		a.Events.Dispatch(events.ActionErrorf("manual_run", "invalid action configuration: %w", err))
+		return err
+	}
+
+	a.Events.Dispatch(events.ActionStartf("manual_run", "Executing action type '%s'", actionConfig.Type))
+
+	go func() { // run in a goroutine to not block the GUI
+		if err := action.Execute(a); err != nil {
+			a.Events.Dispatch(events.ActionErrorf("manual_run", "action '%s' failed: %w", actionConfig.Type, err))
+		} else {
+			a.Events.Dispatch(events.ActionSuccessf("manual_run", "Action '%s' completed successfully", actionConfig.Type))
+		}
+	}()
+
+	return nil
 }
 
 // TriggerEventAction executes a specific action string (e.g., "db:my_function", "exec:ls").

@@ -787,74 +787,85 @@ func (ui *Gui) createPendingChangesTable(entityType string) fyne.CanvasObject {
 func (ui *Gui) createActionsTab() fyne.CanvasObject {
 	actionsContent := container.NewVBox()
 
-	var refreshActions func()
-	refreshActions = func() {
-		actionsContent.Objects = nil
-		eventActions := ui.app.GetEventActions()
+	eventActions := ui.app.GetEventActions()
+	sort.Slice(eventActions, func(i, j int) bool {
+		return eventActions[i].Name < eventActions[j].Name
+	})
 
-		sort.Slice(eventActions, func(i, j int) bool {
-			return eventActions[i].Name < eventActions[j].Name
-		})
-
-		for _, eventAction := range eventActions {
-			eventLabel := widget.NewLabelWithStyle(eventAction.Name, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-			actionsContent.Add(eventLabel)
-
-			for i, action := range eventAction.Run {
-				actionLabel := widget.NewLabel(fmt.Sprintf("%s: %v", action.Type, action.Args))
-				currentEventAction := eventAction
-				actionIndex := i
-
-				editButton := widget.NewButtonWithIcon("", theme.DocumentCreateIcon(), func() {
-					ui.createActionPopup(&currentEventAction, actionIndex)
-				})
-				removeButton := widget.NewButtonWithIcon("", theme.DeleteIcon(), func() {
-					err := ui.app.RemoveEventAction(currentEventAction.Name, actionIndex)
-					if err != nil {
-						ui.app.Events.Dispatch(events.Errorf("gui", "Error removing action: %v", err))
-					}
-				})
-
-				actionBox := container.NewHBox(editButton, removeButton, actionLabel)
-				actionsContent.Add(actionBox)
-			}
-		}
-		actionsContent.Refresh()
+	if len(eventActions) == 0 {
+		actionsContent.Add(widget.NewLabel("No actions configured."))
 	}
 
-	refreshActions()
+	for _, eventAction := range eventActions {
+		ea := eventAction // Capture loop variable
+		actionsContainer := container.NewVBox()
+		for i, action := range ea.Run {
+			ac := action
+			idx := i
+			var iconResource fyne.Resource
+			var labelText string
+
+			switch ac.Type {
+			case "exec":
+				iconResource = theme.FileApplicationIcon()
+				labelText = fmt.Sprintf("Exec: %s", ac.Args["command"])
+			case "db":
+				iconResource = theme.StorageIcon()
+				labelText = fmt.Sprintf("DB: %s", ac.Args["function"])
+			case "api":
+				iconResource = theme.ComputerIcon()
+				labelText = fmt.Sprintf("API: %s", ac.Args["endpoint"])
+			default:
+				iconResource = theme.HelpIcon()
+				labelText = "Unknown action"
+			}
+
+			label := widget.NewLabel(labelText)
+			icon := widget.NewIcon(iconResource)
+
+			toolbar := widget.NewToolbar(
+				widget.NewToolbarAction(theme.MediaPlayIcon(), func() {
+					ui.app.ExecuteAction(ac)
+				}),
+				widget.NewToolbarSeparator(),
+				widget.NewToolbarAction(theme.DocumentCreateIcon(), func() {
+					ui.createActionPopup(&ea, idx)
+				}),
+				widget.NewToolbarSeparator(),
+				widget.NewToolbarAction(theme.DeleteIcon(), func() {
+					dialog.ShowConfirm("Delete Action", "Are you sure you want to delete this action?", func(confirm bool) {
+						if confirm {
+							err := ui.app.RemoveEventAction(ea.Name, idx)
+							if err != nil {
+								ui.app.Events.Dispatch(events.Errorf("gui", "Error removing action: %v", err))
+							}
+						}
+					}, ui.window)
+				}),
+			)
+			actionsContainer.Add(container.NewBorder(nil, nil, icon, toolbar, label))
+		}
+
+		card := widget.NewCard(ea.Name, fmt.Sprintf("Event: %s, Source: %s", ea.Event, ea.Source), actionsContainer)
+		actionsContent.Add(card)
+	}
 
 	addButton := widget.NewButtonWithIcon("Add Action", theme.ContentAddIcon(), func() {
 		ui.createActionPopup(nil, -1)
 	})
 
-	return container.NewBorder(nil, addButton, nil, nil, container.NewScroll(actionsContent))
+	return container.NewBorder(nil, addButton, nil, nil, container.NewVScroll(actionsContent))
 }
 
 func (ui *Gui) createActionPopup(eventAction *events.EventAction, actionIndex int) {
-	var event, source, actionType, command, function, endpoint, method string
-	var args []string
+	var event, source string
+	var actionConfig events.ActionConfig
 
 	if eventAction != nil {
 		event = eventAction.Event
 		source = eventAction.Source
 		if actionIndex != -1 {
-			action := eventAction.Run[actionIndex]
-			actionType = action.Type
-			switch actionType {
-			case "exec":
-				command = action.Args["command"].(string)
-				if action.Args["args"] != nil {
-					for _, arg := range action.Args["args"].([]interface{}) {
-						args = append(args, arg.(string))
-					}
-				}
-			case "db":
-				function = action.Args["function"].(string)
-			case "api":
-				endpoint = action.Args["endpoint"].(string)
-				method = action.Args["method"].(string)
-			}
+			actionConfig = eventAction.Run[actionIndex]
 		}
 	}
 
@@ -862,97 +873,164 @@ func (ui *Gui) createActionPopup(eventAction *events.EventAction, actionIndex in
 	eventEntry.SetSelected(event)
 	sourceEntry := widget.NewSelect(events.AllEventSources(), nil)
 	sourceEntry.SetSelected(source)
-	actionTypeEntry := widget.NewSelect([]string{"exec", "db", "api"}, nil)
-	actionTypeEntry.SetSelected(actionType)
 
-	formItems := []*widget.FormItem{
-		widget.NewFormItem("Event", eventEntry),
-		widget.NewFormItem("Source", sourceEntry),
-		widget.NewFormItem("Action Type", actionTypeEntry),
-	}
-
+	// --- Exec Tab ---
 	execCommandEntry := widget.NewEntry()
-	execCommandEntry.SetText(command)
 	execArgsEntry := widget.NewEntry()
-	execArgsEntry.SetText(strings.Join(args, " "))
-	dbFunctionEntry := widget.NewEntry()
-	dbFunctionEntry.SetText(function)
-	apiEndpointEntry := widget.NewEntry()
-	apiEndpointEntry.SetText(endpoint)
-	apiMethodEntry := widget.NewSelect([]string{"GET", "POST", "PUT", "DELETE"}, nil)
-	apiMethodEntry.SetSelected(method)
-
-	execForm := []*widget.FormItem{
+	if actionConfig.Type == "exec" {
+		if cmd, ok := actionConfig.Args["command"].(string); ok {
+			execCommandEntry.SetText(cmd)
+		}
+		if args, ok := actionConfig.Args["args"].([]interface{}); ok {
+			var argStrings []string
+			for _, arg := range args {
+				argStrings = append(argStrings, arg.(string))
+			}
+			execArgsEntry.SetText(strings.Join(argStrings, " "))
+		}
+	}
+	execForm := widget.NewForm(
 		widget.NewFormItem("Command", execCommandEntry),
-		widget.NewFormItem("Args", execArgsEntry),
+		widget.NewFormItem("Args (space-separated)", execArgsEntry),
+	)
+	execTab := container.NewTabItemWithIcon("Exec", theme.FileApplicationIcon(), execForm)
+
+	// --- DB Tab ---
+	dbFunctionEntry := widget.NewEntry()
+	if actionConfig.Type == "db" {
+		if fn, ok := actionConfig.Args["function"].(string); ok {
+			dbFunctionEntry.SetText(fn)
+		}
 	}
-	dbForm := []*widget.FormItem{
-		widget.NewFormItem("Function", dbFunctionEntry),
+	dbForm := widget.NewForm(widget.NewFormItem("Function", dbFunctionEntry))
+	dbTab := container.NewTabItemWithIcon("Database", theme.StorageIcon(), dbForm)
+
+	// --- API Tab ---
+	apiEndpointEntry := widget.NewEntry()
+	apiMethodEntry := widget.NewSelect([]string{"GET", "POST", "PATCH", "DELETE"}, nil)
+	apiDataEntry := widget.NewMultiLineEntry()
+	apiDataEntry.SetPlaceHolder("key1=value1\nkey2=value2")
+
+	if actionConfig.Type == "api" {
+		if endpoint, ok := actionConfig.Args["endpoint"].(string); ok {
+			apiEndpointEntry.SetText(endpoint)
+		}
+		if method, ok := actionConfig.Args["method"].(string); ok {
+			apiMethodEntry.SetSelected(method)
+		}
+		if data, ok := actionConfig.Args["data"].(map[string]interface{}); ok {
+			var dataStrings []string
+			for k, v := range data {
+				dataStrings = append(dataStrings, fmt.Sprintf("%s=%s", k, v))
+			}
+			apiDataEntry.SetText(strings.Join(dataStrings, "\n"))
+		}
 	}
-	apiForm := []*widget.FormItem{
+
+	apiForm := widget.NewForm(
 		widget.NewFormItem("Endpoint", apiEndpointEntry),
 		widget.NewFormItem("Method", apiMethodEntry),
-	}
+	)
+	apiDataFormItem := widget.NewFormItem("Data", apiDataEntry)
 
-	form := widget.NewForm(formItems...)
-
-	actionTypeEntry.OnChanged = func(selected string) {
-		form.Items = formItems
-		switch selected {
-		case "exec":
-			for _, item := range execForm {
-				form.AppendItem(item)
+	apiMethodEntry.OnChanged = func(method string) {
+		if method == "POST" || method == "PATCH" {
+			// Check if the item is already there
+			found := false
+			for _, item := range apiForm.Items {
+				if item == apiDataFormItem {
+					found = true
+					break
+				}
 			}
-		case "db":
-			for _, item := range dbForm {
-				form.AppendItem(item)
+			if !found {
+				apiForm.AppendItem(apiDataFormItem)
 			}
-		case "api":
-			for _, item := range apiForm {
-				form.AppendItem(item)
+		} else {
+			// Check if the item is there before trying to remove
+			found := false
+			for _, item := range apiForm.Items {
+				if item == apiDataFormItem {
+					found = true
+					break
+				}
+			}
+			if found {
+				apiForm.Items = apiForm.Items[:2] // Keep only endpoint and method
 			}
 		}
-		form.Refresh()
+		apiForm.Refresh()
 	}
-	actionTypeEntry.OnChanged(actionType)
+	// Trigger OnChanged to set initial state
+	apiMethodEntry.OnChanged(apiMethodEntry.Selected)
 
-	content := container.NewVBox(form)
-	d := dialog.NewCustom("Action", "Cancel", content, ui.window)
-	d.Resize(fyne.NewSize(400, 300))
+	apiTab := container.NewTabItemWithIcon("API", theme.ComputerIcon(), apiForm)
 
-	saveButton := widget.NewButton("Save", func() {
+	actionTabs := container.NewAppTabs(execTab, dbTab, apiTab)
+	switch actionConfig.Type {
+	case "db":
+		actionTabs.Select(dbTab)
+	case "api":
+		actionTabs.Select(apiTab)
+	default:
+		actionTabs.Select(execTab)
+	}
+
+	dialogContent := container.NewVBox(
+		widget.NewForm(
+			widget.NewFormItem("Event", eventEntry),
+			widget.NewFormItem("Source", sourceEntry),
+		),
+		actionTabs,
+	)
+
+	d := dialog.NewCustomConfirm("Save Action", "Save", "Cancel", dialogContent, func(confirm bool) {
+		if !confirm {
+			return
+		}
+
 		var newAction events.ActionConfig
-		newAction.Type = actionTypeEntry.Selected
 		newAction.Args = make(map[string]interface{})
 
-		switch newAction.Type {
-		case "exec":
+		selectedTab := actionTabs.Selected()
+		switch selectedTab.Text {
+		case "Exec":
+			newAction.Type = "exec"
 			newAction.Args["command"] = execCommandEntry.Text
-			newAction.Args["args"] = strings.Split(execArgsEntry.Text, " ")
-		case "db":
+			newAction.Args["args"] = strings.Fields(execArgsEntry.Text)
+		case "Database":
+			newAction.Type = "db"
 			newAction.Args["function"] = dbFunctionEntry.Text
-		case "api":
+		case "API":
+			newAction.Type = "api"
 			newAction.Args["endpoint"] = apiEndpointEntry.Text
 			newAction.Args["method"] = apiMethodEntry.Selected
+			if apiMethodEntry.Selected == "POST" || apiMethodEntry.Selected == "PATCH" {
+				data := make(map[string]string)
+				lines := strings.Split(apiDataEntry.Text, "\n")
+				for _, line := range lines {
+					if parts := strings.SplitN(line, "=", 2); len(parts) == 2 {
+						data[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+					}
+				}
+				newAction.Args["data"] = data
+			}
 		}
 
 		if eventAction == nil {
-			// Add new event action
 			err := ui.app.AddEventAction(eventEntry.Selected, sourceEntry.Selected, newAction)
 			if err != nil {
 				ui.app.Events.Dispatch(events.Errorf("gui", "Error adding action: %v", err))
 			}
 		} else {
-			// Update existing event action
 			err := ui.app.UpdateEventAction(eventAction.Name, actionIndex, newAction)
 			if err != nil {
 				ui.app.Events.Dispatch(events.Errorf("gui", "Error updating action: %v", err))
 			}
 		}
-		d.Hide()
-	})
+	}, ui.window)
 
-	d.SetButtons([]fyne.CanvasObject{saveButton})
+	d.Resize(fyne.NewSize(500, 400))
 	d.Show()
 }
 

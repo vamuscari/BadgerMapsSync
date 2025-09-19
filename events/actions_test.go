@@ -37,11 +37,12 @@ func (a *MockApp) GetState() *state.State {
 	return a.AppState
 }
 
-func (a *MockApp) GetRawFromAPI(endpoint string) ([]byte, error) {
+func (a *MockApp) RawRequest(method, endpoint string, data map[string]string) ([]byte, error) {
 	if a.MockAPI == nil {
 		return nil, nil
 	}
-	s, err := a.MockAPI.GetRaw(endpoint)
+	// This is a simplified mock. A more complex one could switch on method.
+	s, err := a.MockAPI.GetRaw(endpoint) // Assuming GetRaw for simplicity
 	if err != nil {
 		return nil, err
 	}
@@ -206,6 +207,7 @@ func TestNewActionFromConfig(t *testing.T) {
 		Type: "api",
 		Args: map[string]interface{}{
 			"endpoint": "my_endpoint",
+			"method":   "GET",
 		},
 	}
 	action, err = NewActionFromConfig(apiConfig)
@@ -257,6 +259,7 @@ func TestApiAction_Execute(t *testing.T) {
 	app := &MockApp{MockAPI: mockAPI, AppConfig: &Config{}}
 	action := &ApiAction{
 		Endpoint: "my_endpoint",
+		Method:   "GET",
 	}
 	err := action.Execute(app)
 	if err != nil {
@@ -294,6 +297,10 @@ func TestAction_Validate(t *testing.T) {
 		t.Error("expected error for api action with no endpoint, got nil")
 	}
 	apiAction.Endpoint = "my_endpoint"
+	if err := apiAction.Validate(); err == nil {
+		t.Error("expected error for api action with no method, got nil")
+	}
+	apiAction.Method = "GET"
 	if err := apiAction.Validate(); err != nil {
 		t.Errorf("unexpected error for valid api action: %v", err)
 	}
@@ -319,7 +326,7 @@ func TestEventDispatcher_Dispatch(t *testing.T) {
 							},
 							{
 								Type: "api",
-								Args: map[string]interface{}{"endpoint": "my_endpoint"},
+								Args: map[string]interface{}{"endpoint": "my_endpoint", "method": "GET"},
 							},
 						},
 					},

@@ -94,14 +94,14 @@ func (a *DbAction) Validate() error {
 
 // ApiAction makes an API call.
 type ApiAction struct {
-	Endpoint string `yaml:"endpoint"`
-	Method   string `yaml:"method"`
+	Endpoint string            `yaml:"endpoint"`
+	Method   string            `yaml:"method"`
+	Data     map[string]string `yaml:"data,omitempty"`
 }
 
 // Execute makes the API call.
 func (a *ApiAction) Execute(app AppInterface) error {
-	// This can be expanded to support different methods.
-	_, err := app.GetRawFromAPI(a.Endpoint)
+	_, err := app.RawRequest(a.Method, a.Endpoint, a.Data)
 	return err
 }
 
@@ -109,6 +109,9 @@ func (a *ApiAction) Execute(app AppInterface) error {
 func (a *ApiAction) Validate() error {
 	if a.Endpoint == "" {
 		return fmt.Errorf("api action requires an 'endpoint'")
+	}
+	if a.Method == "" {
+		return fmt.Errorf("api action requires a 'method'")
 	}
 	return nil
 }

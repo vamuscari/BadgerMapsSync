@@ -14,7 +14,7 @@ type AppInterface interface {
 	GetConfig() *Config
 	GetState() *state.State
 	GetEventActions() []EventAction
-	GetRawFromAPI(endpoint string) ([]byte, error)
+	RawRequest(method, endpoint string, data map[string]string) ([]byte, error)
 }
 
 // Config defines the structure of the application's configuration.
