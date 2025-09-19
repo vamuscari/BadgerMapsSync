@@ -295,7 +295,8 @@ func (p *GuiPresenter) HandlePushAll() {
 // HandleSaveConfig saves the application configuration.
 func (p *GuiPresenter) HandleSaveConfig(
 	apiKey, baseURL, dbType, dbPath, dbHost, dbPortStr, dbUser, dbPass, dbName,
-	serverHost, serverPortStr string, tlsEnabled bool, tlsCert, tlsKey string, verbose bool,
+	serverHost, serverPortStr string, tlsEnabled bool, tlsCert, tlsKey string,
+	verbose bool,
 ) {
 	p.app.Events.Dispatch(events.Debugf("presenter", "HandleSaveConfig called"))
 	p.app.Events.Dispatch(events.Infof("presenter", "Saving configuration..."))

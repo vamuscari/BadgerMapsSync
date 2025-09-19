@@ -1361,24 +1361,32 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 	tlsKeyEntry := widget.NewEntry()
 	tlsKeyEntry.SetText(ui.app.State.TLSKey)
 
+	var serverForm *widget.Form
 	tlsCertFormItem := widget.NewFormItem("TLS Cert Path", tlsCertEntry)
 	tlsKeyFormItem := widget.NewFormItem("TLS Key Path", tlsKeyEntry)
-
-	serverForm := widget.NewForm(
-		widget.NewFormItem("Host", serverHostEntry),
-		widget.NewFormItem("Port", serverPortEntry),
-	)
-
 	tlsEnabledCheck := widget.NewCheck("Enable TLS", func(enabled bool) {
 		if enabled {
 			serverForm.AppendItem(tlsCertFormItem)
 			serverForm.AppendItem(tlsKeyFormItem)
 		} else {
-			serverForm.Items = serverForm.Items[:2] // Keep only host and port
+			// This logic might need adjustment if more items are added dynamically
+			var newItems []*widget.FormItem
+			for _, item := range serverForm.Items {
+				if item != tlsCertFormItem && item != tlsKeyFormItem {
+					newItems = append(newItems, item)
+				}
+			}
+			serverForm.Items = newItems
 		}
 		serverForm.Refresh()
 	})
 	tlsEnabledCheck.SetChecked(ui.app.State.TLSEnabled)
+
+	serverForm = widget.NewForm(
+		widget.NewFormItem("Host", serverHostEntry),
+		widget.NewFormItem("Port", serverPortEntry),
+	)
+
 	if ui.app.State.TLSEnabled {
 		serverForm.AppendItem(tlsCertFormItem)
 		serverForm.AppendItem(tlsKeyFormItem)

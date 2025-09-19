@@ -12,12 +12,13 @@ type State struct {
 	IsGui      bool
 
 	// Server configuration
-	ServerHost   string
-	ServerPort   int
-	TLSEnabled   bool
-	TLSCert      string
-	TLSKey       string
-	PIDFile      string
+	ServerHost      string
+	ServerPort      int
+	TLSEnabled      bool
+	TLSCert         string
+	TLSKey          string
+	WebhooksEnabled bool
+	PIDFile         string
 }
 
 func NewState() *State {
