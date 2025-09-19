@@ -3,7 +3,6 @@ package gui
 import (
 	"badgermaps/app"
 	"badgermaps/app/push"
-	"badgermaps/app/server"
 	"badgermaps/database"
 	"badgermaps/events"
 	"fmt"
@@ -433,7 +432,7 @@ func (ui *Gui) createHomeTab() fyne.CanvasObject {
 	dbStatusLabel := canvas.NewText(dbStatusText, dbColor)
 
 	// Server Status
-	_, serverRunning := server.GetServerStatus(ui.app)
+	_, serverRunning := ui.app.Server.GetServerStatus()
 	serverStatusText := "Stopped"
 	if serverRunning {
 		serverStatusText = "Running"
@@ -1210,7 +1209,7 @@ func (ui *Gui) createServerTab() fyne.CanvasObject {
 
 	var refreshServerStatus func()
 	refreshServerStatus = func() {
-		if pid, running := server.GetServerStatus(ui.app); running {
+		if pid, running := ui.app.Server.GetServerStatus(); running {
 			serverStatusLabel.SetText(fmt.Sprintf("Status: Running (PID: %d)", pid))
 			startButton.Disable()
 			stopButton.Enable()

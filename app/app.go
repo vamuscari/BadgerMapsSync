@@ -2,6 +2,7 @@ package app
 
 import (
 	"badgermaps/api"
+	"badgermaps/app/server"
 	"badgermaps/app/state"
 	"badgermaps/database"
 	"badgermaps/events"
@@ -31,6 +32,7 @@ type App struct {
 	DB     database.DB
 	API    *api.APIClient
 	Events *events.EventDispatcher
+	Server *server.ServerManager
 
 	MaxConcurrentRequests int
 }
@@ -38,25 +40,20 @@ type App struct {
 func (a *App) GetState() *state.State {
 	return a.State
 }
-
 func (a *App) GetConfig() *events.Config {
 	return &events.Config{
 		Events: a.Config.EventActions,
 	}
 }
-
 func (a *App) GetDB() database.DB {
 	return a.DB
 }
-
 func (a *App) GetAPI() *api.APIClient {
 	return a.API
 }
-
 func (a *App) RawRequest(method, endpoint string, data map[string]string) ([]byte, error) {
 	var body string
 	var err error
-
 	switch strings.ToUpper(method) {
 	case "GET":
 		body, err = a.API.GetRaw(endpoint)
@@ -69,13 +66,11 @@ func (a *App) RawRequest(method, endpoint string, data map[string]string) ([]byt
 	default:
 		return nil, fmt.Errorf("unsupported HTTP method: %s", method)
 	}
-
 	if err != nil {
 		return nil, err
 	}
 	return []byte(body), nil
 }
-
 func NewApp() *App {
 	a := &App{
 		State: state.NewState(),
@@ -92,6 +87,7 @@ func NewApp() *App {
 	}
 	a.State.PIDFile = utils.GetConfigDirFile(".badgermaps.pid")
 	a.Events = events.NewEventDispatcher(a)
+	a.Server = server.NewServerManager(a.State)
 
 	// Register the log listener
 	logListener := events.NewLogListener(a)

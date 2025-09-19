@@ -4,7 +4,6 @@
 package server
 
 import (
-	"badgermaps/app"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -14,8 +13,8 @@ import (
 )
 
 // StartServer starts the server as a detached background process.
-func StartServer(a *app.App) error {
-	if _, running := GetServerStatus(a); running {
+func (sm *ServerManager) StartServer() error {
+	if _, running := sm.GetServerStatus(); running {
 		return fmt.Errorf("server is already running")
 	}
 
@@ -37,7 +36,7 @@ func StartServer(a *app.App) error {
 
 	// Write the PID to the file
 	pid := cmd.Process.Pid
-	if err := ioutil.WriteFile(a.State.PIDFile, []byte(strconv.Itoa(pid)), 0644); err != nil {
+	if err := ioutil.WriteFile(sm.state.PIDFile, []byte(strconv.Itoa(pid)), 0644); err != nil {
 		// Try to kill the process we just started if we can't save the PID
 		cmd.Process.Kill()
 		return fmt.Errorf("failed to write PID file: %w", err)

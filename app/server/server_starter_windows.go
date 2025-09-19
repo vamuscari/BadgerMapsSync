@@ -13,8 +13,8 @@ import (
 )
 
 // StartServer starts the server as a detached background process on Windows.
-func (a *App) StartServer() error {
-	if _, running := a.GetServerStatus(); running {
+func (sm *ServerManager) StartServer() error {
+	if _, running := sm.GetServerStatus(); running {
 		return fmt.Errorf("server is already running")
 	}
 
@@ -34,7 +34,7 @@ func (a *App) StartServer() error {
 	}
 
 	pid := cmd.Process.Pid
-	if err := ioutil.WriteFile(a.State.PIDFile, []byte(strconv.Itoa(pid)), 0644); err != nil {
+	if err := ioutil.WriteFile(sm.state.PIDFile, []byte(strconv.Itoa(pid)), 0644); err != nil {
 		cmd.Process.Kill()
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}

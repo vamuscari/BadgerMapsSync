@@ -5,7 +5,6 @@ import (
 	"badgermaps/app"
 	"badgermaps/app/pull"
 	"badgermaps/app/push"
-	"badgermaps/app/server"
 	"badgermaps/database"
 	"badgermaps/events"
 	"fmt"
@@ -492,7 +491,7 @@ func (p *GuiPresenter) HandleViewConfig() {
 
 // HandleStartServer starts the webhook server.
 func (p *GuiPresenter) HandleStartServer() {
-	if err := server.StartServer(p.app); err != nil {
+	if err := p.app.Server.StartServer(); err != nil {
 		p.app.Events.Dispatch(events.Errorf("presenter", "Error starting server: %v", err))
 		p.view.ShowErrorDialog(err)
 	}
@@ -501,7 +500,7 @@ func (p *GuiPresenter) HandleStartServer() {
 
 // HandleStopServer stops the webhook server.
 func (p *GuiPresenter) HandleStopServer() {
-	if err := server.StopServer(p.app); err != nil {
+	if err := p.app.Server.StopServer(); err != nil {
 		p.app.Events.Dispatch(events.Errorf("presenter", "Error stopping server: %v", err))
 		p.view.ShowErrorDialog(err)
 	}

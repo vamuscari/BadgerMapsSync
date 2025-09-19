@@ -8,20 +8,39 @@
 
 export CGO_ENABLED=1
 
+# Default to cleaning, but check for a -k flag to keep files
+CLEAN_UP=true
+while getopts "k" opt; do
+  case ${opt} in
+    k )
+      CLEAN_UP=false
+      echo "Running with -k, will not remove intermediate files."
+      ;;
+    \? )
+      echo "Invalid option: $OPTARG" 1>&2
+      exit 1
+      ;;
+  esac
+done
+
 # Exit on error
 set -e
 
 # Clean the build directory
-echo "Cleaning build directory..."
-rm -rf build/*
-rm -rf BadgerMapsSync.app BadgerMapsSync
+if [ "$CLEAN_UP" = true ]; then
+  echo "Cleaning build directory..."
+  rm -rf build/*
+  rm -rf BadgerMapsSync.app BadgerMapsSync
+fi
 
 # Compile for macOS
 echo "Compiling for macOS..."
 fyne package -os darwin -release
 echo "Compressing macOS app..."
 zip -r build/BadgerMapsSync_macOS.zip BadgerMapsSync.app
-rm -rf BadgerMapsSync.app
+if [ "$CLEAN_UP" = true ]; then
+  rm -rf BadgerMapsSync.app
+fi
 
 # Compile for Linux
 # NOTE: Requires a Linux cross-compiler like x86_64-unknown-linux-gnu
@@ -33,7 +52,9 @@ rm -rf BadgerMapsSync.app
 # export CC=x86_64-linux-gnu-gcc
 # fyne package -os linux -release
 # tar -cJf build/BadgerMapsSync_linux_amd64.tar.xz BadgerMapsSync
-# rm -rf BadgerMapsSync
+# if [ "$CLEAN_UP" = true ]; then
+#   rm -rf BadgerMapsSync
+# fi
 # unset GOOS
 # unset GOARCH
 # unset CC
@@ -69,8 +90,10 @@ fi
 (cd "$TEMP_DIR" && zip -q -r ../BadgerMapsSync_windows_amd64.zip .)
 
 # Clean up intermediate files
-rm -f BadgerMapsSync.exe
-rm -rf "$TEMP_DIR"
+if [ "$CLEAN_UP" = true ]; then
+  rm -f BadgerMapsSync.exe
+  rm -rf "$TEMP_DIR"
+fi
 unset GOOS
 unset GOARCH
 unset CC

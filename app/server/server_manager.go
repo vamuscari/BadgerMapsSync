@@ -1,7 +1,7 @@
 package server
 
 import (
-	"badgermaps/app"
+	"badgermaps/app/state"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -9,10 +9,18 @@ import (
 	"syscall"
 )
 
+type ServerManager struct {
+	state *state.State
+}
+
+func NewServerManager(state *state.State) *ServerManager {
+	return &ServerManager{state: state}
+}
+
 // GetServerStatus checks if the server process is running.
 // It returns the PID and a boolean indicating if it's running.
-func GetServerStatus(a *app.App) (int, bool) {
-	pidData, err := ioutil.ReadFile(a.State.PIDFile)
+func (sm *ServerManager) GetServerStatus() (int, bool) {
+	pidData, err := ioutil.ReadFile(sm.state.PIDFile)
 	if err != nil {
 		return 0, false // PID file doesn't exist
 	}
@@ -34,12 +42,12 @@ func GetServerStatus(a *app.App) (int, bool) {
 }
 
 // StopServer stops the running server process.
-func StopServer(a *app.App) error {
-	pid, running := GetServerStatus(a)
+func (sm *ServerManager) StopServer() error {
+	pid, running := sm.GetServerStatus()
 	if !running {
 		// If we have a PID but the process isn't running, clean up the stale PID file.
 		if pid > 0 {
-			os.Remove(a.State.PIDFile)
+			os.Remove(sm.state.PIDFile)
 		}
 		return fmt.Errorf("server is not running")
 	}
@@ -58,5 +66,5 @@ func StopServer(a *app.App) error {
 	}
 
 	// Clean up the PID file
-	return os.Remove(a.State.PIDFile)
+	return os.Remove(sm.state.PIDFile)
 }

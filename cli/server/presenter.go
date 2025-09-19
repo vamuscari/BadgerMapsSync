@@ -4,7 +4,6 @@ import (
 	"badgermaps/api"
 	"badgermaps/app"
 	"badgermaps/app/pull"
-	"badgermaps/app/server"
 	"badgermaps/events"
 	"context"
 	"encoding/json"
@@ -29,17 +28,17 @@ func NewCliPresenter(a *app.App) *CliPresenter {
 
 // HandleServerStart starts the server in the background.
 func (p *CliPresenter) HandleServerStart() {
-	if err := server.StartServer(p.App); err != nil {
+	if err := p.App.Server.StartServer(); err != nil {
 		p.App.Events.Dispatch(events.Errorf("server", "Failed to start server: %v", err))
 		os.Exit(1)
 	}
-	pid, _ := server.GetServerStatus(p.App)
+	pid, _ := p.App.Server.GetServerStatus()
 	p.App.Events.Dispatch(events.Infof("server", "Server started successfully with PID %d.", pid))
 }
 
 // HandleServerStop stops the running server.
 func (p *CliPresenter) HandleServerStop() {
-	if err := server.StopServer(p.App); err != nil {
+	if err := p.App.Server.StopServer(); err != nil {
 		p.App.Events.Dispatch(events.Errorf("server", "Failed to stop server: %v", err))
 		os.Exit(1)
 	}
@@ -48,7 +47,7 @@ func (p *CliPresenter) HandleServerStop() {
 
 // HandleServerStatus checks and prints the server's status.
 func (p *CliPresenter) HandleServerStatus() {
-	if pid, running := server.GetServerStatus(p.App); running {
+	if pid, running := p.App.Server.GetServerStatus(); running {
 		p.App.Events.Dispatch(events.Infof("server", "Server is running with PID %d.", pid))
 	} else {
 		p.App.Events.Dispatch(events.Warningf("server", "Server is not running."))
