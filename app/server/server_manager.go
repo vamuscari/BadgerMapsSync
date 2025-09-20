@@ -1,8 +1,8 @@
 package server
 
 import (
+	"badgermaps/app/action"
 	"badgermaps/app/state"
-	"badgermaps/cli/action"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -13,8 +13,8 @@ import (
 )
 
 type CronJob struct {
-	Name     string                `yaml:"name"`
-	Schedule string                `yaml:"schedule"`
+	Name     string              `yaml:"name"`
+	Schedule string              `yaml:"schedule"`
 	Action   action.ActionConfig `yaml:"action"`
 }
 

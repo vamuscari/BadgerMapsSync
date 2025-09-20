@@ -1,8 +1,8 @@
 package server
 
 import (
+	"badgermaps/app/action"
 	"badgermaps/app/state"
-	"badgermaps/cli/action"
 	"sync"
 	"testing"
 	"time"
