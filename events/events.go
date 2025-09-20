@@ -215,5 +215,6 @@ func AllEventSources() []string {
 		"accounts",
 		"checkins",
 		"routes",
+		"user_profile",
 	}
 }

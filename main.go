@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"badgermaps/app"
-	"badgermaps/cli/action"
+	"badgermaps/app/action"
 	"badgermaps/cli/config"
 	"badgermaps/cli/pull"
 	"badgermaps/cli/push"

@@ -356,7 +356,7 @@ func (p *GuiPresenter) HandlePushAll() {
 func (p *GuiPresenter) HandleSaveConfig(
 	apiKey, baseURL, dbType, dbPath, dbHost, dbPortStr, dbUser, dbPass, dbName,
 	serverHost, serverPortStr string, tlsEnabled bool, tlsCert, tlsKey string,
-	verbose bool,
+	verbose, debug bool,
 ) {
 	p.app.Events.Dispatch(events.Debugf("presenter", "HandleSaveConfig called"))
 	p.app.Events.Dispatch(events.Infof("presenter", "Saving configuration..."))
@@ -366,13 +366,13 @@ func (p *GuiPresenter) HandleSaveConfig(
 	p.app.Config.API.BaseURL = baseURL
 
 	// Update Server config in memory
-	p.app.State.ServerHost = serverHost
+	p.app.Config.Server.Host = serverHost
 	serverPort, _ := strconv.Atoi(serverPortStr)
-	p.app.State.ServerPort = serverPort
-	p.app.State.TLSEnabled = tlsEnabled
-	p.app.State.TLSCert = tlsCert
-	p.app.State.TLSKey = tlsKey
-	p.app.State.Verbose = verbose
+	p.app.Config.Server.Port = serverPort
+	p.app.Config.Server.TLSEnabled = tlsEnabled
+	p.app.Config.Server.TLSCert = tlsCert
+	p.app.Config.Server.TLSKey = tlsKey
+	p.app.State.Debug = debug
 
 	port, _ := strconv.Atoi(dbPortStr)
 

@@ -3,7 +3,7 @@ package gui
 import (
 	"badgermaps/app"
 	"badgermaps/app/push"
-	"badgermaps/cli/action"
+	"badgermaps/app/action"
 	"badgermaps/database"
 	"badgermaps/events"
 	"fmt"
@@ -1345,13 +1345,13 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 
 	// Server Settings
 	serverHostEntry := widget.NewEntry()
-	serverHostEntry.SetText(ui.app.State.ServerHost)
+	serverHostEntry.SetText(ui.app.Config.Server.Host)
 	serverPortEntry := widget.NewEntry()
-	serverPortEntry.SetText(fmt.Sprintf("%d", ui.app.State.ServerPort))
+	serverPortEntry.SetText(fmt.Sprintf("%d", ui.app.Config.Server.Port))
 	tlsCertEntry := widget.NewEntry()
-	tlsCertEntry.SetText(ui.app.State.TLSCert)
+	tlsCertEntry.SetText(ui.app.Config.Server.TLSCert)
 	tlsKeyEntry := widget.NewEntry()
-	tlsKeyEntry.SetText(ui.app.State.TLSKey)
+	tlsKeyEntry.SetText(ui.app.Config.Server.TLSKey)
 
 	var serverForm *widget.Form
 	tlsCertFormItem := widget.NewFormItem("TLS Cert Path", tlsCertEntry)
@@ -1372,7 +1372,7 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 		}
 		serverForm.Refresh()
 	})
-	tlsEnabledCheck.SetChecked(ui.app.State.TLSEnabled)
+	tlsEnabledCheck.SetChecked(ui.app.Config.Server.TLSEnabled)
 
 	serverForm = widget.NewForm(
 		widget.NewFormItem("Host", serverHostEntry),
@@ -1390,8 +1390,8 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 	))
 
 	// Other Settings
-	verboseCheck := widget.NewCheck("Verbose Logging", nil)
-	verboseCheck.SetChecked(ui.app.State.Verbose)
+	verboseCheck := widget.NewCheck("Debug", nil)
+	verboseCheck.SetChecked(ui.app.State.Debug)
 	otherCard := widget.NewCard("Other Settings", "", verboseCheck)
 
 	// Buttons
@@ -1400,6 +1400,7 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 			apiKeyEntry.Text, baseURLEntry.Text, dbTypeSelect.Selected, dbPathEntry.Text,
 			dbHostEntry.Text, dbPortEntry.Text, dbUserEntry.Text, dbPassEntry.Text, dbNameEntry.Text,
 			serverHostEntry.Text, serverPortEntry.Text, tlsEnabledCheck.Checked, tlsCertEntry.Text, tlsKeyEntry.Text,
+			false, // verbose is deprecated in gui
 			verboseCheck.Checked,
 		)
 	})

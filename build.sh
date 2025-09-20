@@ -12,14 +12,14 @@ export CGO_ENABLED=1
 CLEAN_UP=true
 while getopts "k" opt; do
   case ${opt} in
-    k )
-      CLEAN_UP=false
-      echo "Running with -k, will not remove intermediate files."
-      ;;
-    \? )
-      echo "Invalid option: $OPTARG" 1>&2
-      exit 1
-      ;;
+  k)
+    CLEAN_UP=false
+    echo "Running with -k, will not remove intermediate files."
+    ;;
+  \?)
+    echo "Invalid option: $OPTARG" 1>&2
+    exit 1
+    ;;
   esac
 done
 
@@ -29,7 +29,7 @@ set -e
 # Clean the build directory
 if [ "$CLEAN_UP" = true ]; then
   echo "Cleaning build directory..."
-  rm -rf build/*
+  rm -rf dist/*
   rm -rf BadgerMapsSync.app BadgerMapsSync
 fi
 
@@ -37,7 +37,7 @@ fi
 echo "Compiling for macOS..."
 fyne package -os darwin -release
 echo "Compressing macOS app..."
-zip -r build/BadgerMapsSync_macOS.zip BadgerMapsSync.app
+zip -r dist/BadgerMapsSync_macOS.zip BadgerMapsSync.app
 if [ "$CLEAN_UP" = true ]; then
   rm -rf BadgerMapsSync.app
 fi
@@ -74,7 +74,7 @@ fyne package --os windows --executable BadgerMapsSync.exe -release
 
 # Create a temporary directory for packaging the final zip
 echo "Packaging Windows build with DLL..."
-TEMP_DIR="build/windows_temp"
+TEMP_DIR="dist/windows_temp"
 mkdir -p "$TEMP_DIR"
 
 # Copy the final executable and the DLL to the temp directory

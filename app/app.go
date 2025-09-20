@@ -4,7 +4,7 @@ import (
 	"badgermaps/api"
 	"badgermaps/app/server"
 	"badgermaps/app/state"
-	"badgermaps/cli/action"
+	"badgermaps/app/action"
 	"badgermaps/database"
 	"badgermaps/events"
 	"badgermaps/utils"
@@ -17,9 +17,18 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type ServerConfig struct {
+	Host       string `yaml:"host"`
+	Port       int    `yaml:"port"`
+	TLSEnabled bool   `yaml:"tls_enabled"`
+	TLSCert    string `yaml:"tls_cert"`
+	TLSKey     string `yaml:"tls_key"`
+}
+
 type Config struct {
 	API                   api.APIConfig        `yaml:"api"`
 	DB                    database.DBConfig    `yaml:"db"`
+	Server                ServerConfig         `yaml:"server"`
 	MaxConcurrentRequests int                  `yaml:"max_concurrent_requests"`
 	EventActions          []action.EventAction `yaml:"event_actions"`
 	CronJobs              []server.CronJob     `yaml:"cron_jobs"`
@@ -91,6 +100,10 @@ func NewApp() *App {
 				Type: "sqlite3",
 				Path: utils.GetConfigDirFile("badgermaps.db"),
 			},
+			Server: ServerConfig{
+				Host: "localhost",
+				Port: 8080,
+			},
 			MaxConcurrentRequests: 5,
 		},
 	}
@@ -137,6 +150,13 @@ func (a *App) LoadConfig() error {
 		a.migrateActionNames()
 		a.validateAndCleanActions()
 	}
+
+	// Transfer server config to state
+	a.State.ServerHost = a.Config.Server.Host
+	a.State.ServerPort = a.Config.Server.Port
+	a.State.TLSEnabled = a.Config.Server.TLSEnabled
+	a.State.TLSCert = a.Config.Server.TLSCert
+	a.State.TLSKey = a.Config.Server.TLSKey
 
 	a.API = api.NewAPIClient(&a.Config.API)
 
