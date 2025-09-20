@@ -37,7 +37,9 @@ go.work.sum
 /badgermaps__test/
 /badgermaps
 
+# AI Files
 GEMINI.md
+AGENTS.md
 
 # Binaries
 badgermaps
@@ -46,4 +48,3 @@ BadgerMapsSync
 # System Files 
 .DS_Store
 
-fixes.md

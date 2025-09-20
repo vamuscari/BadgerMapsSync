@@ -9,6 +9,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/mattn/go-sqlite3 v1.14.17
 	github.com/microsoft/go-mssqldb v1.6.0
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/schollz/progressbar/v3 v3.18.0
 	github.com/spf13/cobra v1.7.0
 	gopkg.in/yaml.v2 v2.4.0
@@ -18,7 +19,6 @@ require (
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	github.com/robfig/cron/v3 v3.0.1 // indirect
 	golang.org/x/term v0.28.0 // indirect
 )
 

@@ -53,3 +53,20 @@ The application utilizes two distinct forms of communication:
 1.  **Application-Level Eventing:** The `events` package provides a dispatcher for significant application events (e.g., `PullComplete`, `PushError`). This is used to trigger actions, update the GUI, or log major status changes. It is a high-level concern.
 
 2.  **Diagnostic Logging:** For low-level, verbose output, such as the step-by-step process of validating a database schema, direct logging to the console (`fmt.Printf`) is used. This logging is explicitly guarded by flags (`Verbose`, `Debug`) passed down via the `state.State` object. This approach was chosen over the event system for these specific cases because this output is not a significant "event" for the application to act upon, but rather direct, immediate feedback to the user during a specific, isolated operation. Forcing this into the event system would have unnecessarily coupled the `database` package to the `events` package.
+
+### Unified Omnibox Search
+
+The GUI implements a unified search interface (omnibox) in the Pull tab that allows searching across multiple entity types:
+
+1. **Search Scope:** Users can search across all entities or filter by type (Accounts, Check-ins, Routes)
+2. **Data Sources:** 
+   - **Accounts:** Searched via database (not API) using the `SearchAccounts.sql` queries
+   - **Check-ins:** Searched via database using `SearchCheckins.sql` with joins to Accounts
+   - **Routes:** Searched via database using `SearchRoutes.sql` queries
+3. **Ranking:** All search queries implement SQL-based result ranking:
+   - Rank 0: Exact ID match
+   - Rank 1: Exact name match (case-insensitive)
+   - Rank 2: Name starts with query
+   - Rank 3: Name contains query after word boundary
+   - Rank 4: Name contains query as substring
+4. **Search Fields:** Only name and ID fields are searched to maintain performance and simplicity
