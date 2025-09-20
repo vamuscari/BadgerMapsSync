@@ -1,3 +1,14 @@
-SELECT RouteId, Name, RouteDate, StartAddress, DestinationAddress
+SELECT RouteId, Name, RouteDate
 FROM Routes
-WHERE Name LIKE ? OR StartAddress LIKE ? OR DestinationAddress LIKE ?
+WHERE Name ILIKE ? OR CAST(RouteId AS TEXT) LIKE ?
+ORDER BY
+  CASE
+    WHEN CAST(RouteId AS TEXT) = ? THEN 0
+    WHEN LOWER(Name) = LOWER(?) THEN 1
+    WHEN LOWER(Name) LIKE ? THEN 2
+    WHEN LOWER(Name) LIKE ? THEN 3
+    WHEN LOWER(Name) LIKE ? THEN 4
+    ELSE 5
+  END,
+  RouteDate DESC, Name ASC
+LIMIT 50

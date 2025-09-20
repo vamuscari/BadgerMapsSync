@@ -1,3 +1,13 @@
-SELECT AccountId, FullName, FirstName, LastName, Email, PhoneNumber
+SELECT TOP 50 AccountId, FullName
 FROM Accounts
-WHERE FullName LIKE ? OR FirstName LIKE ? OR LastName LIKE ? OR Email LIKE ? OR PhoneNumber LIKE ?
+WHERE FullName LIKE ? OR CAST(AccountId AS NVARCHAR(50)) LIKE ?
+ORDER BY
+  CASE
+    WHEN CAST(AccountId AS NVARCHAR(50)) = ? THEN 0
+    WHEN LOWER(FullName) = LOWER(?) THEN 1
+    WHEN LOWER(FullName) LIKE ? THEN 2
+    WHEN LOWER(FullName) LIKE ? THEN 3
+    WHEN LOWER(FullName) LIKE ? THEN 4
+    ELSE 5
+  END,
+  FullName ASC

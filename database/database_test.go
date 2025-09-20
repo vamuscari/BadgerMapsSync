@@ -67,6 +67,7 @@ func TestSQLFiles(t *testing.T) {
 		"MergeUserProfiles.sql",
 		"SearchAccounts.sql",
 		"SearchRoutes.sql",
+		"SearchCheckins.sql",
 		"UpdatePendingChangeStatus.sql",
 		"CreateAccountsWithLabelsView.sql",
 		"CreateFieldMapsTable.sql",

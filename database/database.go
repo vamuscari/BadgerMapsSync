@@ -418,13 +418,13 @@ func (db *SQLiteConfig) ExecuteQuery(query string) (*sql.Rows, error) {
 
 // PostgreSQLConfig represents a PostgreSQL database configuration
 type PostgreSQLConfig struct {
-	db       *sql.DB
-	Host     string `mapstructure:"DB_HOST"`
-	Port     int    `mapstructure:"DB_PORT"`
-	Database string `mapstructure:"DB_NAME"`
-	Username string `mapstructure:"DB_USER"`
-	Password string `mapstructure:"DB_PASSWORD"`
-	SSLMode  string `mapstructure:"DB_SSL_MODE"`
+	db        *sql.DB
+	Host      string `mapstructure:"DB_HOST"`
+	Port      int    `mapstructure:"DB_PORT"`
+	Database  string `mapstructure:"DB_NAME"`
+	Username  string `mapstructure:"DB_USER"`
+	Password  string `mapstructure:"DB_PASSWORD"`
+	SSLMode   string `mapstructure:"DB_SSL_MODE"`
 	connected bool
 }
 
@@ -1297,7 +1297,7 @@ func (db *MSSQLConfig) LoadConfig(config *DBConfig) error {
 
 func (db *MSSQLConfig) SaveConfig(config *DBConfig) error {
 	config.Host = db.Host
-	config.Port = config.Port
+	config.Port = db.Port
 	config.Database = db.Database
 	config.Username = db.Username
 	config.Password = db.Password
@@ -1467,7 +1467,6 @@ func (db *MSSQLConfig) DatabaseConnectionWithTimeout() string {
 func (db *SQLiteConfig) DatabaseConnectionWithTimeout() string {
 	return db.DatabaseConnection()
 }
-
 
 func RequiredTables() []string {
 	return []string{
