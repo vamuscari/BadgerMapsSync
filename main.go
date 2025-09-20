@@ -85,6 +85,7 @@ It allows you to push and pull data, run in server mode, and perform various uti
 	rootCmd.PersistentFlags().BoolVar(&App.State.NoColor, "no-color", false, "Disable colored output")
 	rootCmd.PersistentFlags().BoolVar(&App.State.NoInput, "no-input", false, "Disable interactive prompts")
 	rootCmd.PersistentFlags().StringVar(App.State.ConfigFile, "config", "", "Config file (default is $HOME/.badgermaps.yaml)")
+	rootCmd.PersistentFlags().StringVar(&App.State.LogFile, "log-file", "", "Path to write log output to a file")
 	rootCmd.Flags().BoolVar(&guiFlag, "gui", false, "Launch the graphical user interface")
 
 	return rootCmd
@@ -93,6 +94,7 @@ It allows you to push and pull data, run in server mode, and perform various uti
 func main() {
 	// Initialize the core application
 	App = app.NewApp()
+	defer App.Close()
 
 	utils.InitColors(App.State)
 	if App.DB != nil {

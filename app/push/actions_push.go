@@ -10,24 +10,24 @@ import (
 
 // RunPushAccounts orchestrates pushing pending account changes to the API.
 func RunPushAccounts(a *app.App) error {
-	a.Events.Dispatch(events.Event{Type: events.PushScanStart, Source: "accounts"})
+	a.Events.Dispatch(events.Event{Type: "push.scan.start", Source: "accounts", Payload: events.PushScanStartPayload{}})
 	changes, err := database.GetPendingAccountChanges(a.DB)
 	if err != nil {
 		err = fmt.Errorf("error getting pending account changes: %w", err)
-		a.Events.Dispatch(events.Event{Type: events.PushError, Source: "accounts", Payload: err})
+		a.Events.Dispatch(events.Event{Type: "push.error", Source: "accounts", Payload: events.ErrorPayload{Error: err}})
 		return err
 	}
 
-	a.Events.Dispatch(events.Event{Type: events.PushScanComplete, Source: "accounts", Payload: changes})
+	a.Events.Dispatch(events.Event{Type: "push.scan.complete", Source: "accounts", Payload: events.PushScanCompletePayload{Changes: changes}})
 	if len(changes) == 0 {
 		a.Events.Dispatch(events.Infof("push", "No pending account changes to push."))
-		a.Events.Dispatch(events.Event{Type: events.PushComplete, Source: "accounts", Payload: 0})
+		a.Events.Dispatch(events.Event{Type: "push.complete", Source: "accounts", Payload: events.PushCompletePayload{ErrorCount: 0}})
 		return nil
 	}
 
 	errorCount := 0
 	for _, change := range changes {
-		a.Events.Dispatch(events.Event{Type: events.PushItemStart, Source: "accounts", Payload: change})
+		a.Events.Dispatch(events.Event{Type: "push.item.start", Source: "accounts", Payload: events.PushItemStartPayload{Change: change}})
 		database.UpdatePendingChangeStatus(a.DB, "AccountsPendingChanges", change.ChangeId, "processing")
 
 		var data map[string]string
@@ -44,39 +44,39 @@ func RunPushAccounts(a *app.App) error {
 		}
 
 		if apiErr != nil {
-			a.Events.Dispatch(events.Event{Type: events.PushItemError, Source: "accounts", Payload: apiErr})
+			a.Events.Dispatch(events.Event{Type: "push.item.error", Source: "accounts", Payload: events.PushItemErrorPayload{Error: apiErr}})
 			database.UpdatePendingChangeStatus(a.DB, "AccountsPendingChanges", change.ChangeId, "failed")
 			errorCount++
 		} else {
-			a.Events.Dispatch(events.Event{Type: events.PushItemSuccess, Source: "accounts", Payload: change})
+			a.Events.Dispatch(events.Event{Type: "push.item.success", Source: "accounts", Payload: events.PushItemSuccessPayload{Change: change}})
 			database.UpdatePendingChangeStatus(a.DB, "AccountsPendingChanges", change.ChangeId, "completed")
 		}
 	}
-	a.Events.Dispatch(events.Event{Type: events.PushComplete, Source: "accounts", Payload: errorCount})
+	a.Events.Dispatch(events.Event{Type: "push.complete", Source: "accounts", Payload: events.PushCompletePayload{ErrorCount: errorCount}})
 	a.Events.Dispatch(events.Infof("push", "Finished pushing account changes."))
 	return nil
 }
 
 // RunPushCheckins orchestrates pushing pending check-in changes to the API.
 func RunPushCheckins(a *app.App) error {
-	a.Events.Dispatch(events.Event{Type: events.PushScanStart, Source: "checkins"})
+	a.Events.Dispatch(events.Event{Type: "push.scan.start", Source: "checkins", Payload: events.PushScanStartPayload{}})
 	changes, err := database.GetPendingCheckinChanges(a.DB)
 	if err != nil {
 		err = fmt.Errorf("error getting pending check-in changes: %w", err)
-		a.Events.Dispatch(events.Event{Type: events.PushError, Source: "checkins", Payload: err})
+		a.Events.Dispatch(events.Event{Type: "push.error", Source: "checkins", Payload: events.ErrorPayload{Error: err}})
 		return err
 	}
 
-	a.Events.Dispatch(events.Event{Type: events.PushScanComplete, Source: "checkins", Payload: changes})
+	a.Events.Dispatch(events.Event{Type: "push.scan.complete", Source: "checkins", Payload: events.PushScanCompletePayload{Changes: changes}})
 	if len(changes) == 0 {
 		a.Events.Dispatch(events.Infof("push", "No pending check-in changes to push."))
-		a.Events.Dispatch(events.Event{Type: events.PushComplete, Source: "checkins", Payload: 0})
+		a.Events.Dispatch(events.Event{Type: "push.complete", Source: "checkins", Payload: events.PushCompletePayload{ErrorCount: 0}})
 		return nil
 	}
 
 	errorCount := 0
 	for _, change := range changes {
-		a.Events.Dispatch(events.Event{Type: events.PushItemStart, Source: "checkins", Payload: change})
+		a.Events.Dispatch(events.Event{Type: "push.item.start", Source: "checkins", Payload: events.PushItemStartPayload{Change: change}})
 		database.UpdatePendingChangeStatus(a.DB, "AccountCheckinsPendingChanges", change.ChangeId, "processing")
 
 		var data map[string]string
@@ -89,15 +89,15 @@ func RunPushCheckins(a *app.App) error {
 		}
 
 		if apiErr != nil {
-			a.Events.Dispatch(events.Event{Type: events.PushItemError, Source: "checkins", Payload: apiErr})
+			a.Events.Dispatch(events.Event{Type: "push.item.error", Source: "checkins", Payload: events.PushItemErrorPayload{Error: apiErr}})
 			database.UpdatePendingChangeStatus(a.DB, "AccountCheckinsPendingChanges", change.ChangeId, "failed")
 			errorCount++
 		} else {
-			a.Events.Dispatch(events.Event{Type: events.PushItemSuccess, Source: "checkins", Payload: change})
+			a.Events.Dispatch(events.Event{Type: "push.item.success", Source: "checkins", Payload: events.PushItemSuccessPayload{Change: change}})
 			database.UpdatePendingChangeStatus(a.DB, "AccountCheckinsPendingChanges", change.ChangeId, "completed")
 		}
 	}
-	a.Events.Dispatch(events.Event{Type: events.PushComplete, Source: "checkins", Payload: errorCount})
+	a.Events.Dispatch(events.Event{Type: "push.complete", Source: "checkins", Payload: events.PushCompletePayload{ErrorCount: errorCount}})
 	a.Events.Dispatch(events.Infof("push", "Finished pushing check-in changes."))
 	return nil
 }

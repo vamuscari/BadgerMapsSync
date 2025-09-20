@@ -89,28 +89,24 @@ func (p *CliPresenter) HandlePushAccounts() error {
 			return
 		}
 		switch e.Type {
-		case events.PushScanStart:
+		case "push.scan.start":
 			p.App.Events.Dispatch(events.Infof("push", "Scanning for pending %s changes...", e.Source))
-		case events.PushItemError:
-			err := e.Payload.(error)
-			p.App.Events.Dispatch(events.Errorf("push", "An error occurred during push: %v", err))
-		case events.PushError:
-			err := e.Payload.(error)
-			p.App.Events.Dispatch(events.Errorf("push", "An error occurred during push scan: %v", err))
-		case events.PushComplete:
+		case "push.item.error":
+			payload := e.Payload.(events.PushItemErrorPayload)
+			p.App.Events.Dispatch(events.Errorf("push", "An error occurred during push: %v", payload.Error))
+		case "push.error":
+			payload := e.Payload.(events.ErrorPayload)
+			p.App.Events.Dispatch(events.Errorf("push", "An error occurred during push scan: %v", payload.Error))
+		case "push.complete":
 			if bar != nil {
 				bar.Finish()
 			}
-			errorCount := e.Payload.(int)
-			p.App.Events.Dispatch(events.Infof("push", "✔ Push for %s complete. Encountered %d errors.", e.Source, errorCount))
+			payload := e.Payload.(events.PushCompletePayload)
+			p.App.Events.Dispatch(events.Infof("push", "✔ Push for %s complete. Encountered %d errors.", e.Source, payload.ErrorCount))
 		}
 	}
 
-	p.App.Events.Subscribe(events.PushScanStart, pushListener)
-	p.App.Events.Subscribe(events.PushScanComplete, pushListener)
-	p.App.Events.Subscribe(events.PushItemSuccess, pushListener)
-	p.App.Events.Subscribe(events.PushItemError, pushListener)
-	p.App.Events.Subscribe(events.PushComplete, pushListener)
+	p.App.Events.Subscribe("push.*", pushListener)
 
 	return push.RunPushAccounts(p.App)
 }
@@ -126,10 +122,11 @@ func (p *CliPresenter) HandlePushCheckins() error {
 		}
 
 		switch e.Type {
-		case events.PushScanStart:
+		case "push.scan.start":
 			p.App.Events.Dispatch(events.Infof("push", "Scanning for pending %s changes...", e.Source))
-		case events.PushScanComplete:
-			changes := e.Payload.([]database.CheckinPendingChange)
+		case "push.scan.complete":
+			payload := e.Payload.(events.PushScanCompletePayload)
+			changes := payload.Changes.([]database.CheckinPendingChange)
 			if len(changes) > 0 {
 				bar = progressbar.NewOptions(len(changes),
 					progressbar.OptionSetDescription(fmt.Sprintf("Pushing %d %s changes", len(changes), e.Source)),
@@ -137,30 +134,26 @@ func (p *CliPresenter) HandlePushCheckins() error {
 					progressbar.OptionEnableColorCodes(true),
 				)
 			}
-		case events.PushItemSuccess:
+		case "push.item.success":
 			if bar != nil {
 				bar.Add(1)
 			}
-		case events.PushItemError:
-			err := e.Payload.(error)
-			p.App.Events.Dispatch(events.Errorf("push", "An error occurred during push: %v", err))
-		case events.PushError:
-			err := e.Payload.(error)
-			p.App.Events.Dispatch(events.Errorf("push", "An error occurred during push scan: %v", err))
-		case events.PushComplete:
+		case "push.item.error":
+			payload := e.Payload.(events.PushItemErrorPayload)
+			p.App.Events.Dispatch(events.Errorf("push", "An error occurred during push: %v", payload.Error))
+		case "push.error":
+			payload := e.Payload.(events.ErrorPayload)
+			p.App.Events.Dispatch(events.Errorf("push", "An error occurred during push scan: %v", payload.Error))
+		case "push.complete":
 			if bar != nil {
 				bar.Finish()
 			}
-			errorCount := e.Payload.(int)
-			p.App.Events.Dispatch(events.Infof("push", "✔ Push for %s complete. Encountered %d errors.", e.Source, errorCount))
+			payload := e.Payload.(events.PushCompletePayload)
+			p.App.Events.Dispatch(events.Infof("push", "✔ Push for %s complete. Encountered %d errors.", e.Source, payload.ErrorCount))
 		}
 	}
 
-	p.App.Events.Subscribe(events.PushScanStart, pushListener)
-	p.App.Events.Subscribe(events.PushScanComplete, pushListener)
-	p.App.Events.Subscribe(events.PushItemSuccess, pushListener)
-	p.App.Events.Subscribe(events.PushItemError, pushListener)
-	p.App.Events.Subscribe(events.PushComplete, pushListener)
+	p.App.Events.Subscribe("push.*", pushListener)
 
 	return push.RunPushCheckins(p.App)
 }

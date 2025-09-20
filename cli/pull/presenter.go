@@ -27,15 +27,17 @@ func (p *CliPresenter) HandlePullAccount(accountID int) error {
 			return
 		}
 		switch e.Type {
-		case events.PullComplete:
-			p.App.Events.Dispatch(events.Infof("pull", "Successfully pulled account %d.", e.Payload.(int)))
-		case events.PullError:
+		case "pull.complete":
+			payload := e.Payload.(events.CompletionPayload)
+			p.App.Events.Dispatch(events.Infof("pull", "Successfully pulled account %d.", payload.Count))
+		case "pull.error":
+			payload := e.Payload.(events.ErrorPayload)
 			p.App.Events.Dispatch(events.Errorf("pull", "Error: Failed to pull account %d. The API returned an error.", accountID))
-			p.App.Events.Dispatch(events.Warningf("pull", "Details: %v", e.Payload.(error)))
+			p.App.Events.Dispatch(events.Warningf("pull", "Details: %v", payload.Error))
 		}
 	}
-	p.App.Events.Subscribe(events.PullComplete, listener)
-	p.App.Events.Subscribe(events.PullError, listener)
+	p.App.Events.Subscribe("pull.complete", listener)
+	p.App.Events.Subscribe("pull.error", listener)
 
 	return pull.PullAccount(p.App, accountID)
 }
@@ -49,30 +51,30 @@ func (p *CliPresenter) HandlePullAccounts() error {
 			return
 		}
 		switch e.Type {
-		case events.PullGroupStart:
+		case "pull.group.start":
 			bar = progressbar.NewOptions(-1,
 				progressbar.OptionSetDescription("Pulling accounts..."),
 				progressbar.OptionSetWriter(os.Stderr),
 				progressbar.OptionSpinnerType(14),
 				progressbar.OptionEnableColorCodes(true),
 			)
-		case events.ResourceIDsFetched:
-			count := e.Payload.(int)
+		case "pull.ids_fetched":
+			payload := e.Payload.(events.ResourceIDsFetchedPayload)
 			if bar != nil {
-				bar.ChangeMax(count)
-				bar.Describe(fmt.Sprintf("Found %d accounts to pull.", count))
+				bar.ChangeMax(payload.Count)
+				bar.Describe(fmt.Sprintf("Found %d accounts to pull.", payload.Count))
 			}
-		case events.StoreSuccess:
+		case "pull.store.success":
 			if bar != nil {
 				bar.Add(1)
 			}
-		case events.PullGroupError:
-			err := e.Payload.(error)
+		case "pull.group.error":
+			payload := e.Payload.(events.ErrorPayload)
 			if bar != nil {
 				bar.Clear()
 			}
-			p.App.Events.Dispatch(events.Errorf("pull", "An error occurred during pull: %v", err))
-		case events.PullGroupComplete:
+			p.App.Events.Dispatch(events.Errorf("pull", "An error occurred during pull: %v", payload.Error))
+		case "pull.group.complete":
 			if bar != nil {
 				bar.Finish()
 				p.App.Events.Dispatch(events.Infof("pull", "✔ Pull for %s complete.", e.Source))
@@ -81,11 +83,7 @@ func (p *CliPresenter) HandlePullAccounts() error {
 	}
 
 	// Subscribe the listener to all relevant events
-	p.App.Events.Subscribe(events.PullGroupStart, pullListener)
-	p.App.Events.Subscribe(events.ResourceIDsFetched, pullListener)
-	p.App.Events.Subscribe(events.StoreSuccess, pullListener)
-	p.App.Events.Subscribe(events.PullGroupError, pullListener)
-	p.App.Events.Subscribe(events.PullGroupComplete, pullListener)
+	p.App.Events.Subscribe("pull.*", pullListener)
 
 	err := pull.PullGroupAccounts(p.App, 0, nil)
 	if bar != nil && !bar.IsFinished() {
@@ -101,15 +99,16 @@ func (p *CliPresenter) HandlePullCheckin(checkinID int) error {
 			return
 		}
 		switch e.Type {
-		case events.PullComplete:
-			p.App.Events.Dispatch(events.Infof("pull", "Successfully pulled check-in %d.", e.Payload.(int)))
-		case events.PullError:
+		case "pull.complete":
+			p.App.Events.Dispatch(events.Infof("pull", "Successfully pulled check-in %d.", checkinID))
+		case "pull.error":
+			payload := e.Payload.(events.ErrorPayload)
 			p.App.Events.Dispatch(events.Errorf("pull", "Error: Failed to pull check-in %d. The API returned an error.", checkinID))
-			p.App.Events.Dispatch(events.Warningf("pull", "Details: %v", e.Payload.(error)))
+			p.App.Events.Dispatch(events.Warningf("pull", "Details: %v", payload.Error))
 		}
 	}
-	p.App.Events.Subscribe(events.PullComplete, listener)
-	p.App.Events.Subscribe(events.PullError, listener)
+	p.App.Events.Subscribe("pull.complete", listener)
+	p.App.Events.Subscribe("pull.error", listener)
 
 	return pull.PullCheckin(p.App, checkinID)
 }
@@ -123,30 +122,30 @@ func (p *CliPresenter) HandlePullCheckins() error {
 			return
 		}
 		switch e.Type {
-		case events.PullGroupStart:
+		case "pull.group.start":
 			bar = progressbar.NewOptions(-1,
 				progressbar.OptionSetDescription("Pulling checkins..."),
 				progressbar.OptionSetWriter(os.Stderr),
 				progressbar.OptionSpinnerType(14),
 				progressbar.OptionEnableColorCodes(true),
 			)
-		case events.ResourceIDsFetched:
-			count := e.Payload.(int)
+		case "pull.ids_fetched":
+			payload := e.Payload.(events.ResourceIDsFetchedPayload)
 			if bar != nil {
-				bar.ChangeMax(count)
-				bar.Describe(fmt.Sprintf("Found %d accounts to pull checkins from.", count))
+				bar.ChangeMax(payload.Count)
+				bar.Describe(fmt.Sprintf("Found %d accounts to pull checkins from.", payload.Count))
 			}
-		case events.StoreSuccess:
+		case "pull.store.success":
 			if bar != nil {
 				bar.Add(1)
 			}
-		case events.PullGroupError:
-			err := e.Payload.(error)
+		case "pull.group.error":
+			payload := e.Payload.(events.ErrorPayload)
 			if bar != nil {
 				bar.Clear()
 			}
-			p.App.Events.Dispatch(events.Errorf("pull", "An error occurred during pull: %v", err))
-		case events.PullGroupComplete:
+			p.App.Events.Dispatch(events.Errorf("pull", "An error occurred during pull: %v", payload.Error))
+		case "pull.group.complete":
 			if bar != nil {
 				bar.Finish()
 				p.App.Events.Dispatch(events.Infof("pull", "✔ Pull for %s complete.", e.Source))
@@ -155,11 +154,7 @@ func (p *CliPresenter) HandlePullCheckins() error {
 	}
 
 	// Subscribe the listener to all relevant events
-	p.App.Events.Subscribe(events.PullGroupStart, pullListener)
-	p.App.Events.Subscribe(events.ResourceIDsFetched, pullListener)
-	p.App.Events.Subscribe(events.StoreSuccess, pullListener)
-	p.App.Events.Subscribe(events.PullGroupError, pullListener)
-	p.App.Events.Subscribe(events.PullGroupComplete, pullListener)
+	p.App.Events.Subscribe("pull.*", pullListener)
 
 	err := pull.PullGroupCheckins(p.App, nil)
 	if bar != nil && !bar.IsFinished() {
@@ -175,15 +170,16 @@ func (p *CliPresenter) HandlePullRoute(routeID int) error {
 			return
 		}
 		switch e.Type {
-		case events.PullComplete:
-			p.App.Events.Dispatch(events.Infof("pull", "Successfully pulled route %d.", e.Payload.(int)))
-		case events.PullError:
+		case "pull.complete":
+			p.App.Events.Dispatch(events.Infof("pull", "Successfully pulled route %d.", routeID))
+		case "pull.error":
+			payload := e.Payload.(events.ErrorPayload)
 			p.App.Events.Dispatch(events.Errorf("pull", "Error: Failed to pull route %d. The API returned an error.", routeID))
-			p.App.Events.Dispatch(events.Warningf("pull", "Details: %v", e.Payload.(error)))
+			p.App.Events.Dispatch(events.Warningf("pull", "Details: %v", payload.Error))
 		}
 	}
-	p.App.Events.Subscribe(events.PullComplete, listener)
-	p.App.Events.Subscribe(events.PullError, listener)
+	p.App.Events.Subscribe("pull.complete", listener)
+	p.App.Events.Subscribe("pull.error", listener)
 
 	return pull.PullRoute(p.App, routeID)
 }
@@ -197,30 +193,30 @@ func (p *CliPresenter) HandlePullRoutes() error {
 			return
 		}
 		switch e.Type {
-		case events.PullGroupStart:
+		case "pull.group.start":
 			bar = progressbar.NewOptions(-1,
 				progressbar.OptionSetDescription("Pulling routes..."),
 				progressbar.OptionSetWriter(os.Stderr),
 				progressbar.OptionSpinnerType(14),
 				progressbar.OptionEnableColorCodes(true),
 			)
-		case events.ResourceIDsFetched:
-			count := e.Payload.(int)
+		case "pull.ids_fetched":
+			payload := e.Payload.(events.ResourceIDsFetchedPayload)
 			if bar != nil {
-				bar.ChangeMax(count)
-				bar.Describe(fmt.Sprintf("Found %d routes to pull.", count))
+				bar.ChangeMax(payload.Count)
+				bar.Describe(fmt.Sprintf("Found %d routes to pull.", payload.Count))
 			}
-		case events.StoreSuccess:
+		case "pull.store.success":
 			if bar != nil {
 				bar.Add(1)
 			}
-		case events.PullGroupError:
-			err := e.Payload.(error)
+		case "pull.group.error":
+			payload := e.Payload.(events.ErrorPayload)
 			if bar != nil {
 				bar.Clear()
 			}
-			p.App.Events.Dispatch(events.Errorf("pull", "An error occurred during pull: %v", err))
-		case events.PullGroupComplete:
+			p.App.Events.Dispatch(events.Errorf("pull", "An error occurred during pull: %v", payload.Error))
+		case "pull.group.complete":
 			if bar != nil {
 				bar.Finish()
 				p.App.Events.Dispatch(events.Infof("pull", "✔ Pull for %s complete.", e.Source))
@@ -229,11 +225,7 @@ func (p *CliPresenter) HandlePullRoutes() error {
 	}
 
 	// Subscribe the listener to all relevant events
-	p.App.Events.Subscribe(events.PullGroupStart, pullListener)
-	p.App.Events.Subscribe(events.ResourceIDsFetched, pullListener)
-	p.App.Events.Subscribe(events.StoreSuccess, pullListener)
-	p.App.Events.Subscribe(events.PullGroupError, pullListener)
-	p.App.Events.Subscribe(events.PullGroupComplete, pullListener)
+	p.App.Events.Subscribe("pull.*", pullListener)
 
 	err := pull.PullGroupRoutes(p.App, nil)
 	if bar != nil && !bar.IsFinished() {
@@ -249,15 +241,16 @@ func (p *CliPresenter) HandlePullProfile() error {
 			return
 		}
 		switch e.Type {
-		case events.PullComplete:
+		case "pull.complete":
 			p.App.Events.Dispatch(events.Infof("pull", "Successfully pulled user profile."))
-		case events.PullError:
+		case "pull.error":
+			payload := e.Payload.(events.ErrorPayload)
 			p.App.Events.Dispatch(events.Errorf("pull", "Error: Failed to pull user profile. The API returned an error."))
-			p.App.Events.Dispatch(events.Warningf("pull", "Details: %v", e.Payload.(error)))
+			p.App.Events.Dispatch(events.Warningf("pull", "Details: %v", payload.Error))
 		}
 	}
-	p.App.Events.Subscribe(events.PullComplete, listener)
-	p.App.Events.Subscribe(events.PullError, listener)
+	p.App.Events.Subscribe("pull.complete", listener)
+	p.App.Events.Subscribe("pull.error", listener)
 
 	return pull.PullProfile(p.App, nil)
 }

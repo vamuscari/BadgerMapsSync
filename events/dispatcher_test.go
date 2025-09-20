@@ -1,144 +1,88 @@
 package events
 
-// import (
-// 	"badgermaps/api"
-// 	"badgermaps/app/state"
-// 	"os"
-// 	"sync"
-// 	"testing"
-// 	"time"
-// )
-//
-// // mockState is a simple state for testing.
-// var mockState = &state.State{}
-//
-// // MockAppForDispatcher is a mock implementation of AppInterface for dispatcher tests.
-// type MockAppForDispatcher struct {
-// 	config *Config
-// 	state  *state.State
-// }
-//
-// func (m *MockAppForDispatcher) GetDB() database.DB                                       { return nil }
-// func (m *MockAppForDispatcher) GetAPI() *api.APIClient                                     { return nil }
-// func (m *MockAppForDispatcher) GetConfig() *Config                                         { return m.config }
-// func (m *MockAppForDispatcher) GetState() *state.State                                     { return m.state }
-// func (m *MockAppForDispatcher) GetEventActions() []EventAction                             { return m.config.Events }
-// func (m *MockAppForDispatcher) RawRequest(method, endpoint string, data map[string]string) ([]byte, error) { return nil, nil }
-//
-// func TestEventDispatcher_Dispatch(t *testing.T) {
-// 	t.Run("Listener receives event", func(t *testing.T) {
-// 		app := &MockAppForDispatcher{config: &Config{}, state: mockState}
-// 		dispatcher := NewEventDispatcher(app)
-//
-// 		var wg sync.WaitGroup
-// 		wg.Add(1)
-//
-// 		received := false
-// 		listener := func(e Event) {
-// 			if e.Type == TestEvent {
-// 				received = true
-// 				wg.Done()
-// 			}
-// 		}
-//
-// 		dispatcher.Subscribe(TestEvent, listener)
-// 		dispatcher.Dispatch(Event{Type: TestEvent})
-//
-// 		wg.Wait()
-//
-// 		if !received {
-// 			t.Error("Expected listener to receive event, but it didn't")
-// 		}
-// 	})
-//
-// 	t.Run("Action with valid config", func(t *testing.T) {
-// 		tmpfile, err := os.CreateTemp("", "test_action")
-// 		if err != nil {
-// 			t.Fatal(err)
-// 		}
-// 		defer os.Remove(tmpfile.Name())
-//
-// 		app := &MockAppForDispatcher{
-// 			config: &Config{
-// 				Events: []EventAction{
-// 					{
-// 						Name:  "TestExecAction",
-// 						Event: "TestEvent",
-// 						Run: []ActionConfig{
-// 							{
-// 								Type: "exec",
-// 								Args: map[string]interface{}{
-// 									"command": "echo hello > " + tmpfile.Name(),
-// 								},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 			state: mockState,
-// 		}
-//
-// 		dispatcher := NewEventDispatcher(app)
-//
-// 		dispatcher.Dispatch(Event{Type: TestEvent})
-//
-// 		// Wait for the action to execute
-// 		time.Sleep(100 * time.Millisecond)
-//
-// 		content, err := os.ReadFile(tmpfile.Name())
-// 		if err != nil {
-// 			t.Fatalf("Failed to read temp file: %v", err)
-// 		}
-// 		if string(content) != "hello\n" {
-// 			t.Errorf("Expected file content 'hello\\n', got '%s'", string(content))
-// 		}
-// 	})
-//
-// 	t.Run("Action with invalid config", func(t *testing.T) {
-// 		var wg sync.WaitGroup
-// 		wg.Add(1)
-//
-// 		// This listener will check for the error event that should be dispatched
-// 		errorReceived := false
-// 		errorListener := func(e Event) {
-// 			if e.Type == LogEvent {
-// 				if payload, ok := e.Payload.(LogEventPayload); ok {
-// 					if payload.Level == LogLevelError {
-// 						errorReceived = true
-// 						wg.Done()
-// 					}
-// 				}
-// 			}
-// 		}
-//
-// 		app := &MockAppForDispatcher{
-// 			config: &Config{
-// 				Events: []EventAction{
-// 					{
-// 						Name:  "TestInvalidAction",
-// 						Event: "TestEvent",
-// 						Run: []ActionConfig{
-// 							{
-// 								Type: "exec",
-// 								Args: map[string]interface{}{
-// 									"command": nil, // Invalid command
-// 								},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 			state: mockState,
-// 		}
-// 		dispatcher := NewEventDispatcher(app)
-// 		dispatcher.Subscribe(LogEvent, errorListener)
-//
-// 		dispatcher.Dispatch(Event{Type: TestEvent})
-//
-// 		wg.Wait()
-//
-// 		if !errorReceived {
-// 			t.Error("Expected an error event for invalid action config, but none was received")
-// 		}
-// 	})
-// }
+import (
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestEventDispatcher_SubscribeAndDispatch(t *testing.T) {
+	dispatcher := NewEventDispatcher()
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	listener := func(e Event) {
+		if e.Type != "test.event" {
+			t.Errorf("Expected event type 'test.event', got '%s'", e.Type)
+		}
+		if e.Source != "test_source" {
+			t.Errorf("Expected event source 'test_source', got '%s'", e.Source)
+		}
+		wg.Done()
+	}
+
+	dispatcher.Subscribe("test.event", listener)
+	dispatcher.Dispatch(Event{
+		Type:   "test.event",
+		Source: "test_source",
+	})
+
+	wg.Wait()
+}
+
+func TestEventDispatcher_WildcardSubscription(t *testing.T) {
+	dispatcher := NewEventDispatcher()
+	var wg sync.WaitGroup
+	wg.Add(6)
+
+	listener := func(e Event) {
+		wg.Done()
+	}
+
+	dispatcher.Subscribe("pull.*", listener)
+	dispatcher.Subscribe("*.accounts", listener)
+	dispatcher.Subscribe("*", listener)
+
+	dispatcher.Dispatch(Event{Type: "pull.start"})
+	dispatcher.Dispatch(Event{Type: "pull.complete.accounts"})
+	dispatcher.Dispatch(Event{Type: "push.start"})
+
+	c := make(chan struct{})
+	go func() {
+		defer close(c)
+		wg.Wait()
+	}()
+
+	select {
+	case <-c:
+		// All good
+	case <-time.After(1 * time.Second):
+		t.Fatal("Test timed out, not all listeners were called")
+	}
+}
+
+func TestMatchFunction(t *testing.T) {
+	testCases := []struct {
+		pattern   EventType
+		eventType EventType
+		expected  bool
+	}{
+		{"pull.start", "pull.start", true},
+		{"pull.start", "pull.end", false},
+		{"pull.*", "pull.start", true},
+		{"pull.*", "pull.end", true},
+		{"pull.*", "push.start", false},
+		{"*.accounts", "pull.start.accounts", true},
+		{"*.accounts", "push.end.accounts", true},
+		{"*.accounts", "pull.start.checkins", false},
+		{"*", "any.event.whatsoever", true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(string(tc.pattern), func(t *testing.T) {
+			if got := match(tc.pattern, tc.eventType); got != tc.expected {
+				t.Errorf("match(%q, %q) = %v; want %v", tc.pattern, tc.eventType, got, tc.expected)
+			}
+		})
+	}
+}

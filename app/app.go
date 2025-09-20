@@ -22,6 +22,9 @@ type Config struct {
 	DB                    database.DBConfig    `yaml:"db"`
 	MaxConcurrentRequests int                  `yaml:"max_concurrent_requests"`
 	EventActions          []action.EventAction `yaml:"event_actions"`
+	CronJobs              []server.CronJob     `yaml:"cron_jobs"`
+	WebhookCatchAll       bool                 `yaml:"webhook_catch_all"`
+	LogFile               string               `yaml:"log_file"`
 }
 
 type App struct {
@@ -34,8 +37,18 @@ type App struct {
 	Events         *events.EventDispatcher
 	Server         *server.ServerManager
 	ActionExecutor *action.Executor
+	LogListener    *events.LogListener
 
 	MaxConcurrentRequests int
+}
+
+func (a *App) Close() {
+	if a.DB != nil {
+		a.DB.Close()
+	}
+	if a.LogListener != nil {
+		a.LogListener.Close()
+	}
 }
 
 func (a *App) GetState() *state.State {
@@ -85,12 +98,23 @@ func NewApp() *App {
 	a.Events = events.NewEventDispatcher()
 	a.Server = server.NewServerManager(a.State)
 
-	// Register the log listener
-	logListener := events.NewLogListener(a.State)
-	a.Events.Subscribe(events.LogEvent, logListener.Handle)
-	a.Events.Subscribe(events.Debug, logListener.Handle)
-
 	return a
+}
+
+func (a *App) InitLogging() error {
+	logPath := a.State.LogFile
+	if logPath == "" {
+		logPath = a.Config.LogFile
+	}
+
+	var err error
+	a.LogListener, err = events.NewLogListener(a.State, logPath)
+	if err != nil {
+		return err
+	}
+
+	a.Events.Subscribe("log", a.LogListener.Handle)
+	return nil
 }
 
 func (a *App) LoadConfig() error {
@@ -128,9 +152,9 @@ func (a *App) LoadConfig() error {
 	}
 
 	a.ActionExecutor = action.NewExecutor(a.DB, a.API)
-	a.Events.Subscribe(events.Wildcard, func(event events.Event) {
+	a.Events.Subscribe("*", func(event events.Event) {
 		for _, eventAction := range a.Config.EventActions {
-			if eventAction.Event == event.Type.String() && (eventAction.Source == "" || eventAction.Source == event.Source) {
+			if eventAction.Event == string(event.Type) && (eventAction.Source == "" || eventAction.Source == event.Source) {
 				for _, actionConfig := range eventAction.Run {
 					go func(ac action.ActionConfig) {
 						if err := a.ExecuteAction(ac); err != nil {
@@ -271,7 +295,7 @@ func (a *App) AddEventAction(event, source string, actionConfig action.ActionCon
 			a.Config.EventActions[i].Run = append(a.Config.EventActions[i].Run, actionConfig)
 			err := a.SaveConfig()
 			if err == nil {
-				a.Events.Dispatch(events.Event{Type: events.ActionConfigUpdated, Source: "events"})
+				a.Events.Dispatch(events.Event{Type: "action.config.updated", Source: "events", Payload: events.ActionConfigUpdatedPayload{}})
 			}
 			return err
 		}
@@ -287,7 +311,7 @@ func (a *App) AddEventAction(event, source string, actionConfig action.ActionCon
 	a.Config.EventActions = append(a.Config.EventActions, newEventAction)
 	err := a.SaveConfig()
 	if err == nil {
-		a.Events.Dispatch(events.Event{Type: events.ActionConfigCreated, Source: "events"})
+		a.Events.Dispatch(events.Event{Type: "action.config.created", Source: "events", Payload: events.ActionConfigCreatedPayload{}})
 	}
 	return err
 }
@@ -300,7 +324,7 @@ func (a *App) UpdateEventAction(eventName string, actionIndex int, actionConfig 
 			a.Config.EventActions[i].Run[actionIndex] = actionConfig
 			err := a.SaveConfig()
 			if err == nil {
-				a.Events.Dispatch(events.Event{Type: events.ActionConfigUpdated, Source: "events"})
+				a.Events.Dispatch(events.Event{Type: "action.config.updated", Source: "events", Payload: events.ActionConfigUpdatedPayload{}})
 			}
 			return err
 		}
@@ -323,7 +347,7 @@ func (a *App) RemoveEventAction(eventName string, actionIndex int) error {
 
 			err := a.SaveConfig()
 			if err == nil {
-				a.Events.Dispatch(events.Event{Type: events.ActionConfigDeleted, Source: "events"})
+				a.Events.Dispatch(events.Event{Type: "action.config.deleted", Source: "events", Payload: events.ActionConfigDeletedPayload{}})
 			}
 			return err
 		}
@@ -395,25 +419,37 @@ func (a *App) EnsureConfig(isGui bool) {
 
 	path, ok, err := a.GetConfigFilePath()
 	if err != nil {
-		a.Events.Dispatch(events.Errorf("config", "Error getting config file path: %v", err))
+		// We can't use the event system yet, so print directly
+		fmt.Fprintf(os.Stderr, "Error getting config file path: %v\n", err)
+		os.Exit(1)
+	}
+
+	if ok {
+		if err := a.LoadConfig(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading configuration: %v\n", err)
+		}
+	}
+
+	// Initialize logging now that config and flags are loaded
+	if err := a.InitLogging(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error initializing logger: %v\n", err)
 		os.Exit(1)
 	}
 
 	if ok {
 		a.Events.Dispatch(events.Infof("config", "Configuration detected: %s", path))
-		if err := a.LoadConfig(); err != nil {
-			a.Events.Dispatch(events.Errorf("config", "Error loading configuration: %v", err))
-		} else {
-			if (a.State.Verbose || a.State.Debug) && a.API != nil {
-				apiKeyStatus := "not set"
-				if a.API.APIKey != "" {
-					apiKeyStatus = "set"
-				}
-				dbType := a.DB.GetType()
-				a.Events.Dispatch(events.Debugf("config", "Setup OK: DB_TYPE=%s, API_KEY=%s", dbType, apiKeyStatus))
+		if (a.State.Verbose || a.State.Debug) && a.API != nil {
+			apiKeyStatus := "not set"
+			if a.API.APIKey != "" {
+				apiKeyStatus = "set"
 			}
-			return
+			dbType := "none"
+			if a.DB != nil {
+				dbType = a.DB.GetType()
+			}
+			a.Events.Dispatch(events.Debugf("config", "Setup OK: DB_TYPE=%s, API_KEY=%s", dbType, apiKeyStatus))
 		}
+		return
 	}
 
 	// If running in GUI mode and no config is found, just load the defaults and continue.

@@ -222,7 +222,7 @@ func Launch(a *app.App, icon fyne.Resource) {
 	// Subscribe to events to refresh the events tab
 	eventListener := func(e events.Event) {
 		if ui.app.State.Debug {
-			a.Events.Dispatch(events.Debugf("gui", "GUI received event: %s", e.Type.String()))
+			a.Events.Dispatch(events.Debugf("gui", "GUI received event: %s", e.Type))
 		}
 		if ui.tabs != nil {
 			for _, tab := range ui.tabs.Items {
@@ -235,30 +235,18 @@ func Launch(a *app.App, icon fyne.Resource) {
 			}
 		}
 	}
-	a.Events.Subscribe(events.ActionConfigCreated, eventListener)
-	a.Events.Subscribe(events.ActionConfigUpdated, eventListener)
-	a.Events.Subscribe(events.ActionConfigDeleted, eventListener)
+	a.Events.Subscribe("action.config.*", eventListener)
 
 	// Subscribe to logging and action events
 	logListener := func(e events.Event) {
 		var msg string
 		switch e.Type {
-		case events.LogEvent:
-			logPayload, ok := e.Payload.(events.LogEventPayload)
+		case "log":
+			logPayload, ok := e.Payload.(events.LogPayload)
 			if !ok {
 				return
 			}
 			msg = fmt.Sprintf("[%s] [%s] %s", logPayload.Level.String(), e.Source, logPayload.Message)
-		case events.ActionStart:
-			msg = fmt.Sprintf("Starting action for event '%s': %s", e.Source, e.Payload.(string))
-		case events.ActionSuccess:
-			msg = fmt.Sprintf("Action for event '%s' completed successfully: %s", e.Source, e.Payload.(string))
-		case events.ActionError:
-			msg = fmt.Sprintf("Action for event '%s' failed: %v", e.Source, e.Payload.(error))
-		case events.Debug:
-			if txt, ok := e.Payload.(string); ok {
-				msg = fmt.Sprintf("DEBUG: %s", txt)
-			}
 		}
 
 		if msg != "" {
@@ -273,42 +261,33 @@ func Launch(a *app.App, icon fyne.Resource) {
 			}
 		}
 	}
-	a.Events.Subscribe(events.LogEvent, logListener)
-	a.Events.Subscribe(events.ActionStart, logListener)
-	a.Events.Subscribe(events.ActionSuccess, logListener)
-	a.Events.Subscribe(events.ActionError, logListener)
-	a.Events.Subscribe(events.Debug, logListener)
+	a.Events.Subscribe("log", logListener)
 
 	// Subscribe to pull events to show notifications
 	pullNotificationListener := func(e events.Event) {
 		switch e.Type {
-		case events.PullStart:
+		case "pull.start":
 			ui.ShowToast(fmt.Sprintf("Pulling %s from API...", e.Source))
-		case events.PullComplete:
+		case "pull.complete":
 			ui.ShowToast(fmt.Sprintf("Successfully pulled %s.", e.Source))
-		case events.PullError:
+		case "pull.error":
 			ui.ShowToast(fmt.Sprintf("Error pulling %s.", e.Source))
-		case events.PullGroupStart:
+		case "pull.group.start":
 			ui.ShowToast(fmt.Sprintf("Starting full pull for %s...", e.Source))
-		case events.PullGroupComplete:
+		case "pull.group.complete":
 			ui.ShowToast(fmt.Sprintf("Successfully pulled all %s.", e.Source))
-		case events.PullGroupError:
+		case "pull.group.error":
 			ui.ShowToast(fmt.Sprintf("Error pulling all %s.", e.Source))
 		}
 	}
-	a.Events.Subscribe(events.PullStart, pullNotificationListener)
-	a.Events.Subscribe(events.PullComplete, pullNotificationListener)
-	a.Events.Subscribe(events.PullError, pullNotificationListener)
-	a.Events.Subscribe(events.PullGroupStart, pullNotificationListener)
-	a.Events.Subscribe(events.PullGroupComplete, pullNotificationListener)
-	a.Events.Subscribe(events.PullGroupError, pullNotificationListener)
+	a.Events.Subscribe("pull.*", pullNotificationListener)
 
 	// Subscribe to connection status changes to refresh UI
 	connectionListener := func(e events.Event) {
 		ui.RefreshConfigTab()
 		ui.RefreshHomeTab()
 	}
-	a.Events.Subscribe(events.ConnectionStatusChanged, connectionListener)
+	a.Events.Subscribe("connection.status.changed", connectionListener)
 
 	window.SetContent(ui.createContent())
 	window.Resize(fyne.NewSize(1280, 720))
@@ -602,11 +581,18 @@ func (ui *Gui) ShowDetails(details fyne.CanvasObject) {
 
 // createPullTab creates the content for the "Pull" tab
 func (ui *Gui) createPullTab() fyne.CanvasObject {
-	accountIDEntry := widget.NewEntry()
-	accountIDEntry.SetPlaceHolder("Account ID")
-	pullAccountButton := widget.NewButtonWithIcon("Pull Account", theme.DownloadIcon(), func() {
-		ui.presenter.HandlePullAccount(accountIDEntry.Text)
+	accountSearchEntry := widget.NewEntry()
+	accountSearchEntry.SetPlaceHolder("Search Accounts by ID or Name...")
+
+	accountSearchButton := widget.NewButtonWithIcon("", theme.SearchIcon(), func() {
+		ui.presenter.HandleAccountSearch(accountSearchEntry.Text)
 	})
+	accountSearchConfigButton := widget.NewButtonWithIcon("", theme.SettingsIcon(), func() {
+		// TODO: Implement configuration popup
+		ui.ShowToast("Configuration for account search is not yet implemented.")
+	})
+
+	accountSearchBox := container.NewBorder(nil, nil, nil, container.NewHBox(accountSearchButton, accountSearchConfigButton), accountSearchEntry)
 
 	checkinIDEntry := widget.NewEntry()
 	checkinIDEntry.SetPlaceHolder("Check-in ID")
@@ -620,9 +606,14 @@ func (ui *Gui) createPullTab() fyne.CanvasObject {
 		ui.presenter.HandlePullRoute(routeIDEntry.Text)
 	})
 
-	singlePullCard := widget.NewCard("Pull Single Item by ID", "", container.NewVBox(
-		container.NewGridWithColumns(2, accountIDEntry, pullAccountButton),
+	searchCard := widget.NewCard("Omnibox Search", "", container.NewVBox(
+		widget.NewLabel("Accounts"),
+		accountSearchBox,
+		widget.NewSeparator(),
+		widget.NewLabel("Check-ins"),
 		container.NewGridWithColumns(2, checkinIDEntry, pullCheckinButton),
+		widget.NewSeparator(),
+		widget.NewLabel("Routes"),
 		container.NewGridWithColumns(2, routeIDEntry, pullRouteButton),
 	))
 
@@ -641,7 +632,7 @@ func (ui *Gui) createPullTab() fyne.CanvasObject {
 	pullAllButton := widget.NewButtonWithIcon("Run Full Pull (All Data)", theme.ViewRefreshIcon(), ui.presenter.HandlePullGroup)
 
 	return container.NewVScroll(container.NewVBox(
-		singlePullCard,
+		searchCard,
 		bulkPullCard,
 		pullAllButton,
 	))

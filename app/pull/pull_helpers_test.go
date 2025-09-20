@@ -93,7 +93,7 @@ func TestPullAccount(t *testing.T) {
 
 	// Use a channel to wait for the async event
 	pullCompleteChan := make(chan events.Event)
-	testApp.Events.Subscribe(events.PullComplete, func(e events.Event) {
+	testApp.Events.Subscribe("pull.complete", func(e events.Event) {
 		if e.Source == "account" { // Filter for the correct event source
 			pullCompleteChan <- e
 		}
@@ -108,11 +108,12 @@ func TestPullAccount(t *testing.T) {
 	// Verify that the PullComplete event was dispatched
 	select {
 	case e := <-pullCompleteChan:
-		if e.Type != events.PullComplete {
-			t.Errorf("Expected event type PullComplete, got %s", e.Type)
+		if e.Type != "pull.complete" {
+			t.Errorf("Expected event type pull.complete, got %s", e.Type)
 		}
-		if e.Payload.(int) != 123 {
-			t.Errorf("Expected payload to be 123, got %v", e.Payload)
+		payload := e.Payload.(events.CompletionPayload)
+		if payload.Count != 1 {
+			t.Errorf("Expected payload count to be 1, got %v", payload.Count)
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("Timed out waiting for PullComplete event")

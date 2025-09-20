@@ -2,6 +2,8 @@ package server
 
 import (
 	"badgermaps/app"
+	"badgermaps/events"
+	"strconv"
 
 	"github.com/spf13/cobra"
 )
@@ -47,8 +49,25 @@ func ServerCmd(a *app.App) *cobra.Command {
 	serverCmd.AddCommand(newServerStopCmd(presenter))
 	serverCmd.AddCommand(newServerStatusCmd(presenter))
 	serverCmd.AddCommand(newServerSetupCmd(a))
+	serverCmd.AddCommand(newServerReplayWebhookCmd(presenter))
 
 	return serverCmd
+}
+
+func newServerReplayWebhookCmd(presenter *CliPresenter) *cobra.Command {
+	return &cobra.Command{
+		Use:   "replay-webhook [id]",
+		Short: "Replay a webhook from the log",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			id, err := strconv.Atoi(args[0])
+			if err != nil {
+				presenter.App.Events.Dispatch(events.Errorf("server", "Invalid webhook ID: %v", err))
+				return
+			}
+			presenter.HandleReplayWebhook(id)
+		},
+	}
 }
 
 func newServerStartCmd(presenter *CliPresenter) *cobra.Command {

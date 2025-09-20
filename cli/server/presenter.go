@@ -4,12 +4,15 @@ import (
 	"badgermaps/api"
 	"badgermaps/app"
 	"badgermaps/app/pull"
+	"badgermaps/database"
 	"badgermaps/events"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/signal"
 	"syscall"
@@ -56,9 +59,25 @@ func (p *CliPresenter) HandleServerStatus() {
 
 // RunServer runs the server in the foreground.
 func (p *CliPresenter) RunServer(config *ServerConfig) {
+	p.App.Server.Start(p.App.Config.CronJobs, p.App)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/webhook/account/create", p.HandleAccountCreateWebhook)
-	mux.HandleFunc("/webhook/checkin", p.HandleCheckinWebhook)
+
+	accountCreateHandler := http.HandlerFunc(p.HandleAccountCreateWebhook)
+	checkinHandler := http.HandlerFunc(p.HandleCheckinWebhook)
+
+	mux.Handle("/webhook/account/create", WebhookLoggingMiddleware(accountCreateHandler, p.App))
+	mux.Handle("/webhook/checkin", WebhookLoggingMiddleware(checkinHandler, p.App))
+
+	if p.App.Config.WebhookCatchAll {
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			WebhookLoggingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				p.App.Events.Dispatch(events.Warningf("server", "Received request for unhandled path: %s", r.RequestURI))
+				http.NotFound(w, r)
+			}), p.App).ServeHTTP(w, r)
+		})
+	}
+
+	mux.HandleFunc("/health", p.HandleHealthCheck)
 	addr := fmt.Sprintf("%s:%d", config.Host, config.Port)
 	server := &http.Server{Addr: addr, Handler: mux}
 
@@ -87,6 +106,54 @@ func (p *CliPresenter) RunServer(config *ServerConfig) {
 		p.App.Events.Dispatch(events.Errorf("server", "Server shutdown error: %v", err))
 	}
 	p.App.Events.Dispatch(events.Infof("server", "Server stopped"))
+}
+
+func (p *CliPresenter) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
+	if p.App.DB != nil && p.App.DB.IsConnected() {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "OK")
+	} else {
+		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
+	}
+}
+
+func (p *CliPresenter) HandleReplayWebhook(id int) {
+	method, uri, headers, body, err := database.GetWebhookLog(p.App.DB, id)
+	if err != nil {
+		p.App.Events.Dispatch(events.Errorf("server", "Error getting webhook log: %v", err))
+		return
+	}
+
+	req, err := http.NewRequest(method, uri, bytes.NewBufferString(body))
+	if err != nil {
+		p.App.Events.Dispatch(events.Errorf("server", "Error creating request: %v", err))
+		return
+	}
+
+	var headerMap map[string][]string
+	if err := json.Unmarshal([]byte(headers), &headerMap); err != nil {
+		p.App.Events.Dispatch(events.Errorf("server", "Error unmarshaling headers: %v", err))
+		return
+	}
+	req.Header = headerMap
+
+	rr := httptest.NewRecorder()
+
+	switch uri {
+	case "/webhook/account/create":
+		p.HandleAccountCreateWebhook(rr, req)
+	case "/webhook/checkin":
+		p.HandleCheckinWebhook(rr, req)
+	default:
+		p.App.Events.Dispatch(events.Warningf("server", "No handler for path: %s", uri))
+		return
+	}
+
+	if rr.Code != http.StatusOK {
+		p.App.Events.Dispatch(events.Errorf("server", "Replay failed with status code %d: %s", rr.Code, rr.Body.String()))
+	} else {
+		p.App.Events.Dispatch(events.Infof("server", "Webhook %d replayed successfully", id))
+	}
 }
 
 func (p *CliPresenter) HandleAccountCreateWebhook(w http.ResponseWriter, r *http.Request) {

@@ -8,8 +8,11 @@ import (
 	"badgermaps/database"
 	"badgermaps/events"
 	"fmt"
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/widget"
 	"gopkg.in/yaml.v2"
 	"strconv"
+	"strings"
 )
 
 // GuiPresenter handles the presentation logic for the GUI.
@@ -109,6 +112,63 @@ func (p *GuiPresenter) HandlePullAccount(idStr string) {
 			return
 		}
 		p.view.ShowToast(fmt.Sprintf("Success: Pulled account %d.", id))
+	}()
+}
+
+// HandleAccountSearch performs a search for accounts and displays the results.
+func (p *GuiPresenter) HandleAccountSearch(query string) {
+	p.app.Events.Dispatch(events.Debugf("presenter", "HandleAccountSearch called with query: %s", query))
+	p.view.ShowProgressBar("Searching Accounts...")
+	p.view.SetProgress(0)
+
+	go func() {
+		defer p.view.HideProgressBar()
+		accounts, err := p.app.API.SearchAccounts(query)
+		if err != nil {
+			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
+			p.view.ShowToast("Error: Failed to search for accounts.")
+			return
+		}
+		p.view.SetProgress(1)
+
+		if len(accounts) == 0 {
+			p.view.ShowToast("No accounts found.")
+			return
+		}
+
+		// Create a list to display the results
+		data := make([]string, len(accounts))
+		for i, acc := range accounts {
+			data[i] = acc.FullName.String
+		}
+
+		list := widget.NewList(
+			func() int {
+				return len(data)
+			},
+			func() fyne.CanvasObject {
+				return widget.NewLabel("template")
+			},
+			func(i widget.ListItemID, o fyne.CanvasObject) {
+				o.(*widget.Label).SetText(data[i])
+			},
+		)
+
+		list.OnSelected = func(id widget.ListItemID) {
+			selectedAccount := accounts[id]
+			// Show full details in the details view
+			var details strings.Builder
+			details.WriteString(fmt.Sprintf("ID: %d\n", selectedAccount.AccountId.Int64))
+			details.WriteString(fmt.Sprintf("Name: %s\n", selectedAccount.FullName.String))
+			details.WriteString(fmt.Sprintf("Email: %s\n", selectedAccount.Email.String))
+			details.WriteString(fmt.Sprintf("Phone: %s\n", selectedAccount.PhoneNumber.String))
+			details.WriteString(fmt.Sprintf("Address: %s\n", selectedAccount.OriginalAddress.String))
+
+			detailsLabel := NewWrappingLabel(details.String())
+			p.view.ShowDetails(detailsLabel)
+		}
+
+		p.view.ShowDetails(list)
 	}()
 }
 
@@ -357,7 +417,7 @@ func (p *GuiPresenter) HandleSaveConfig(
 	}
 
 	p.view.ShowToast("Success: Configuration saved successfully.")
-	p.app.Events.Dispatch(events.Event{Type: events.ConnectionStatusChanged})
+	p.app.Events.Dispatch(events.Event{Type: "connection.status.changed"})
 	p.view.RefreshAllTabs()
 }
 
@@ -376,13 +436,13 @@ func (p *GuiPresenter) HandleTestAPIConnection(apiKey, baseURL string) {
 		if !apiClient.IsConnected() {
 			p.app.Events.Dispatch(events.Errorf("presenter", "API connection failed"))
 			p.app.API.SetConnected(false)
-			p.app.Events.Dispatch(events.Event{Type: events.ConnectionStatusChanged})
+			p.app.Events.Dispatch(events.Event{Type: "connection.status.changed"})
 			return
 		}
 
 		p.app.Events.Dispatch(events.Infof("presenter", "API connection successful!"))
 		p.app.API.SetConnected(true)
-		p.app.Events.Dispatch(events.Event{Type: events.ConnectionStatusChanged})
+		p.app.Events.Dispatch(events.Event{Type: "connection.status.changed"})
 	}()
 }
 
@@ -410,14 +470,14 @@ func (p *GuiPresenter) HandleTestDBConnection(dbType, dbPath, dbHost, dbPortStr,
 		default:
 			p.app.Events.Dispatch(events.Errorf("presenter", "Unknown database type for testing: %s", dbType))
 			p.app.DB.SetConnected(false)
-			p.app.Events.Dispatch(events.Event{Type: events.ConnectionStatusChanged})
+			p.app.Events.Dispatch(events.Event{Type: "connection.status.changed"})
 			return
 		}
 
 		if err := db.Connect(); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "Failed to create connection: %v", err))
 			p.app.DB.SetConnected(false)
-			p.app.Events.Dispatch(events.Event{Type: events.ConnectionStatusChanged})
+			p.app.Events.Dispatch(events.Event{Type: "connection.status.changed"})
 			return
 		}
 		defer db.Close()
@@ -425,13 +485,13 @@ func (p *GuiPresenter) HandleTestDBConnection(dbType, dbPath, dbHost, dbPortStr,
 		if err := db.TestConnection(); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "Connection failed: %v", err))
 			p.app.DB.SetConnected(false)
-			p.app.Events.Dispatch(events.Event{Type: events.ConnectionStatusChanged})
+			p.app.Events.Dispatch(events.Event{Type: "connection.status.changed"})
 			return
 		}
 
 		p.app.Events.Dispatch(events.Infof("presenter", "Connection successful!"))
 		p.app.DB.SetConnected(true)
-		p.app.Events.Dispatch(events.Event{Type: events.ConnectionStatusChanged})
+		p.app.Events.Dispatch(events.Event{Type: "connection.status.changed"})
 	}()
 }
 
@@ -520,7 +580,7 @@ func (p *GuiPresenter) HandleRefreshStatus() {
 			if err := p.app.API.TestAPIConnection(); err != nil {
 				p.app.Events.Dispatch(events.Errorf("presenter", "API connection test failed: %v", err))
 			}
-			p.app.Events.Dispatch(events.Event{Type: events.ConnectionStatusChanged})
+			p.app.Events.Dispatch(events.Event{Type: "connection.status.changed"})
 		}()
 	}
 
@@ -530,7 +590,7 @@ func (p *GuiPresenter) HandleRefreshStatus() {
 			if err := p.app.DB.TestConnection(); err != nil {
 				p.app.Events.Dispatch(events.Errorf("presenter", "DB connection test failed: %v", err))
 			}
-			p.app.Events.Dispatch(events.Event{Type: events.ConnectionStatusChanged})
+			p.app.Events.Dispatch(events.Event{Type: "connection.status.changed"})
 		}()
 	}
 

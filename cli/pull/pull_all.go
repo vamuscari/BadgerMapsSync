@@ -36,30 +36,30 @@ func runPullGroup(a *app.App, top int) {
 
 	pullListener := func(e events.Event) {
 		switch e.Type {
-		case events.PullGroupStart:
+		case "pull.group.start":
 			bar = progressbar.NewOptions(-1,
 				progressbar.OptionSetDescription(fmt.Sprintf("Starting pull for %s...", e.Source)),
 				progressbar.OptionSetWriter(os.Stderr),
 				progressbar.OptionSpinnerType(14),
 				progressbar.OptionEnableColorCodes(true),
 			)
-		case events.ResourceIDsFetched:
-			count := e.Payload.(int)
+		case "pull.ids_fetched":
+			payload := e.Payload.(events.ResourceIDsFetchedPayload)
 			if bar != nil {
-				bar.ChangeMax(count)
-				bar.Describe(fmt.Sprintf("Found %d %s to pull.", count, e.Source))
+				bar.ChangeMax(payload.Count)
+				bar.Describe(fmt.Sprintf("Found %d %s to pull.", payload.Count, e.Source))
 			}
-		case events.StoreSuccess:
+		case "pull.store.success":
 			if bar != nil {
 				bar.Add(1)
 			}
-		case events.PullGroupError:
-			err := e.Payload.(error)
+		case "pull.group.error":
+			payload := e.Payload.(events.ErrorPayload)
 			if bar != nil {
 				bar.Clear()
 			}
-			a.Events.Dispatch(events.Errorf("pull", "An error occurred during pull: %v", err))
-		case events.PullGroupComplete:
+			a.Events.Dispatch(events.Errorf("pull", "An error occurred during pull: %v", payload.Error))
+		case "pull.group.complete":
 			if bar != nil {
 				bar.Finish()
 				a.Events.Dispatch(events.Infof("pull", "✔ Pull for %s complete.", e.Source))
@@ -68,11 +68,7 @@ func runPullGroup(a *app.App, top int) {
 	}
 
 	// Subscribe the listener to all relevant events
-	a.Events.Subscribe(events.PullGroupStart, pullListener)
-	a.Events.Subscribe(events.ResourceIDsFetched, pullListener)
-	a.Events.Subscribe(events.StoreSuccess, pullListener)
-	a.Events.Subscribe(events.PullGroupError, pullListener)
-	a.Events.Subscribe(events.PullGroupComplete, pullListener)
+	a.Events.Subscribe("pull.*", pullListener)
 
 	// --- Execute Pull Operations ---
 	a.Events.Dispatch(events.Infof("pull", "Starting data pull from BadgerMaps API..."))

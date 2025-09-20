@@ -7,20 +7,19 @@ type State struct {
 	Quiet      bool
 	Debug      bool
 	NoColor    bool
-	ConfigFile *string
 	NoInput    bool
+	ConfigFile *string
 	IsGui      bool
-
-	// Server configuration
-	ServerHost      string
-	ServerPort      int
-	TLSEnabled      bool
-	TLSCert         string
-	TLSKey          string
-	WebhooksEnabled bool
-	PIDFile         string
+	LogFile    string
+	PIDFile    string
+	ServerHost string
+	ServerPort int
+	TLSEnabled bool
+	TLSCert    string
+	TLSKey     string
 }
 
+// NewState creates a new State object with default values
 func NewState() *State {
 	return &State{
 		Verbose:    false,

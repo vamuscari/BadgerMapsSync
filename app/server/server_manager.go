@@ -2,19 +2,45 @@ package server
 
 import (
 	"badgermaps/app/state"
+	"badgermaps/cli/action"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"strconv"
 	"syscall"
+
+	"github.com/robfig/cron/v3"
 )
+
+type CronJob struct {
+	Name     string                `yaml:"name"`
+	Schedule string                `yaml:"schedule"`
+	Action   action.ActionConfig `yaml:"action"`
+}
+
+type ActionExecutor interface {
+	ExecuteAction(action.ActionConfig) error
+}
 
 type ServerManager struct {
 	state *state.State
+	cron  *cron.Cron
 }
 
 func NewServerManager(state *state.State) *ServerManager {
-	return &ServerManager{state: state}
+	return &ServerManager{
+		state: state,
+	}
+}
+
+func (sm *ServerManager) Start(cronJobs []CronJob, actionExecutor ActionExecutor) {
+	sm.cron = cron.New()
+	for _, job := range cronJobs {
+		sm.cron.AddFunc(job.Schedule, func() {
+			actionExecutor.ExecuteAction(job.Action)
+		})
+	}
+	sm.cron.Start()
 }
 
 // GetServerStatus checks if the server process is running.
@@ -43,6 +69,9 @@ func (sm *ServerManager) GetServerStatus() (int, bool) {
 
 // StopServer stops the running server process.
 func (sm *ServerManager) StopServer() error {
+	if sm.cron != nil {
+		sm.cron.Stop()
+	}
 	pid, running := sm.GetServerStatus()
 	if !running {
 		// If we have a PID but the process isn't running, clean up the stale PID file.

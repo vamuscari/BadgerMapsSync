@@ -78,6 +78,8 @@ func TestSQLFiles(t *testing.T) {
 		"InsertConfigurations.sql",
 		"UpdateConfiguration.sql",
 		"CreateCommandLogTable.sql",
+		"CreateWebhookLogTable.sql",
+		"GetWebhookLog.sql",
 	}
 
 	postgresMssqlExtraFiles := []string{

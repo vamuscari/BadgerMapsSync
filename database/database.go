@@ -11,6 +11,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/fatih/color"
 	_ "github.com/lib/pq"               // PostgreSQL driver
@@ -1483,6 +1484,7 @@ func RequiredTables() []string {
 		"FieldMaps",
 		"Configurations",
 		"CommandLog",
+		"WebhookLog",
 	}
 }
 
@@ -1524,6 +1526,24 @@ func LogCommand(db DB, command string, args []string, success bool, errorMessage
 	sqlDB := db.GetDB()
 	_, err := sqlDB.Exec(sqlText, command, strings.Join(args, " "), success, errorMessage)
 	return err
+}
+
+func LogWebhook(db DB, receivedAt time.Time, method, uri, headers, body string) error {
+	sqlText := "INSERT INTO WebhookLog (ReceivedAt, Method, Uri, Headers, Body) VALUES (?, ?, ?, ?, ?)"
+	sqlDB := db.GetDB()
+	_, err := sqlDB.Exec(sqlText, receivedAt, method, uri, headers, body)
+	return err
+}
+
+func GetWebhookLog(db DB, id int) (method, uri, headers, body string, err error) {
+	sqlText := db.GetSQL("GetWebhookLog")
+	if sqlText == "" {
+		err = fmt.Errorf("unknown or unavailable SQL command: GetWebhookLog")
+		return
+	}
+	sqlDB := db.GetDB()
+	err = sqlDB.QueryRow(sqlText, id).Scan(&method, &uri, &headers, &body)
+	return
 }
 
 func GetExpectedSchema() map[string][]string {

@@ -12,14 +12,14 @@ import (
 )
 
 func PullAccount(a *app.App, accountID int) (err error) {
-	a.Events.Dispatch(events.Event{Type: events.PullStart, Source: "account", Payload: accountID})
+	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "account", Payload: events.PullStartPayload{ResourceID: accountID}})
 	a.Events.Dispatch(events.Infof("pull", "Pulling account with ID: %d", accountID))
 
 	defer func() {
 		if err != nil {
-			a.Events.Dispatch(events.Event{Type: events.PullError, Source: "account", Payload: err})
+			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "account", Payload: events.ErrorPayload{Error: err}})
 		} else {
-			a.Events.Dispatch(events.Event{Type: events.PullComplete, Source: "account", Payload: accountID})
+			a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "account", Payload: events.CompletionPayload{Success: true, Count: 1}})
 		}
 	}()
 
@@ -37,18 +37,18 @@ func PullAccount(a *app.App, accountID int) (err error) {
 }
 
 func PullGroupAccounts(a *app.App, top int, progressCallback func(current, total int)) (err error) {
-	a.Events.Dispatch(events.Event{Type: events.PullGroupStart, Source: "accounts"})
+	a.Events.Dispatch(events.Event{Type: "pull.group.start", Source: "accounts"})
 
 	defer func() {
 		if err != nil {
-			a.Events.Dispatch(events.Event{Type: events.PullGroupError, Source: "accounts", Payload: err})
+			a.Events.Dispatch(events.Event{Type: "pull.group.error", Source: "accounts", Payload: events.ErrorPayload{Error: err}})
 		}
 	}()
 
 	accountIDs, err := a.API.GetAccountIDs()
 	if err != nil {
 		err = fmt.Errorf("error getting account IDs: %w", err)
-		a.Events.Dispatch(events.Event{Type: events.PullError, Source: "accounts", Payload: err})
+		a.Events.Dispatch(events.Event{Type: "pull.error", Source: "accounts", Payload: events.ErrorPayload{Error: err}})
 		return err
 	}
 
@@ -56,7 +56,7 @@ func PullGroupAccounts(a *app.App, top int, progressCallback func(current, total
 		accountIDs = accountIDs[:top]
 	}
 	total := len(accountIDs)
-	a.Events.Dispatch(events.Event{Type: events.ResourceIDsFetched, Source: "accounts", Payload: total})
+	a.Events.Dispatch(events.Event{Type: "pull.ids_fetched", Source: "accounts", Payload: events.ResourceIDsFetchedPayload{Count: total}})
 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, a.MaxConcurrentRequests)
@@ -70,22 +70,22 @@ func PullGroupAccounts(a *app.App, top int, progressCallback func(current, total
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			a.Events.Dispatch(events.Event{Type: events.FetchDetailStart, Source: "accounts", Payload: accountID})
+			a.Events.Dispatch(events.Event{Type: "pull.fetch_detail.start", Source: "accounts", Payload: events.FetchDetailStartPayload{ResourceID: accountID}})
 			account, err := a.API.GetAccountDetailed(accountID)
 			if err != nil {
 				err = fmt.Errorf("error getting detailed account info for ID %d: %w", accountID, err)
-				a.Events.Dispatch(events.Event{Type: events.PullError, Source: "accounts", Payload: err})
+				a.Events.Dispatch(events.Event{Type: "pull.error", Source: "accounts", Payload: events.ErrorPayload{Error: err}})
 				errorChan <- err
 				return
 			}
-			a.Events.Dispatch(events.Event{Type: events.FetchDetailSuccess, Source: "accounts", Payload: account})
+			a.Events.Dispatch(events.Event{Type: "pull.fetch_detail.success", Source: "accounts", Payload: events.FetchDetailSuccessPayload{Data: account}})
 
 			if err := StoreAccountDetailed(a, account); err != nil {
 				err = fmt.Errorf("error storing account %d: %w", accountID, err)
-				a.Events.Dispatch(events.Event{Type: events.PullError, Source: "accounts", Payload: err})
+				a.Events.Dispatch(events.Event{Type: "pull.error", Source: "accounts", Payload: events.ErrorPayload{Error: err}})
 				errorChan <- err
 			} else {
-				a.Events.Dispatch(events.Event{Type: events.StoreSuccess, Source: "accounts", Payload: account})
+				a.Events.Dispatch(events.Event{Type: "pull.store.success", Source: "accounts", Payload: events.StoreSuccessPayload{Data: account}})
 			}
 			if progressCallback != nil {
 				progressCallback(index+1, total)
@@ -110,14 +110,14 @@ func PullGroupAccounts(a *app.App, top int, progressCallback func(current, total
 }
 
 func PullCheckin(a *app.App, checkinID int) (err error) {
-	a.Events.Dispatch(events.Event{Type: events.PullStart, Source: "check-in", Payload: checkinID})
+	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "check-in", Payload: events.PullStartPayload{ResourceID: checkinID}})
 	a.Events.Dispatch(events.Infof("pull", "Pulling checkin with ID: %d", checkinID))
 
 	defer func() {
 		if err != nil {
-			a.Events.Dispatch(events.Event{Type: events.PullError, Source: "check-in", Payload: err})
+			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "check-in", Payload: events.ErrorPayload{Error: err}})
 		} else {
-			a.Events.Dispatch(events.Event{Type: events.PullComplete, Source: "check-in", Payload: checkinID})
+			a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "check-in", Payload: events.CompletionPayload{Success: true, Count: 1}})
 		}
 	}()
 
@@ -135,22 +135,22 @@ func PullCheckin(a *app.App, checkinID int) (err error) {
 }
 
 func PullGroupCheckins(a *app.App, progressCallback func(current, total int)) (err error) {
-	a.Events.Dispatch(events.Event{Type: events.PullGroupStart, Source: "checkins"})
+	a.Events.Dispatch(events.Event{Type: "pull.group.start", Source: "checkins"})
 
 	defer func() {
 		if err != nil {
-			a.Events.Dispatch(events.Event{Type: events.PullGroupError, Source: "checkins", Payload: err})
+			a.Events.Dispatch(events.Event{Type: "pull.group.error", Source: "checkins", Payload: events.ErrorPayload{Error: err}})
 		}
 	}()
 
 	accountIDs, err := a.API.GetAccountIDs()
 	if err != nil {
 		err = fmt.Errorf("error getting account IDs: %w", err)
-		a.Events.Dispatch(events.Event{Type: events.PullError, Source: "checkins", Payload: err})
+		a.Events.Dispatch(events.Event{Type: "pull.error", Source: "checkins", Payload: events.ErrorPayload{Error: err}})
 		return err
 	}
 	total := len(accountIDs)
-	a.Events.Dispatch(events.Event{Type: events.ResourceIDsFetched, Source: "checkins", Payload: total})
+	a.Events.Dispatch(events.Event{Type: "pull.ids_fetched", Source: "checkins", Payload: events.ResourceIDsFetchedPayload{Count: total}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -173,16 +173,16 @@ func PullGroupCheckins(a *app.App, progressCallback func(current, total int)) (e
 			default:
 			}
 
-			a.Events.Dispatch(events.Event{Type: events.FetchDetailStart, Source: "checkins", Payload: accountID})
+			a.Events.Dispatch(events.Event{Type: "pull.fetch_detail.start", Source: "checkins", Payload: events.FetchDetailStartPayload{ResourceID: accountID}})
 			checkins, err := a.API.GetCheckinsForAccount(accountID)
 			if err != nil {
 				err = fmt.Errorf("error getting checkins for account ID %d: %w", accountID, err)
-				a.Events.Dispatch(events.Event{Type: events.PullError, Source: "checkins", Payload: err})
+				a.Events.Dispatch(events.Event{Type: "pull.error", Source: "checkins", Payload: events.ErrorPayload{Error: err}})
 				errorChan <- err
 				cancel() // Cancel context on first error
 				return
 			}
-			a.Events.Dispatch(events.Event{Type: events.FetchDetailSuccess, Source: "checkins", Payload: checkins})
+			a.Events.Dispatch(events.Event{Type: "pull.fetch_detail.success", Source: "checkins", Payload: events.FetchDetailSuccessPayload{Data: checkins}})
 
 			for _, checkin := range checkins {
 				select {
@@ -192,11 +192,11 @@ func PullGroupCheckins(a *app.App, progressCallback func(current, total int)) (e
 				}
 				if err := StoreCheckin(a, checkin); err != nil {
 					err = fmt.Errorf("error storing checkin %d: %w", checkin.CheckinId.Int64, err)
-					a.Events.Dispatch(events.Event{Type: events.PullError, Source: "checkins", Payload: err})
+					a.Events.Dispatch(events.Event{Type: "pull.error", Source: "checkins", Payload: events.ErrorPayload{Error: err}})
 					errorChan <- err
 					cancel() // Cancel context on first error
 				} else {
-					a.Events.Dispatch(events.Event{Type: events.StoreSuccess, Source: "checkins", Payload: checkin})
+					a.Events.Dispatch(events.Event{Type: "pull.store.success", Source: "checkins", Payload: events.StoreSuccessPayload{Data: checkin}})
 				}
 			}
 			if progressCallback != nil {
@@ -222,14 +222,14 @@ func PullGroupCheckins(a *app.App, progressCallback func(current, total int)) (e
 }
 
 func PullRoute(a *app.App, routeID int) (err error) {
-	a.Events.Dispatch(events.Event{Type: events.PullStart, Source: "route", Payload: routeID})
+	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "route", Payload: events.PullStartPayload{ResourceID: routeID}})
 	a.Events.Dispatch(events.Infof("pull", "Pulling route with ID: %d", routeID))
 
 	defer func() {
 		if err != nil {
-			a.Events.Dispatch(events.Event{Type: events.PullError, Source: "route", Payload: err})
+			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "route", Payload: events.ErrorPayload{Error: err}})
 		} else {
-			a.Events.Dispatch(events.Event{Type: events.PullComplete, Source: "route", Payload: routeID})
+			a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "route", Payload: events.CompletionPayload{Success: true, Count: 1}})
 		}
 	}()
 
@@ -247,22 +247,22 @@ func PullRoute(a *app.App, routeID int) (err error) {
 }
 
 func PullGroupRoutes(a *app.App, progressCallback func(current, total int)) (err error) {
-	a.Events.Dispatch(events.Event{Type: events.PullGroupStart, Source: "routes"})
+	a.Events.Dispatch(events.Event{Type: "pull.group.start", Source: "routes"})
 
 	defer func() {
 		if err != nil {
-			a.Events.Dispatch(events.Event{Type: events.PullGroupError, Source: "routes", Payload: err})
+			a.Events.Dispatch(events.Event{Type: "pull.group.error", Source: "routes", Payload: events.ErrorPayload{Error: err}})
 		}
 	}()
 
 	routes, err := a.API.GetRoutes()
 	if err != nil {
 		err = fmt.Errorf("error getting routes: %w", err)
-		a.Events.Dispatch(events.Event{Type: events.PullError, Source: "routes", Payload: err})
+		a.Events.Dispatch(events.Event{Type: "pull.error", Source: "routes", Payload: events.ErrorPayload{Error: err}})
 		return err
 	}
 	total := len(routes)
-	a.Events.Dispatch(events.Event{Type: events.ResourceIDsFetched, Source: "routes", Payload: total})
+	a.Events.Dispatch(events.Event{Type: "pull.ids_fetched", Source: "routes", Payload: events.ResourceIDsFetchedPayload{Count: total}})
 
 	errorCount := 0
 	for i, route := range routes {
@@ -273,33 +273,33 @@ func PullGroupRoutes(a *app.App, progressCallback func(current, total int)) (err
 			continue
 		}
 
-		a.Events.Dispatch(events.Event{Type: events.FetchDetailSuccess, Source: "routes", Payload: route})
+		a.Events.Dispatch(events.Event{Type: "pull.fetch_detail.success", Source: "routes", Payload: events.FetchDetailSuccessPayload{Data: route}})
 		if err := StoreRoute(a, route); err != nil {
 			err = fmt.Errorf("error storing route: %w", err)
-			a.Events.Dispatch(events.Event{Type: events.PullError, Source: "routes", Payload: err})
+			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "routes", Payload: events.ErrorPayload{Error: err}})
 			errorCount++
 		} else {
-			a.Events.Dispatch(events.Event{Type: events.StoreSuccess, Source: "routes", Payload: route})
+			a.Events.Dispatch(events.Event{Type: "pull.store.success", Source: "routes", Payload: events.StoreSuccessPayload{Data: route}})
 		}
 		if progressCallback != nil {
 			progressCallback(i+1, total)
 		}
 	}
 
-	a.Events.Dispatch(events.Event{Type: events.PullGroupComplete, Source: "routes", Payload: errorCount})
+	a.Events.Dispatch(events.Event{Type: "pull.group.complete", Source: "routes", Payload: events.CompletionPayload{Success: true, Count: total - errorCount}})
 	a.Events.Dispatch(events.Infof("pull", "Successfully pulled all routes"))
 	return nil
 }
 
 func PullProfile(a *app.App, progressCallback func(current, total int)) (err error) {
-	a.Events.Dispatch(events.Event{Type: events.PullStart, Source: "user profile"})
+	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "user profile"})
 	a.Events.Dispatch(events.Infof("pull", "Pulling user profile..."))
 
 	defer func() {
 		if err != nil {
-			a.Events.Dispatch(events.Event{Type: events.PullError, Source: "user profile", Payload: err})
+			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "user profile", Payload: events.ErrorPayload{Error: err}})
 		} else {
-			a.Events.Dispatch(events.Event{Type: events.PullComplete, Source: "user profile"})
+			a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "user profile", Payload: events.CompletionPayload{Success: true}})
 		}
 	}()
 

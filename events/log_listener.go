@@ -2,20 +2,44 @@ package events
 
 import (
 	"badgermaps/app/state"
-	"badgermaps/utils"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"time"
 )
 
-// LogListener handles log events and prints them to the console.
+// LogListener handles log events and prints them to the console or a file.
 type LogListener struct {
-	State *state.State
+	State  *state.State
+	writer io.Writer
+	file   *os.File
 }
 
 // NewLogListener creates a new LogListener.
-func NewLogListener(state *state.State) *LogListener {
-	return &LogListener{State: state}
+func NewLogListener(state *state.State, logFilePath string) (*LogListener, error) {
+	l := &LogListener{
+		State:  state,
+		writer: os.Stdout, // Default to stdout
+	}
+
+	if logFilePath != "" {
+		file, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open log file: %w", err)
+		}
+		l.file = file
+		l.writer = file
+	}
+
+	return l, nil
+}
+
+// Close closes the log file if it was opened.
+func (l *LogListener) Close() {
+	if l.file != nil {
+		l.file.Close()
+	}
 }
 
 // Handle processes the log event.
@@ -24,29 +48,7 @@ func (l *LogListener) Handle(e Event) {
 		return
 	}
 
-	// Handle Debug events separately as they have a different payload
-	if e.Type == Debug {
-		if !l.State.Debug {
-			return
-		}
-		msg, ok := e.Payload.(string)
-		if !ok {
-			return
-		}
-		timestamp := time.Now().Format("2006-01-02 15:04:05")
-		var sb strings.Builder
-		sb.WriteString(utils.Colors.Gray("%s", timestamp))
-		sb.WriteString(" ")
-		sb.WriteString(utils.Colors.Gray("%-5s", "DEBUG")) // Padded level
-		sb.WriteString(" ")
-		sb.WriteString(utils.Colors.Cyan("[%s]", e.Source))
-		sb.WriteString(" ")
-		sb.WriteString(msg)
-		fmt.Println(sb.String())
-		return
-	}
-
-	payload, ok := e.Payload.(LogEventPayload)
+	payload, ok := e.Payload.(LogPayload)
 	if !ok {
 		return // Not a log event we can handle
 	}
@@ -61,29 +63,11 @@ func (l *LogListener) Handle(e Event) {
 	levelStr := payload.Level.String()
 	sourceStr := e.Source
 
-	// Colorize level
-	var levelColor func(format string, a ...interface{}) string
-	switch payload.Level {
-	case LogLevelDebug:
-		levelColor = utils.Colors.Gray
-	case LogLevelInfo:
-		levelColor = utils.Colors.Blue
-	case LogLevelWarn:
-		levelColor = utils.Colors.Yellow
-	case LogLevelError:
-		levelColor = utils.Colors.Red
-	default:
-		levelColor = fmt.Sprintf // No color
-	}
-
 	// Build the log string
 	var sb strings.Builder
-	sb.WriteString(utils.Colors.Gray("%s", timestamp))
-	sb.WriteString(" ")
-	sb.WriteString(levelColor("%-5s", levelStr)) // Padded level
-	sb.WriteString(" ")
-	sb.WriteString(utils.Colors.Cyan("[%s]", sourceStr))
-	sb.WriteString(" ")
+	sb.WriteString(fmt.Sprintf("%s ", timestamp))
+	sb.WriteString(fmt.Sprintf("%-5s ", levelStr)) // Padded level
+	sb.WriteString(fmt.Sprintf("[%s] ", sourceStr))
 	sb.WriteString(payload.Message)
 
 	// Append fields if they exist
@@ -94,11 +78,13 @@ func (l *LogListener) Handle(e Event) {
 			if !first {
 				sb.WriteString(" ")
 			}
-			sb.WriteString(utils.Colors.Green("%s=", k))
+			sb.WriteString(fmt.Sprintf("%s=", k))
 			sb.WriteString(fmt.Sprintf("%v", v))
 			first = false
 		}
 	}
+	sb.WriteString("\n")
 
-	fmt.Println(sb.String())
+	// Write to the configured writer
+	fmt.Fprint(l.writer, sb.String())
 }

@@ -1,0 +1,8 @@
+CREATE TABLE WebhookLog (
+    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ReceivedAt DATETIME NOT NULL,
+    Method TEXT NOT NULL,
+    Uri TEXT NOT NULL,
+    Headers TEXT,
+    Body TEXT
+);
