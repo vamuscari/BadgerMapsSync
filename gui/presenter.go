@@ -9,6 +9,8 @@ import (
 	"badgermaps/events"
 	"fmt"
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"gopkg.in/yaml.v2"
 	"strconv"
@@ -115,60 +117,154 @@ func (p *GuiPresenter) HandlePullAccount(idStr string) {
 	}()
 }
 
-// HandleAccountSearch performs a search for accounts and displays the results.
-func (p *GuiPresenter) HandleAccountSearch(query string) {
-	p.app.Events.Dispatch(events.Debugf("presenter", "HandleAccountSearch called with query: %s", query))
-	p.view.ShowProgressBar("Searching Accounts...")
+// HandleOmniSearch performs a unified search across Accounts, Check-ins, and Routes.
+func (p *GuiPresenter) HandleOmniSearch(query string, scope string) {
+	p.app.Events.Dispatch(events.Debugf("presenter", "HandleOmniSearch called: q='%s', scope='%s'", query, scope))
+	p.view.ShowProgressBar("Searching...")
 	p.view.SetProgress(0)
+
+	type result struct {
+		Type string // account, checkin, route
+		ID   int
+		Name string
+		Meta string // optional, e.g., date
+	}
 
 	go func() {
 		defer p.view.HideProgressBar()
-		accounts, err := p.app.API.SearchAccounts(query)
+		var results []result
+
+		addAccounts := func() error {
+			rows, err := database.SearchAccounts(p.app.DB, query)
+			if err != nil {
+				return err
+			}
+			for _, a := range rows {
+				results = append(results, result{
+					Type: "account",
+					ID:   int(a.AccountId.Int64),
+					Name: a.FullName.String,
+				})
+			}
+			return nil
+		}
+		addRoutes := func() error {
+			rws, err := database.SearchRoutes(p.app.DB, query)
+			if err != nil {
+				return err
+			}
+			for _, r := range rws {
+				results = append(results, result{
+					Type: "route",
+					ID:   int(r.RouteId.Int64),
+					Name: r.Name.String,
+					Meta: r.RouteDate.String,
+				})
+			}
+			return nil
+		}
+		addCheckins := func() error {
+			chs, err := database.SearchCheckins(p.app.DB, query)
+			if err != nil {
+				return err
+			}
+			for _, c := range chs {
+				results = append(results, result{
+					Type: "checkin",
+					ID:   c.CheckinId,
+					Name: c.AccountName,
+					Meta: c.LogDatetime,
+				})
+			}
+			return nil
+		}
+
+		var err error
+		switch strings.ToLower(scope) {
+		case "accounts":
+			err = addAccounts()
+		case "check-ins", "checkins":
+			err = addCheckins()
+		case "routes":
+			err = addRoutes()
+		default: // All
+			if e := addAccounts(); e != nil {
+				err = e
+			}
+			if e := addCheckins(); e != nil && err == nil {
+				err = e
+			}
+			if e := addRoutes(); e != nil && err == nil {
+				err = e
+			}
+		}
+
 		if err != nil {
-			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
-			p.view.ShowToast("Error: Failed to search for accounts.")
-			return
-		}
-		p.view.SetProgress(1)
-
-		if len(accounts) == 0 {
-			p.view.ShowToast("No accounts found.")
+			p.app.Events.Dispatch(events.Errorf("presenter", "Search error: %v", err))
+			p.view.ShowToast("Error: search failed.")
 			return
 		}
 
-		// Create a list to display the results
-		data := make([]string, len(accounts))
-		for i, acc := range accounts {
-			data[i] = acc.FullName.String
+		if len(results) == 0 {
+			p.view.ShowToast("No matches found.")
+			return
+		}
+
+		data := make([]string, len(results))
+		for i, r := range results {
+			labelType := r.Type
+			if labelType == "checkin" {
+				if r.Meta != "" {
+					data[i] = fmt.Sprintf("Check-in • %s (#%d) @ %s", r.Name, r.ID, r.Meta)
+				} else {
+					data[i] = fmt.Sprintf("Check-in • %s (#%d)", r.Name, r.ID)
+				}
+			} else if labelType == "route" {
+				if r.Meta != "" {
+					data[i] = fmt.Sprintf("Route • %s (#%d) @ %s", r.Name, r.ID, r.Meta)
+				} else {
+					data[i] = fmt.Sprintf("Route • %s (#%d)", r.Name, r.ID)
+				}
+			} else {
+				data[i] = fmt.Sprintf("Account • %s (#%d)", r.Name, r.ID)
+			}
 		}
 
 		list := widget.NewList(
-			func() int {
-				return len(data)
-			},
-			func() fyne.CanvasObject {
-				return widget.NewLabel("template")
-			},
-			func(i widget.ListItemID, o fyne.CanvasObject) {
-				o.(*widget.Label).SetText(data[i])
-			},
+			func() int { return len(data) },
+			func() fyne.CanvasObject { return widget.NewLabel("template") },
+			func(i widget.ListItemID, o fyne.CanvasObject) { o.(*widget.Label).SetText(data[i]) },
 		)
 
 		list.OnSelected = func(id widget.ListItemID) {
-			selectedAccount := accounts[id]
-			// Show full details in the details view
+			r := results[id]
 			var details strings.Builder
-			details.WriteString(fmt.Sprintf("ID: %d\n", selectedAccount.AccountId.Int64))
-			details.WriteString(fmt.Sprintf("Name: %s\n", selectedAccount.FullName.String))
-			details.WriteString(fmt.Sprintf("Email: %s\n", selectedAccount.Email.String))
-			details.WriteString(fmt.Sprintf("Phone: %s\n", selectedAccount.PhoneNumber.String))
-			details.WriteString(fmt.Sprintf("Address: %s\n", selectedAccount.OriginalAddress.String))
+			typeLabel := r.Type
+			if len(typeLabel) > 0 {
+				typeLabel = strings.ToUpper(typeLabel[:1]) + typeLabel[1:]
+			}
+			details.WriteString(fmt.Sprintf("Type: %s\n", typeLabel))
+			details.WriteString(fmt.Sprintf("ID: %d\n", r.ID))
+			details.WriteString(fmt.Sprintf("Name: %s\n", r.Name))
+			if r.Meta != "" {
+				details.WriteString(fmt.Sprintf("Date: %s\n", r.Meta))
+			}
 
-			detailsLabel := NewWrappingLabel(details.String())
-			p.view.ShowDetails(detailsLabel)
+			pullBtn := widget.NewButtonWithIcon("Pull", theme.DownloadIcon(), func() {
+				switch r.Type {
+				case "account":
+					p.HandlePullAccount(strconv.Itoa(r.ID))
+				case "checkin":
+					p.HandlePullCheckin(strconv.Itoa(r.ID))
+				case "route":
+					p.HandlePullRoute(strconv.Itoa(r.ID))
+				}
+			})
+			p.view.ShowDetails(container.NewVBox(NewWrappingLabel(details.String()), pullBtn))
 		}
 
 		p.view.ShowDetails(list)
+		p.view.SetProgress(1)
 	}()
 }
 

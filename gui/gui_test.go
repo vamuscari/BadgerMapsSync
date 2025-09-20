@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -58,7 +59,7 @@ func findWidget(o fyne.CanvasObject, predicate func(fyne.CanvasObject) bool) fyn
 func TestOmniboxSearch(t *testing.T) {
 	// Create a mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/search/accounts" {
+		if strings.HasPrefix(r.URL.Path, "/search/accounts") {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`[{"id": 1, "full_name": "Test Account 1"}, {"id": 2, "full_name": "Test Account 2"}]`))
 		} else {
@@ -76,6 +77,10 @@ func TestOmniboxSearch(t *testing.T) {
 	a.DB, _ = database.NewDB(&database.DBConfig{Type: "sqlite3", Path: dbPath})
 	a.DB.Connect()
 	a.DB.EnforceSchema(&state.State{})
+	// Seed minimal data for DB-backed omnibox search
+	if _, err := a.DB.GetDB().Exec("INSERT INTO Accounts (AccountId, FullName) VALUES (1, 'Test Account 1'), (2, 'Test Account 2')"); err != nil {
+		t.Fatalf("failed seeding accounts: %v", err)
+	}
 	a.API.SetConnected(true)
 	a.DB.SetConnected(true)
 
@@ -91,7 +96,7 @@ func TestOmniboxSearch(t *testing.T) {
 	// Find the search entry and button using the helper
 	searchEntry := findWidget(ui.window.Canvas().Content(), func(o fyne.CanvasObject) bool {
 		if e, ok := o.(*widget.Entry); ok {
-			return e.PlaceHolder == "Search Accounts by ID or Name..."
+			return e.PlaceHolder == "Search by name or ID…" || e.PlaceHolder == "Search by name or ID..."
 		}
 		return false
 	})
@@ -114,10 +119,10 @@ func TestOmniboxSearch(t *testing.T) {
 	test.Tap(searchButton.(fyne.Tappable))
 
 	// Let the go routine in the presenter finish
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	// Verify that the results are displayed in the details view
-	resultsListObject := findWidget(ui.rightPane, func(o fyne.CanvasObject) bool {
+	resultsListObject := findWidget(ui.detailsView, func(o fyne.CanvasObject) bool {
 		_, ok := o.(*widget.List)
 		return ok
 	})

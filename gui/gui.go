@@ -2,8 +2,8 @@ package gui
 
 import (
 	"badgermaps/app"
-	"badgermaps/app/push"
 	"badgermaps/app/action"
+	"badgermaps/app/push"
 	"badgermaps/database"
 	"badgermaps/events"
 	"fmt"
@@ -581,40 +581,20 @@ func (ui *Gui) ShowDetails(details fyne.CanvasObject) {
 
 // createPullTab creates the content for the "Pull" tab
 func (ui *Gui) createPullTab() fyne.CanvasObject {
-	accountSearchEntry := widget.NewEntry()
-	accountSearchEntry.SetPlaceHolder("Search Accounts by ID or Name...")
-
-	accountSearchButton := widget.NewButtonWithIcon("", theme.SearchIcon(), func() {
-		ui.presenter.HandleAccountSearch(accountSearchEntry.Text)
+	omniEntry := widget.NewEntry()
+	omniEntry.SetPlaceHolder("Search by name or ID…")
+	omniScope := widget.NewSelect([]string{"All", "Accounts", "Check-ins", "Routes"}, nil)
+	omniScope.SetSelected("All")
+	omniSearchButton := widget.NewButtonWithIcon("", theme.SearchIcon(), func() {
+		ui.presenter.HandleOmniSearch(omniEntry.Text, omniScope.Selected)
 	})
-	accountSearchConfigButton := widget.NewButtonWithIcon("", theme.SettingsIcon(), func() {
-		// TODO: Implement configuration popup
-		ui.ShowToast("Configuration for account search is not yet implemented.")
+	omniConfigButton := widget.NewButtonWithIcon("", theme.SettingsIcon(), func() {
+		ui.ShowToast("Omnibox configuration not yet implemented.")
 	})
-
-	accountSearchBox := container.NewBorder(nil, nil, nil, container.NewHBox(accountSearchButton, accountSearchConfigButton), accountSearchEntry)
-
-	checkinIDEntry := widget.NewEntry()
-	checkinIDEntry.SetPlaceHolder("Check-in ID")
-	pullCheckinButton := widget.NewButtonWithIcon("Pull Check-in", theme.DownloadIcon(), func() {
-		ui.presenter.HandlePullCheckin(checkinIDEntry.Text)
-	})
-
-	routeIDEntry := widget.NewEntry()
-	routeIDEntry.SetPlaceHolder("Route ID")
-	pullRouteButton := widget.NewButtonWithIcon("Pull Route", theme.DownloadIcon(), func() {
-		ui.presenter.HandlePullRoute(routeIDEntry.Text)
-	})
+	omniBox := container.NewBorder(nil, nil, omniScope, container.NewHBox(omniSearchButton, omniConfigButton), omniEntry)
 
 	searchCard := widget.NewCard("Omnibox Search", "", container.NewVBox(
-		widget.NewLabel("Accounts"),
-		accountSearchBox,
-		widget.NewSeparator(),
-		widget.NewLabel("Check-ins"),
-		container.NewGridWithColumns(2, checkinIDEntry, pullCheckinButton),
-		widget.NewSeparator(),
-		widget.NewLabel("Routes"),
-		container.NewGridWithColumns(2, routeIDEntry, pullRouteButton),
+		omniBox,
 	))
 
 	pullAccountsButton := widget.NewButtonWithIcon("Pull All Accounts", theme.DownloadIcon(), ui.presenter.HandlePullAccounts)
