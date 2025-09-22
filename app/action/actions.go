@@ -72,7 +72,8 @@ func NewActionFromConfig(config ActionConfig) (Action, error) {
 	return action, nil
 }
 
-// ExecAction executes a shell command.
+// ExecAction executes a command using the platform shell by default.
+// Set UseShell to false to execute the binary directly with Args.
 type ExecAction struct {
 	Command  string   `yaml:"command"`
 	Args     []string `yaml:"args"`
