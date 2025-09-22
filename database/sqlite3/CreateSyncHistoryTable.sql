@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS SyncHistory (
     RunType TEXT NOT NULL,
     Direction TEXT NOT NULL,
     Source TEXT,
-    Trigger TEXT,
+    Initiator TEXT,
     Status TEXT NOT NULL,
     ItemsProcessed INTEGER DEFAULT 0,
     ErrorCount INTEGER DEFAULT 0,

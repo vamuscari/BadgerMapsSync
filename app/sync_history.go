@@ -156,7 +156,7 @@ func (a *App) startSyncHistoryRun(key, runType, direction, source, summary strin
 		RunType:        runType,
 		Direction:      direction,
 		Source:         source,
-		Trigger:        "manual",
+		Initiator:      "manual",
 		Status:         "running",
 		ItemsProcessed: 0,
 		ErrorCount:     0,

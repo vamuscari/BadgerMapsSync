@@ -5,7 +5,7 @@ CREATE TABLE SyncHistory (
     RunType NVARCHAR(40) NOT NULL,
     Direction NVARCHAR(40) NOT NULL,
     Source NVARCHAR(80),
-    Trigger NVARCHAR(40),
+    Initiator NVARCHAR(40),
     Status NVARCHAR(40) NOT NULL,
     ItemsProcessed INT DEFAULT 0,
     ErrorCount INT DEFAULT 0,

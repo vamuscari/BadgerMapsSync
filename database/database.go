@@ -1589,7 +1589,7 @@ func GetExpectedSchema() map[string][]string {
 			"CustomerId", "ApptTime", "Type", "PlaceId", "CreatedAt", "UpdatedAt",
 		},
 		"SyncHistory": {
-			"HistoryId", "CorrelationId", "RunType", "Direction", "Source", "Trigger", "Status", "ItemsProcessed", "ErrorCount",
+			"HistoryId", "CorrelationId", "RunType", "Direction", "Source", "Initiator", "Status", "ItemsProcessed", "ErrorCount",
 			"StartedAt", "CompletedAt", "DurationSeconds", "Summary", "Details",
 		},
 		"UserProfiles": {

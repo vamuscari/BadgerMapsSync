@@ -13,7 +13,7 @@ type SyncHistoryEntry struct {
 	RunType         string
 	Direction       string
 	Source          string
-	Trigger         string
+	Initiator       string
 	Status          string
 	ItemsProcessed  int
 	ErrorCount      int
@@ -45,13 +45,18 @@ func InsertSyncHistory(db DB, entry *SyncHistoryEntry) (int64, error) {
 		entry.Status = "running"
 	}
 
+	sqlText := db.GetSQL("InsertSyncHistory")
+	if sqlText == "" {
+		return 0, fmt.Errorf("unknown or unavailable SQL command: InsertSyncHistory")
+	}
+
 	sqlDB := db.GetDB()
 	args := []any{
 		entry.CorrelationID,
 		entry.RunType,
 		entry.Direction,
 		entry.Source,
-		entry.Trigger,
+		entry.Initiator,
 		entry.Status,
 		entry.ItemsProcessed,
 		entry.ErrorCount,
@@ -66,17 +71,11 @@ func InsertSyncHistory(db DB, entry *SyncHistoryEntry) (int64, error) {
 
 	switch db.GetType() {
 	case "postgres":
-		query := `INSERT INTO "SyncHistory" ("CorrelationId", "RunType", "Direction", "Source", "Trigger", "Status", "ItemsProcessed", "ErrorCount", "Summary", "Details")
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING "HistoryId"`
-		err = sqlDB.QueryRow(query, args...).Scan(&id)
+		err = sqlDB.QueryRow(sqlText, args...).Scan(&id)
 	case "mssql":
-		query := `INSERT INTO SyncHistory (CorrelationId, RunType, Direction, Source, Trigger, Status, ItemsProcessed, ErrorCount, Summary, Details)
-			OUTPUT INSERTED.HistoryId VALUES (@p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10)`
-		err = sqlDB.QueryRow(query, args...).Scan(&id)
+		err = sqlDB.QueryRow(sqlText, args...).Scan(&id)
 	default:
-		query := `INSERT INTO SyncHistory (CorrelationId, RunType, Direction, Source, Trigger, Status, ItemsProcessed, ErrorCount, Summary, Details)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-		result, execErr := sqlDB.Exec(query, args...)
+		result, execErr := sqlDB.Exec(sqlText, args...)
 		if execErr != nil {
 			return 0, execErr
 		}
@@ -97,20 +96,22 @@ func UpdateSyncHistoryMetrics(db DB, correlationID string, itemsProcessed int, s
 		return fmt.Errorf("database connection is not initialized")
 	}
 
+	sqlText := db.GetSQL("UpdateSyncHistoryMetrics")
+	if sqlText == "" {
+		return fmt.Errorf("unknown or unavailable SQL command: UpdateSyncHistoryMetrics")
+	}
+
 	sqlDB := db.GetDB()
 
 	switch db.GetType() {
 	case "postgres":
-		query := `UPDATE "SyncHistory" SET "ItemsProcessed" = $1, "Summary" = $2 WHERE "CorrelationId" = $3`
-		_, err := sqlDB.Exec(query, itemsProcessed, summary, correlationID)
+		_, err := sqlDB.Exec(sqlText, itemsProcessed, summary, correlationID)
 		return err
 	case "mssql":
-		query := `UPDATE SyncHistory SET ItemsProcessed = @p1, Summary = @p2 WHERE CorrelationId = @p3`
-		_, err := sqlDB.Exec(query, itemsProcessed, summary, correlationID)
+		_, err := sqlDB.Exec(sqlText, itemsProcessed, summary, correlationID)
 		return err
 	default:
-		query := `UPDATE SyncHistory SET ItemsProcessed = ?, Summary = ? WHERE CorrelationId = ?`
-		_, err := sqlDB.Exec(query, itemsProcessed, summary, correlationID)
+		_, err := sqlDB.Exec(sqlText, itemsProcessed, summary, correlationID)
 		return err
 	}
 }
@@ -121,44 +122,22 @@ func CompleteSyncHistory(db DB, correlationID, status string, itemsProcessed, er
 		return fmt.Errorf("database connection is not initialized")
 	}
 
+	sqlText := db.GetSQL("CompleteSyncHistory")
+	if sqlText == "" {
+		return fmt.Errorf("unknown or unavailable SQL command: CompleteSyncHistory")
+	}
+
 	sqlDB := db.GetDB()
 
 	switch db.GetType() {
 	case "postgres":
-		query := `UPDATE "SyncHistory"
-			SET "Status" = $1,
-			    "ItemsProcessed" = $2,
-			    "ErrorCount" = $3,
-			    "CompletedAt" = COALESCE("CompletedAt", CURRENT_TIMESTAMP),
-			    "DurationSeconds" = $4,
-			    "Summary" = $5,
-			    "Details" = $6
-			WHERE "CorrelationId" = $7`
-		_, err := sqlDB.Exec(query, status, itemsProcessed, errorCount, durationSeconds, summary, details, correlationID)
+		_, err := sqlDB.Exec(sqlText, status, itemsProcessed, errorCount, durationSeconds, summary, details, correlationID)
 		return err
 	case "mssql":
-		query := `UPDATE SyncHistory
-			SET Status = @p1,
-			    ItemsProcessed = @p2,
-			    ErrorCount = @p3,
-			    CompletedAt = ISNULL(CompletedAt, SYSDATETIME()),
-			    DurationSeconds = @p4,
-			    Summary = @p5,
-			    Details = @p6
-			WHERE CorrelationId = @p7`
-		_, err := sqlDB.Exec(query, status, itemsProcessed, errorCount, durationSeconds, summary, details, correlationID)
+		_, err := sqlDB.Exec(sqlText, status, itemsProcessed, errorCount, durationSeconds, summary, details, correlationID)
 		return err
 	default:
-		query := `UPDATE SyncHistory
-			SET Status = ?,
-			    ItemsProcessed = ?,
-			    ErrorCount = ?,
-			    CompletedAt = COALESCE(CompletedAt, CURRENT_TIMESTAMP),
-			    DurationSeconds = ?,
-			    Summary = ?,
-			    Details = ?
-			WHERE CorrelationId = ?`
-		_, err := sqlDB.Exec(query, status, itemsProcessed, errorCount, durationSeconds, summary, details, correlationID)
+		_, err := sqlDB.Exec(sqlText, status, itemsProcessed, errorCount, durationSeconds, summary, details, correlationID)
 		return err
 	}
 }
@@ -172,22 +151,14 @@ func GetRecentSyncHistory(db DB, limit int) ([]SyncHistoryEntry, error) {
 		limit = 20
 	}
 
-	sqlDB := db.GetDB()
-
-	var query string
-	switch db.GetType() {
-	case "postgres":
-		query = fmt.Sprintf(`SELECT HistoryId, CorrelationId, RunType, Direction, Source, Trigger, Status, ItemsProcessed, ErrorCount, StartedAt, CompletedAt, DurationSeconds, Summary, Details
-			FROM SyncHistory ORDER BY StartedAt DESC LIMIT %d`, limit)
-	case "mssql":
-		query = fmt.Sprintf(`SELECT TOP (%d) HistoryId, CorrelationId, RunType, Direction, Source, Trigger, Status, ItemsProcessed, ErrorCount, StartedAt, CompletedAt, DurationSeconds, Summary, Details
-			FROM SyncHistory ORDER BY StartedAt DESC`, limit)
-	default:
-		query = fmt.Sprintf(`SELECT HistoryId, CorrelationId, RunType, Direction, Source, Trigger, Status, ItemsProcessed, ErrorCount, StartedAt, CompletedAt, DurationSeconds, Summary, Details
-			FROM SyncHistory ORDER BY StartedAt DESC LIMIT %d`, limit)
+	sqlText := db.GetSQL("GetRecentSyncHistory")
+	if sqlText == "" {
+		return nil, fmt.Errorf("unknown or unavailable SQL command: GetRecentSyncHistory")
 	}
 
-	rows, err := sqlDB.Query(query)
+	sqlDB := db.GetDB()
+
+	rows, err := sqlDB.Query(sqlText, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +179,7 @@ func GetRecentSyncHistory(db DB, limit int) ([]SyncHistoryEntry, error) {
 			&entry.RunType,
 			&entry.Direction,
 			&entry.Source,
-			&entry.Trigger,
+			&entry.Initiator,
 			&entry.Status,
 			&entry.ItemsProcessed,
 			&entry.ErrorCount,
