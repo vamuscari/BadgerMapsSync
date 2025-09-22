@@ -1482,6 +1482,7 @@ func RequiredTables() []string {
 		"DataSetValues",
 		"FieldMaps",
 		"Configurations",
+		"SyncHistory",
 		"CommandLog",
 		"WebhookLog",
 	}
@@ -1586,6 +1587,10 @@ func GetExpectedSchema() map[string][]string {
 			"WaypointId", "RouteId", "Name", "Address", "Suite", "City", "State", "Zipcode", "Location",
 			"Latitude", "Longitude", "LayoverMinutes", "Position", "CompleteAddress", "LocationId",
 			"CustomerId", "ApptTime", "Type", "PlaceId", "CreatedAt", "UpdatedAt",
+		},
+		"SyncHistory": {
+			"HistoryId", "CorrelationId", "RunType", "Direction", "Source", "Trigger", "Status", "ItemsProcessed", "ErrorCount",
+			"StartedAt", "CompletedAt", "DurationSeconds", "Summary", "Details",
 		},
 		"UserProfiles": {
 			"ProfileId", "Email", "FirstName", "LastName", "IsManager", "IsHideReferralIOSBanner",

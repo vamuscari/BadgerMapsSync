@@ -2083,14 +2083,18 @@ func (ui *Gui) loadPaginatedTableData(tableName string, page, pageSize int) *Pag
 		}
 		for i, val := range row {
 			if val == nil {
-				rowData[i] = "NULL"
+				rowData[i] = ""
+				continue
+			}
+			v := val.(*interface{})
+			if v == nil || *v == nil {
+				rowData[i] = ""
+				continue
+			}
+			if b, ok := (*v).([]byte); ok {
+				rowData[i] = string(b)
 			} else {
-				v := val.(*interface{})
-				if b, ok := (*v).([]byte); ok {
-					rowData[i] = string(b)
-				} else {
-					rowData[i] = fmt.Sprintf("%v", *v)
-				}
+				rowData[i] = fmt.Sprintf("%v", *v)
 			}
 		}
 		data = append(data, rowData)

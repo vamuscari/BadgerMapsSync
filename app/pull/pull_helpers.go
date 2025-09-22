@@ -105,7 +105,12 @@ func PullGroupAccounts(a *app.App, top int, progressCallback func(current, total
 		err = fmt.Errorf("encountered errors during account pull:\n- %s", strings.Join(pullErrors, "\n- "))
 	}
 
-	a.Events.Dispatch(events.Infof("pull", "Successfully pulled all accounts"))
+	if err == nil {
+		a.Events.Dispatch(events.Event{Type: "pull.group.complete", Source: "accounts", Payload: events.CompletionPayload{Success: true, Count: total}})
+		a.Events.Dispatch(events.Infof("pull", "Successfully pulled all accounts"))
+	} else {
+		a.Events.Dispatch(events.Infof("pull", "Finished pulling accounts with errors"))
+	}
 	return err
 }
 
@@ -217,7 +222,12 @@ func PullGroupCheckins(a *app.App, progressCallback func(current, total int)) (e
 		err = fmt.Errorf("encountered errors during check-in pull:\n- %s", strings.Join(pullErrors, "\n- "))
 	}
 
-	a.Events.Dispatch(events.Infof("pull", "Finished pulling all checkins"))
+	if err == nil {
+		a.Events.Dispatch(events.Event{Type: "pull.group.complete", Source: "checkins", Payload: events.CompletionPayload{Success: true, Count: total}})
+		a.Events.Dispatch(events.Infof("pull", "Finished pulling all checkins"))
+	} else {
+		a.Events.Dispatch(events.Infof("pull", "Finished pulling checkins with errors"))
+	}
 	return err
 }
 

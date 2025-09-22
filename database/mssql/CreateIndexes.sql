@@ -18,4 +18,7 @@ IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IdxRouteWaypointsRouteId'
 CREATE INDEX IdxRouteWaypointsRouteId ON RouteWaypoints(RouteId);
 
 IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IdxAccountLocationsAccountId')
-CREATE INDEX IdxAccountLocationsAccountId ON AccountLocations(AccountId); 
+CREATE INDEX IdxAccountLocationsAccountId ON AccountLocations(AccountId);
+
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IdxSyncHistoryStartedAt')
+CREATE INDEX IdxSyncHistoryStartedAt ON SyncHistory(StartedAt DESC);

@@ -43,6 +43,7 @@ func TestSQLFiles(t *testing.T) {
 		"CreateIndexes.sql",
 		"CreateRouteWaypointsTable.sql",
 		"CreateRoutesTable.sql",
+		"CreateSyncHistoryTable.sql",
 		"CreateUserProfilesTable.sql",
 		"DeleteAccountLocations.sql",
 		"DeleteDataSetValues.sql",

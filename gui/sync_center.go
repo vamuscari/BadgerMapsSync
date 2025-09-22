@@ -68,6 +68,7 @@ type SyncCenter struct {
 
 	// Progress container
 	progressContainer *fyne.Container
+	historyContainer  *fyne.Container
 
 	// Current state - thread safe
 	currentOperation string
@@ -401,50 +402,137 @@ func (sc *SyncCenter) createBatchActions() fyne.CanvasObject {
 }
 
 func (sc *SyncCenter) createSyncHistoryView() fyne.CanvasObject {
-	// Mock sync history data
-	historyData := [][]string{
-		{"2024-01-15 14:30", "Pull", "Success", "50 accounts, 120 check-ins", "2m 15s"},
-		{"2024-01-15 10:00", "Push", "Success", "5 accounts updated", "30s"},
-		{"2024-01-14 16:45", "Two-way", "Failed", "Network error", "5s"},
-		{"2024-01-14 09:00", "Pull", "Success", "Full sync completed", "5m 42s"},
-	}
+	sc.historyContainer = container.NewMax(widget.NewLabel("Loading history..."))
+	sc.refreshHistoryView()
 
-	headers := []string{"Time", "Type", "Status", "Summary", "Duration"}
-
-	// Use the enhanced table factory for consistent formatting
-	factory := NewTableFactory(sc.ui)
-	config := TableConfig{
-		Headers:       headers,
-		Data:          historyData,
-		HasCheckboxes: false,
-		StatusColumn:  2, // Status column
-		ColumnWidths: map[int]float32{
-			0: 120, // Time
-			1: 80,  // Type
-			2: 80,  // Status
-			3: 200, // Summary (wider, will be auto-truncated)
-			4: 80,  // Duration
-		},
-	}
-
-	table := factory.CreateAutoTruncatedTable(config)
-
-	// Add action buttons for history items
 	viewDetailsBtn := widget.NewButtonWithIcon("View Details", theme.InfoIcon(), func() {
-		// Show selected history item details
+		// Future enhancement: show detailed run information
 	})
 
 	rerunBtn := widget.NewButtonWithIcon("Re-run", theme.ViewRefreshIcon(), func() {
-		// Re-run selected sync operation
+		// Future enhancement: re-run selected sync operation
 	})
 
 	exportBtn := widget.NewButtonWithIcon("Export History", theme.DocumentSaveIcon(), func() {
-		// Export sync history
+		// Future enhancement: export sync history entries
 	})
 
-	actions := container.NewHBox(viewDetailsBtn, rerunBtn, layout.NewSpacer(), exportBtn)
+	refreshBtn := widget.NewButtonWithIcon("Refresh History", theme.ViewRefreshIcon(), func() {
+		sc.refreshHistoryView()
+	})
+	refreshBtn.Importance = widget.HighImportance
 
-	return container.NewBorder(nil, actions, nil, nil, table)
+	actions := container.NewHBox(viewDetailsBtn, rerunBtn, exportBtn, layout.NewSpacer(), refreshBtn)
+
+	return container.NewBorder(nil, actions, nil, nil, sc.historyContainer)
+}
+
+func (sc *SyncCenter) refreshHistoryView() {
+	if sc.historyContainer == nil {
+		return
+	}
+
+	if sc.ui.app.DB == nil || !sc.ui.app.DB.IsConnected() {
+		sc.historyContainer.Objects = []fyne.CanvasObject{widget.NewLabel("Connect to the database to view sync history.")}
+		sc.historyContainer.Refresh()
+		return
+	}
+
+	entries, err := database.GetRecentSyncHistory(sc.ui.app.DB, 50)
+	if err != nil {
+		sc.ui.app.Events.Dispatch(events.Errorf("sync_center", "Failed to load sync history: %v", err))
+		sc.historyContainer.Objects = []fyne.CanvasObject{widget.NewLabel("Unable to load sync history.")}
+		sc.historyContainer.Refresh()
+		return
+	}
+
+	if len(entries) == 0 {
+		sc.historyContainer.Objects = []fyne.CanvasObject{widget.NewLabel("No sync runs recorded yet.")}
+		sc.historyContainer.Refresh()
+		return
+	}
+
+	table := sc.buildHistoryTable(entries)
+	sc.historyContainer.Objects = []fyne.CanvasObject{table}
+	sc.historyContainer.Refresh()
+}
+
+func (sc *SyncCenter) buildHistoryTable(entries []database.SyncHistoryEntry) fyne.CanvasObject {
+	headers := []string{"Started", "Run", "Status", "Items", "Errors", "Duration", "Summary"}
+	data := make([][]string, len(entries))
+
+	for i, entry := range entries {
+		started := "-"
+		if !entry.StartedAt.IsZero() {
+			started = entry.StartedAt.Local().Format("2006-01-02 15:04")
+		}
+
+		runLabel := strings.Title(entry.RunType)
+		if entry.Source != "" {
+			runLabel = fmt.Sprintf("%s • %s", runLabel, friendlyHistoryLabel(entry.Source))
+		}
+
+		status := prettifyHistoryStatus(entry.Status)
+		items := fmt.Sprintf("%d", entry.ItemsProcessed)
+		errors := fmt.Sprintf("%d", entry.ErrorCount)
+		duration := formatHistoryDuration(entry.DurationSeconds, entry.StartedAt, entry.CompletedAt)
+		summary := entry.Summary
+		if strings.TrimSpace(summary) == "" {
+			summary = "-"
+		}
+
+		data[i] = []string{started, runLabel, status, items, errors, duration, summary}
+	}
+
+	factory := NewTableFactory(sc.ui)
+	config := TableConfig{
+		Headers:       headers,
+		Data:          data,
+		HasCheckboxes: false,
+		StatusColumn:  2,
+		ColumnWidths: map[int]float32{
+			0: 140,
+			1: 200,
+			2: 140,
+			3: 80,
+			4: 80,
+			5: 100,
+			6: 260,
+		},
+	}
+
+	return factory.CreateAutoTruncatedTable(config)
+}
+
+func formatHistoryDuration(seconds int, started time.Time, completed *time.Time) string {
+	if seconds <= 0 && !started.IsZero() && completed != nil && !completed.IsZero() {
+		seconds = int(completed.Sub(started).Seconds())
+	}
+	if seconds <= 0 {
+		return "-"
+	}
+	duration := time.Duration(seconds) * time.Second
+	if duration < time.Second {
+		return "<1s"
+	}
+	return duration.String()
+}
+
+func prettifyHistoryStatus(status string) string {
+	if status == "" {
+		return "-"
+	}
+	status = strings.ReplaceAll(status, "_", " ")
+	status = strings.TrimSpace(status)
+	return strings.Title(status)
+}
+
+func friendlyHistoryLabel(source string) string {
+	if source == "" {
+		return "General"
+	}
+	replacer := strings.NewReplacer("_", " ", "-", " ")
+	return strings.Title(replacer.Replace(source))
 }
 
 func (sc *SyncCenter) createConflictsView() fyne.CanvasObject {

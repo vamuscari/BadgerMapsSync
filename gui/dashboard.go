@@ -6,6 +6,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"image/color"
@@ -45,9 +46,14 @@ func (d *SmartDashboard) CreateContent() fyne.CanvasObject {
 			d.ui.RefreshHomeTab()
 		}
 	})
+	refreshBtn.Importance = widget.HighImportance
+	refreshBtnWrapper := container.New(
+		layout.NewGridWrapLayout(fyne.NewSize(220, refreshBtn.MinSize().Height)),
+		refreshBtn,
+	)
 	footer := container.NewVBox(
 		widget.NewSeparator(),
-		container.NewCenter(refreshBtn),
+		container.NewCenter(refreshBtnWrapper),
 	)
 
 	// Show recent activity in the details panel on load (if UI is fully initialized)

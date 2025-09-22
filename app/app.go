@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -49,6 +50,10 @@ type App struct {
 	LogListener    *events.LogListener
 
 	MaxConcurrentRequests int
+
+	syncHistoryRuns map[string]*syncHistoryRun
+	syncHistoryMu   sync.Mutex
+	syncHistoryOnce bool
 }
 
 func (a *App) Close() {
@@ -110,6 +115,7 @@ func NewApp() *App {
 	a.State.PIDFile = utils.GetConfigDirFile(".badgermaps.pid")
 	a.Events = events.NewEventDispatcher()
 	a.Server = server.NewServerManager(a.State)
+	a.syncHistoryRuns = make(map[string]*syncHistoryRun)
 
 	return a
 }
@@ -197,6 +203,8 @@ func (a *App) LoadConfig() error {
 	if a.MaxConcurrentRequests < 1 || a.MaxConcurrentRequests > 10 {
 		a.MaxConcurrentRequests = 5
 	}
+
+	a.ensureSyncHistoryTracking()
 
 	return nil
 }

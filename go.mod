@@ -6,6 +6,7 @@ toolchain go1.24.4
 
 require (
 	github.com/fatih/color v1.15.0
+	github.com/google/uuid v1.3.0
 	github.com/lib/pq v1.10.9
 	github.com/mattn/go-sqlite3 v1.14.17
 	github.com/microsoft/go-mssqldb v1.6.0
