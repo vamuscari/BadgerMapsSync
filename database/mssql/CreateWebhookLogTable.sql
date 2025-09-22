@@ -1,3 +1,4 @@
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='WebhookLog' AND xtype='U')
 CREATE TABLE WebhookLog (
     Id INT PRIMARY KEY IDENTITY,
     ReceivedAt DATETIME NOT NULL,

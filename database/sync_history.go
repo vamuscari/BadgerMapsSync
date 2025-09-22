@@ -3,6 +3,8 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -155,10 +157,11 @@ func GetRecentSyncHistory(db DB, limit int) ([]SyncHistoryEntry, error) {
 	if sqlText == "" {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: GetRecentSyncHistory")
 	}
+	sqlText = strings.Replace(sqlText, "{{LIMIT}}", strconv.Itoa(limit), 1)
 
 	sqlDB := db.GetDB()
 
-	rows, err := sqlDB.Query(sqlText, limit)
+	rows, err := sqlDB.Query(sqlText)
 	if err != nil {
 		return nil, err
 	}

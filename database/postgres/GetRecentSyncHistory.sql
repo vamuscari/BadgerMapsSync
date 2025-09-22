@@ -14,4 +14,4 @@ SELECT "HistoryId",
        "Details"
 FROM "SyncHistory"
 ORDER BY "StartedAt" DESC
-LIMIT $1;
+LIMIT {{LIMIT}};
