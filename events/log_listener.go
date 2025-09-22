@@ -59,13 +59,17 @@ func (l *LogListener) Handle(e Event) {
 	}
 
 	// Prepare output parts
-	timestamp := time.Now().Format("2006-01-02 15:04:05")
+	timestamp := payload.Timestamp
+	if timestamp.IsZero() {
+		timestamp = time.Now()
+	}
+	timestampStr := timestamp.Format("2006-01-02 15:04:05")
 	levelStr := payload.Level.String()
 	sourceStr := e.Source
 
 	// Build the log string
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%s ", timestamp))
+	sb.WriteString(fmt.Sprintf("%s ", timestampStr))
 	sb.WriteString(fmt.Sprintf("%-5s ", levelStr)) // Padded level
 	sb.WriteString(fmt.Sprintf("[%s] ", sourceStr))
 	sb.WriteString(payload.Message)

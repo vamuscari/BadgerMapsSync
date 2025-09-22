@@ -17,7 +17,18 @@ const (
 
 // String returns the string representation of a LogLevel.
 func (l LogLevel) String() string {
-	return [...]string{"DEBUG", "WARN", "INFO", "ERROR"}[l]
+	switch l {
+	case LogLevelDebug:
+		return "DEBUG"
+	case LogLevelInfo:
+		return "INFO"
+	case LogLevelWarn:
+		return "WARN"
+	case LogLevelError:
+		return "ERROR"
+	default:
+		return fmt.Sprintf("UNKNOWN(%d)", l)
+	}
 }
 
 // EventType is a string-based identifier for an event (e.g., "pull.start").
@@ -198,23 +209,51 @@ type EventListener func(e Event)
 
 // --- For Action Configuration ---
 
+var eventTypeOptions = []string{
+	"action.config.created",
+	"action.config.deleted",
+	"action.config.updated",
+	"action.error",
+	"action.success",
+	"connection.status.changed",
+	"log",
+	"pull.complete",
+	"pull.error",
+	"pull.fetch_detail.start",
+	"pull.fetch_detail.success",
+	"pull.group.complete",
+	"pull.group.error",
+	"pull.group.start",
+	"pull.ids_fetched",
+	"pull.start",
+	"pull.store.success",
+	"push.complete",
+	"push.error",
+	"push.item.error",
+	"push.item.start",
+	"push.item.success",
+	"push.scan.complete",
+	"push.scan.start",
+}
+
+var eventSourceOptions = []string{
+	"",
+	"account",
+	"accounts",
+	"check-in",
+	"checkins",
+	"events",
+	"route",
+	"routes",
+	"user profile",
+}
+
 // AllEventTypes returns a slice of all event type strings suitable for user configuration.
 func AllEventTypes() []string {
-	return []string{
-		"pull.complete",
-		"push.complete",
-		"action.success",
-		"action.error",
-	}
+	return append([]string(nil), eventTypeOptions...)
 }
 
 // AllEventSources returns a slice of all event source strings suitable for user configuration.
 func AllEventSources() []string {
-	return []string{
-		"",
-		"accounts",
-		"checkins",
-		"routes",
-		"user_profile",
-	}
+	return append([]string(nil), eventSourceOptions...)
 }

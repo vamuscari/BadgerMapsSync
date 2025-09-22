@@ -19,6 +19,7 @@ import (
 	fapp "fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
@@ -195,6 +196,18 @@ type Gui struct {
 
 	terminalVisible bool
 	tabs            *container.AppTabs // Hold a reference to the tabs container
+
+	// Explorer references for cross-navigation
+	explorerTableSelect     *widget.Select
+	explorerLoadPage        func(tableName string, page, pageSize int)
+	explorerCurrentPageSize int
+
+	// New components
+	syncCenter     *SyncCenter
+	welcomeScreen  *WelcomeScreen
+	smartDashboard *SmartDashboard
+	tableFactory   *TableFactory
+	showWelcome    bool
 }
 
 // Launch initializes and runs the GUI
@@ -218,6 +231,18 @@ func Launch(a *app.App, icon fyne.Resource) {
 	// Create and link the presenter
 	presenter := NewGuiPresenter(a, ui)
 	ui.presenter = presenter
+
+	// Create new components
+	ui.syncCenter = NewSyncCenter(ui, presenter)
+	ui.smartDashboard = NewSmartDashboard(ui, presenter)
+
+	// Initialize table factory for consistent table creation
+	if ui.tableFactory == nil {
+		ui.tableFactory = NewTableFactory(ui)
+	}
+
+	// Check if we should show welcome screen (first time setup or no config)
+	ui.showWelcome = (a.API == nil || a.API.APIKey == "") || (a.DB == nil || a.DB.GetType() == "")
 
 	// Subscribe to events to refresh the events tab
 	eventListener := func(e events.Event) {
@@ -290,12 +315,24 @@ func Launch(a *app.App, icon fyne.Resource) {
 	a.Events.Subscribe("connection.status.changed", connectionListener)
 
 	window.SetContent(ui.createContent())
-	window.Resize(fyne.NewSize(1280, 720))
+	// Set more reasonable default size and allow proper resizing
+	window.Resize(fyne.NewSize(1000, 600))
+	window.SetFixedSize(false) // Allow resizing
+	window.CenterOnScreen()
 	window.ShowAndRun()
 }
 
 // createContent builds the main content of the window
 func (ui *Gui) createContent() fyne.CanvasObject {
+	if ui.showWelcome {
+		// Show welcome screen on first launch
+		ui.welcomeScreen = NewWelcomeScreen(ui.app, ui.presenter, func() {
+			// When welcome is complete, switch to main content
+			ui.showWelcome = false
+			ui.window.SetContent(ui.createMainContent())
+		})
+		return ui.welcomeScreen.CreateContent()
+	}
 	return ui.createMainContent()
 }
 
@@ -305,32 +342,28 @@ func (ui *Gui) createMainContent() fyne.CanvasObject {
 
 	// Define all tabs first
 	homeTab := container.NewTabItemWithIcon("Home", theme.HomeIcon(), ui.createHomeTab())
-	actionsTab := container.NewTabItemWithIcon("Actions", theme.ListIcon(), ui.createActionsTab())
-	serverTab := container.NewTabItemWithIcon("Server", theme.ComputerIcon(), ui.createServerTab())
 	configTab := container.NewTabItemWithIcon("Configuration", theme.SettingsIcon(), ui.createConfigTab())
 
 	// Conditionally create content for tabs that depend on configuration
-	var pullContent, pushContent, explorerContent fyne.CanvasObject
+	var syncContent, explorerContent fyne.CanvasObject
 	if ui.app.API != nil && ui.app.API.IsConnected() && ui.app.DB != nil && ui.app.DB.IsConnected() {
-		pullContent = ui.createPullTab()
-		pushContent = ui.createPushTab()
+		syncContent = ui.syncCenter.CreateContent()
 		explorerContent = ui.createExplorerTab()
 	} else {
-		pullContent = ui.createDisabledTabView(configTab)
-		pushContent = ui.createDisabledTabView(configTab)
+		syncContent = ui.createDisabledTabView(configTab)
 		explorerContent = ui.createDisabledTabView(configTab)
 	}
 
-	pullTab := container.NewTabItemWithIcon("Pull", theme.DownloadIcon(), pullContent)
-	pushTab := container.NewTabItemWithIcon("Push", theme.UploadIcon(), pushContent)
+	syncTab := container.NewTabItemWithIcon("Sync Center", theme.ViewRefreshIcon(), syncContent)
 	explorerTab := container.NewTabItemWithIcon("Explorer", theme.FolderIcon(), explorerContent)
+	actionsTab := container.NewTabItemWithIcon("Actions", theme.ListIcon(), ui.createActionsTab())
+	serverTab := container.NewTabItemWithIcon("Server", theme.ComputerIcon(), ui.createServerTab())
 
 	tabs := []*container.TabItem{
 		homeTab,
-		pullTab,
-		pushTab,
-		actionsTab,
+		syncTab,
 		explorerTab,
+		actionsTab,
 		serverTab,
 		configTab,
 	}
@@ -376,11 +409,17 @@ func (ui *Gui) createMainContent() fyne.CanvasObject {
 	ui.rightPane = rightPaneContent
 
 	split := container.NewHSplit(mainContent, ui.rightPane)
-	split.Offset = 0.7
+	split.Offset = 0.75 // Give more space to main content
 	return split
 }
 
 func (ui *Gui) createHomeTab() fyne.CanvasObject {
+	// Use the new smart dashboard
+	if ui.smartDashboard != nil {
+		return ui.smartDashboard.CreateContent()
+	}
+
+	// Fallback to original home tab if smart dashboard not initialized
 	// Config Status
 	configValid := ui.app.API != nil && ui.app.DB != nil
 	configStatusText := "Invalid"
@@ -451,11 +490,18 @@ func (ui *Gui) createHomeTab() fyne.CanvasObject {
 
 	refreshButton := widget.NewButtonWithIcon("Refresh Status", theme.ViewRefreshIcon(), ui.presenter.HandleRefreshStatus)
 
-	return container.NewVScroll(container.NewVBox(
+	body := container.NewVBox(
 		widget.NewLabelWithStyle("Welcome to BadgerMaps Sync", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
 		statusCard,
-		refreshButton,
-	))
+	)
+
+	return container.NewBorder(
+		nil,
+		container.NewCenter(refreshButton),
+		nil,
+		nil,
+		container.NewVScroll(body),
+	)
 }
 
 // RefreshAllTabs rebuilds the main tabs, which is useful when connection status changes.
@@ -472,14 +518,12 @@ func (ui *Gui) RefreshAllTabs() {
 		}
 	}
 
-	var pullContent, pushContent, explorerContent fyne.CanvasObject
+	var syncContent, explorerContent fyne.CanvasObject
 	if ui.app.API != nil && ui.app.API.IsConnected() && ui.app.DB != nil && ui.app.DB.IsConnected() {
-		pullContent = ui.createPullTab()
-		pushContent = ui.createPushTab()
+		syncContent = ui.syncCenter.CreateContent()
 		explorerContent = ui.createExplorerTab()
 	} else {
-		pullContent = ui.createDisabledTabView(configTabItem)
-		pushContent = ui.createDisabledTabView(configTabItem)
+		syncContent = ui.createDisabledTabView(configTabItem)
 		explorerContent = ui.createDisabledTabView(configTabItem)
 	}
 
@@ -487,10 +531,8 @@ func (ui *Gui) RefreshAllTabs() {
 		switch tab.Text {
 		case "Home":
 			tab.Content = ui.createHomeTab()
-		case "Pull":
-			tab.Content = pullContent
-		case "Push":
-			tab.Content = pushContent
+		case "Sync Center":
+			tab.Content = syncContent
 		case "Explorer":
 			tab.Content = explorerContent
 		case "Configuration":
@@ -782,7 +824,29 @@ func (ui *Gui) createActionsTab() fyne.CanvasObject {
 				labelText = fmt.Sprintf("Exec: %s", ac.Args["command"])
 			case "db":
 				iconResource = theme.StorageIcon()
-				labelText = fmt.Sprintf("DB: %s", ac.Args["function"])
+				labelText = func() string {
+					if ac.Args == nil {
+						return "DB action"
+					}
+					if cmd, ok := ac.Args["command"].(string); ok && cmd != "" {
+						return fmt.Sprintf("DB command: %s", cmd)
+					}
+					if fn, ok := ac.Args["function"].(string); ok && fn != "" {
+						return fmt.Sprintf("DB function: %s", fn)
+					}
+					if proc, ok := ac.Args["procedure"].(string); ok && proc != "" {
+						return fmt.Sprintf("DB procedure: %s", proc)
+					}
+					if query, ok := ac.Args["query"].(string); ok && query != "" {
+						trimmed := strings.TrimSpace(query)
+						runes := []rune(trimmed)
+						if len(runes) > 32 {
+							trimmed = string(runes[:32]) + "..."
+						}
+						return fmt.Sprintf("DB query: %s", trimmed)
+					}
+					return "DB action"
+				}()
 			case "api":
 				iconResource = theme.ComputerIcon()
 				labelText = fmt.Sprintf("API: %s", ac.Args["endpoint"])
@@ -840,10 +904,16 @@ func (ui *Gui) createActionPopup(eventAction *action.EventAction, actionIndex in
 		}
 	}
 
-	eventEntry := widget.NewSelect(events.AllEventTypes(), nil)
-	eventEntry.SetSelected(event)
-	sourceEntry := widget.NewSelect(events.AllEventSources(), nil)
-	sourceEntry.SetSelected(source)
+	eventEntry := widget.NewSelectEntry(events.AllEventTypes())
+	eventEntry.SetPlaceHolder("e.g. pull.complete")
+	if event != "" {
+		eventEntry.SetText(event)
+	}
+	sourceEntry := widget.NewSelectEntry(events.AllEventSources())
+	sourceEntry.SetPlaceHolder("Leave blank for any source")
+	if source != "" {
+		sourceEntry.SetText(source)
+	}
 
 	// --- Exec Tab ---
 	execCommandEntry := widget.NewEntry()
@@ -867,14 +937,61 @@ func (ui *Gui) createActionPopup(eventAction *action.EventAction, actionIndex in
 	execTab := container.NewTabItemWithIcon("Exec", theme.FileApplicationIcon(), execForm)
 
 	// --- DB Tab ---
+	dbCommandEntry := widget.NewEntry()
 	dbFunctionEntry := widget.NewEntry()
-	if actionConfig.Type == "db" {
-		if fn, ok := actionConfig.Args["function"].(string); ok {
+	dbProcedureEntry := widget.NewEntry()
+	dbQueryEntry := widget.NewMultiLineEntry()
+	dbQueryEntry.SetPlaceHolder("SELECT ...")
+
+	dbActionType := "command"
+	if actionConfig.Type == "db" && actionConfig.Args != nil {
+		if cmd, ok := actionConfig.Args["command"].(string); ok && cmd != "" {
+			dbActionType = "command"
+			dbCommandEntry.SetText(cmd)
+		} else if fn, ok := actionConfig.Args["function"].(string); ok && fn != "" {
+			dbActionType = "function"
 			dbFunctionEntry.SetText(fn)
+		} else if proc, ok := actionConfig.Args["procedure"].(string); ok && proc != "" {
+			dbActionType = "procedure"
+			dbProcedureEntry.SetText(proc)
+		} else if query, ok := actionConfig.Args["query"].(string); ok && query != "" {
+			dbActionType = "query"
+			dbQueryEntry.SetText(query)
 		}
 	}
-	dbForm := widget.NewForm(widget.NewFormItem("Function", dbFunctionEntry))
-	dbTab := container.NewTabItemWithIcon("Database", theme.StorageIcon(), dbForm)
+
+	dbActionTypeRadio := widget.NewRadioGroup([]string{"command", "function", "procedure", "query"}, nil)
+	dbActionTypeRadio.Required = true
+	dbActionTypeRadio.Horizontal = true
+
+	dbForms := map[string]*widget.Form{
+		"command":   widget.NewForm(widget.NewFormItem("Command Key", dbCommandEntry)),
+		"function":  widget.NewForm(widget.NewFormItem("Function Name", dbFunctionEntry)),
+		"procedure": widget.NewForm(widget.NewFormItem("Procedure Name", dbProcedureEntry)),
+		"query":     widget.NewForm(widget.NewFormItem("SQL Query", dbQueryEntry)),
+	}
+
+	dbInputContainer := container.NewMax()
+	showDbInput := func(selection string) {
+		form, ok := dbForms[selection]
+		if !ok {
+			form = dbForms["command"]
+		}
+		dbInputContainer.Objects = []fyne.CanvasObject{form}
+		dbInputContainer.Refresh()
+	}
+
+	dbActionTypeRadio.SetSelected(dbActionType)
+	showDbInput(dbActionType)
+	dbActionTypeRadio.OnChanged = func(selection string) {
+		showDbInput(selection)
+	}
+
+	dbTabContent := container.NewVBox(
+		widget.NewForm(widget.NewFormItem("Action Type", dbActionTypeRadio)),
+		dbInputContainer,
+	)
+	dbTab := container.NewTabItemWithIcon("Database", theme.StorageIcon(), dbTabContent)
 
 	// --- API Tab ---
 	apiEndpointEntry := widget.NewEntry()
@@ -974,7 +1091,33 @@ func (ui *Gui) createActionPopup(eventAction *action.EventAction, actionIndex in
 			newAction.Args["command"] = command
 		case "Database":
 			newAction.Type = "db"
-			newAction.Args["function"] = dbFunctionEntry.Text
+			if actionConfig.Type == "db" && actionConfig.Args != nil {
+				for k, v := range actionConfig.Args {
+					newAction.Args[k] = v
+				}
+			}
+			for _, key := range []string{"command", "function", "procedure", "query"} {
+				delete(newAction.Args, key)
+			}
+			selectedKind := dbActionTypeRadio.Selected
+			switch selectedKind {
+			case "command":
+				if val := strings.TrimSpace(dbCommandEntry.Text); val != "" {
+					newAction.Args["command"] = val
+				}
+			case "function":
+				if val := strings.TrimSpace(dbFunctionEntry.Text); val != "" {
+					newAction.Args["function"] = val
+				}
+			case "procedure":
+				if val := strings.TrimSpace(dbProcedureEntry.Text); val != "" {
+					newAction.Args["procedure"] = val
+				}
+			case "query":
+				if val := strings.TrimSpace(dbQueryEntry.Text); val != "" {
+					newAction.Args["query"] = val
+				}
+			}
 		case "API":
 			newAction.Type = "api"
 			newAction.Args["endpoint"] = apiEndpointEntry.Text
@@ -991,8 +1134,29 @@ func (ui *Gui) createActionPopup(eventAction *action.EventAction, actionIndex in
 			}
 		}
 
+		eventValue := strings.TrimSpace(eventEntry.Text)
+		if eventValue == "" {
+			ui.app.Events.Dispatch(events.Warningf("gui", "Event type is required"))
+			return
+		}
+		sourceValue := strings.TrimSpace(sourceEntry.Text)
+
+		if newAction.Type == "db" {
+			hasSpecifier := false
+			for _, key := range []string{"command", "function", "procedure", "query"} {
+				if _, ok := newAction.Args[key]; ok {
+					hasSpecifier = true
+					break
+				}
+			}
+			if !hasSpecifier {
+				ui.app.Events.Dispatch(events.Warningf("gui", "Select a database action type and provide a value"))
+				return
+			}
+		}
+
 		if eventAction == nil {
-			err := ui.app.AddEventAction(eventEntry.Selected, sourceEntry.Selected, newAction)
+			err := ui.app.AddEventAction(eventValue, sourceValue, newAction)
 			if err != nil {
 				ui.app.Events.Dispatch(events.Errorf("gui", "Error adding action: %v", err))
 			}
@@ -1008,135 +1172,291 @@ func (ui *Gui) createActionPopup(eventAction *action.EventAction, actionIndex in
 	d.Show()
 }
 
-// createExplorerTab creates the content for the "Explorer" tab
+// createExplorerTab creates the content for the "Explorer" tab with pagination support
 func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 	tableContainer := container.NewMax() // Use NewMax to fill available space
+
+	// Pagination state
+	var currentTableName string
+	var currentPaginatedData *PaginatedTableData
+	var searchEntry *widget.Entry
+	var pageInfoLabel *widget.Label
+	var prevBtn, nextBtn, firstPageBtn, lastPageBtn *widget.Button
+	var pageSizeSelect *widget.Select
+
+	// Page size options with descriptions for better UX
+	pageSizeOptions := []string{"10", "25", "50", "100", "250", "500", "1000"}
+	currentPageSize := 50
+	ui.explorerCurrentPageSize = currentPageSize
+
+	// Function to load a specific page
+	loadPage := func(tableName string, page int, pageSize int) {
+		if tableName == "" {
+			return
+		}
+
+		ui.app.Events.Dispatch(events.Infof("gui", "Explorer: Loading page %d of table '%s'", page+1, tableName))
+
+		// Load paginated data
+		paginatedData := ui.loadPaginatedTableData(tableName, page, pageSize)
+		if paginatedData == nil {
+			tableContainer.Objects = []fyne.CanvasObject{widget.NewLabel("Error loading table data")}
+			tableContainer.Refresh()
+			return
+		}
+
+		currentPaginatedData = paginatedData
+		currentTableName = tableName
+
+		// Create table using the table factory
+		factory := NewTableFactory(ui)
+		config := TableConfig{
+			Headers:       paginatedData.Headers,
+			Data:          paginatedData.Data,
+			HasCheckboxes: false, // Explorer doesn't need checkboxes
+		}
+
+		// Create auto-truncated table for better display
+		table := factory.CreateAutoTruncatedTable(config)
+
+		// Update page info with row range
+		startRow := paginatedData.CurrentPage*paginatedData.PageSize + 1
+		endRow := startRow + len(paginatedData.Data) - 1
+		if len(paginatedData.Data) == 0 {
+			startRow = 0
+			endRow = 0
+		}
+
+		pageInfoLabel.SetText(fmt.Sprintf("Page %d of %d | Rows %d-%d of %d",
+			paginatedData.CurrentPage+1, paginatedData.TotalPages, startRow, endRow, paginatedData.TotalRows))
+
+		// Update pagination buttons
+		prevBtn.Disable()
+		nextBtn.Disable()
+		firstPageBtn.Disable()
+		lastPageBtn.Disable()
+
+		if paginatedData.TotalPages > 1 {
+			if paginatedData.CurrentPage > 0 {
+				prevBtn.Enable()
+				firstPageBtn.Enable()
+			}
+			if paginatedData.CurrentPage < paginatedData.TotalPages-1 {
+				nextBtn.Enable()
+				lastPageBtn.Enable()
+			}
+		}
+
+		// Clear search when changing pages
+		if searchEntry != nil {
+			searchEntry.SetText("")
+		}
+
+		tableContainer.Objects = []fyne.CanvasObject{table}
+		tableContainer.Refresh()
+	}
+
+	ui.explorerLoadPage = loadPage
+
+	// Table selection
 	tableSelect := widget.NewSelect([]string{}, func(tableName string) {
-		ui.app.Events.Dispatch(events.Infof("gui", "Explorer: Loading table '%s'", tableName))
 		if tableName == "" {
 			tableContainer.Objects = nil
 			tableContainer.Refresh()
 			return
 		}
+		loadPage(tableName, 0, currentPageSize)
+	})
+	ui.explorerTableSelect = tableSelect
 
-		var query string
-		dbType := ui.app.DB.GetType()
-		switch dbType {
-		case "mssql":
-			query = fmt.Sprintf("SELECT TOP 100 * FROM %s", tableName)
-		default: // sqlite3 and postgres
-			query = fmt.Sprintf("SELECT * FROM %s LIMIT 100", tableName)
-		}
-
-		rows, err := ui.app.DB.ExecuteQuery(query)
-		if err != nil {
-			ui.app.Events.Dispatch(events.Errorf("gui", "Error executing query: %v", err))
-			tableContainer.Objects = []fyne.CanvasObject{widget.NewLabel(fmt.Sprintf("Error: %v", err))}
-			tableContainer.Refresh()
+	// Search functionality (searches within current page results)
+	searchEntry = widget.NewEntry()
+	searchEntry.SetPlaceHolder("Search current page...")
+	searchEntry.OnChanged = func(query string) {
+		if currentPaginatedData == nil {
 			return
 		}
-		defer rows.Close()
 
-		columns, err := rows.Columns()
-		if err != nil {
-			ui.app.Events.Dispatch(events.Errorf("gui", "Error getting columns: %v", err))
-			tableContainer.Objects = []fyne.CanvasObject{widget.NewLabel(fmt.Sprintf("Error: %v", err))}
-			tableContainer.Refresh()
-			return
-		}
-		ui.app.Events.Dispatch(events.Infof("gui", "Explorer: Found %d columns in '%s'", len(columns), tableName))
-
-		var data [][]string
-		for rows.Next() {
-			row := make([]interface{}, len(columns))
-			rowData := make([]string, len(columns))
-			for i := range row {
-				row[i] = new(interface{})
-			}
-			if err := rows.Scan(row...); err != nil {
-				ui.app.Events.Dispatch(events.Errorf("gui", "Error scanning row: %v", err))
-				continue
-			}
-			for i, val := range row {
-				if val == nil {
-					rowData[i] = "NULL"
-				} else {
-					v := val.(*interface{})
-					if b, ok := (*v).([]byte); ok {
-						rowData[i] = string(b)
-					} else {
-						rowData[i] = fmt.Sprintf("%v", *v)
+		// Filter current page data
+		var filteredData [][]string
+		if query == "" {
+			// Show all data from current page
+			filteredData = currentPaginatedData.Data
+		} else {
+			query = strings.ToLower(query)
+			for _, row := range currentPaginatedData.Data {
+				for _, cell := range row {
+					if strings.Contains(strings.ToLower(cell), query) {
+						filteredData = append(filteredData, row)
+						break
 					}
 				}
 			}
-			data = append(data, rowData)
-		}
-		ui.app.Events.Dispatch(events.Infof("gui", "Explorer: Found %d rows in '%s'", len(data), tableName))
-
-		if len(data) == 0 {
-			tableContainer.Objects = []fyne.CanvasObject{widget.NewLabel("No rows in this table.")}
-			tableContainer.Refresh()
-			return
 		}
 
-		// Calculate column widths
-		colWidths := make([]float32, len(columns))
-		for i, colName := range columns {
-			headerSize := fyne.MeasureText(colName, theme.TextSize(), fyne.TextStyle{Bold: true})
-			maxWidth := headerSize.Width
-
-			for _, rowData := range data {
-				if i < len(rowData) {
-					cellSize := fyne.MeasureText(rowData[i], theme.TextSize(), fyne.TextStyle{})
-					if cellSize.Width > maxWidth {
-						maxWidth = cellSize.Width
-					}
-				}
-			}
-			colWidths[i] = maxWidth + 10 // Add some padding
+		// Recreate table with filtered data
+		factory := NewTableFactory(ui)
+		config := TableConfig{
+			Headers:       currentPaginatedData.Headers,
+			Data:          filteredData,
+			HasCheckboxes: false,
 		}
 
-		dataTable := widget.NewTable(
-			func() (int, int) { return len(data) + 1, len(columns) },
-			func() fyne.CanvasObject { return widget.NewLabel("template") },
-			func(i widget.TableCellID, o fyne.CanvasObject) {
-				label := o.(*widget.Label)
-				if i.Row == 0 { // Header
-					label.SetText(columns[i.Col])
-					label.TextStyle = fyne.TextStyle{Bold: true}
-				} else {
-					label.SetText(data[i.Row-1][i.Col])
-					label.TextStyle = fyne.TextStyle{}
-				}
-			},
-		)
-
-		dataTable.OnSelected = func(id widget.TableCellID) {
-			if id.Row < 0 { // Deselection event
-				return
-			}
-			if id.Row == 0 { // Header
-				dataTable.Unselect(id)
-				return
-			}
-			selectedData := data[id.Row-1]
-
-			var details strings.Builder
-			for i, header := range columns {
-				details.WriteString(fmt.Sprintf("%s: %s\n", header, selectedData[i]))
-			}
-
-			detailsLabel := widget.NewLabel(details.String())
-			detailsLabel.Wrapping = fyne.TextWrapWord
-			ui.ShowDetails(container.NewScroll(detailsLabel))
-		}
-
-		for i, width := range colWidths {
-			dataTable.SetColumnWidth(i, width)
-		}
-
-		tableContainer.Objects = []fyne.CanvasObject{dataTable}
+		table := factory.CreateAutoTruncatedTable(config)
+		tableContainer.Objects = []fyne.CanvasObject{table}
 		tableContainer.Refresh()
+	}
+
+	// Page size selection
+	pageSizeSelect = widget.NewSelect(pageSizeOptions, func(selected string) {
+		if selected == "" {
+			return
+		}
+
+		newPageSize := 50 // default
+		switch selected {
+		case "10":
+			newPageSize = 10
+		case "25":
+			newPageSize = 25
+		case "50":
+			newPageSize = 50
+		case "100":
+			newPageSize = 100
+		case "250":
+			newPageSize = 250
+		case "500":
+			newPageSize = 500
+		case "1000":
+			newPageSize = 1000
+		}
+
+		if newPageSize != currentPageSize {
+			currentPageSize = newPageSize
+			ui.explorerCurrentPageSize = currentPageSize
+			if currentTableName != "" {
+				loadPage(currentTableName, 0, currentPageSize) // Reset to first page
+			}
+		}
+	})
+	pageSizeSelect.SetSelected("50")
+
+	// Pagination controls
+	pageInfoLabel = widget.NewLabel("No data loaded")
+
+	prevBtn = widget.NewButtonWithIcon("", theme.NavigateBackIcon(), func() {
+		if currentPaginatedData != nil && currentPaginatedData.CurrentPage > 0 {
+			loadPage(currentTableName, currentPaginatedData.CurrentPage-1, currentPageSize)
+		}
+	})
+	prevBtn.Disable()
+
+	nextBtn = widget.NewButtonWithIcon("", theme.NavigateNextIcon(), func() {
+		if currentPaginatedData != nil && currentPaginatedData.CurrentPage < currentPaginatedData.TotalPages-1 {
+			loadPage(currentTableName, currentPaginatedData.CurrentPage+1, currentPageSize)
+		}
+	})
+	nextBtn.Disable()
+
+	firstPageBtn = widget.NewButtonWithIcon("", theme.MediaSkipPreviousIcon(), func() {
+		if currentPaginatedData != nil && currentPaginatedData.CurrentPage > 0 {
+			loadPage(currentTableName, 0, currentPageSize)
+		}
+	})
+
+	lastPageBtn = widget.NewButtonWithIcon("", theme.MediaSkipNextIcon(), func() {
+		if currentPaginatedData != nil && currentPaginatedData.CurrentPage < currentPaginatedData.TotalPages-1 {
+			loadPage(currentTableName, currentPaginatedData.TotalPages-1, currentPageSize)
+		}
+	})
+	firstPageBtn.Disable()
+	lastPageBtn.Disable()
+
+	// Go to page functionality
+	gotoPageEntry := widget.NewEntry()
+	gotoPageEntry.SetPlaceHolder("#")
+	gotoPageEntry.Resize(fyne.NewSize(50, gotoPageEntry.MinSize().Height))
+
+	gotoPageBtn := widget.NewButton("Go", func() {
+		if currentPaginatedData == nil {
+			return
+		}
+
+		pageText := gotoPageEntry.Text
+		if pageText == "" {
+			return
+		}
+
+		var targetPage int
+		if _, err := fmt.Sscanf(pageText, "%d", &targetPage); err != nil {
+			ui.app.Events.Dispatch(events.Errorf("gui", "Invalid page number: %s", pageText))
+			return
+		}
+
+		// Convert to 0-based indexing and validate
+		targetPage--
+		if targetPage < 0 {
+			targetPage = 0
+		}
+		if targetPage >= currentPaginatedData.TotalPages {
+			targetPage = currentPaginatedData.TotalPages - 1
+		}
+
+		if targetPage != currentPaginatedData.CurrentPage {
+			loadPage(currentTableName, targetPage, currentPageSize)
+		}
+
+		gotoPageEntry.SetText("")
+	})
+
+	// Export current page data
+	exportBtn := widget.NewButtonWithIcon("Export Page", theme.DocumentSaveIcon(), func() {
+		if currentPaginatedData == nil || len(currentPaginatedData.Data) == 0 {
+			ui.app.Events.Dispatch(events.Infof("gui", "No data to export"))
+			return
+		}
+
+		// Create CSV content
+		var csvContent strings.Builder
+
+		// Add headers
+		csvContent.WriteString(strings.Join(currentPaginatedData.Headers, ","))
+		csvContent.WriteString("\n")
+
+		// Add data rows
+		for _, row := range currentPaginatedData.Data {
+			// Escape fields that contain commas or quotes
+			var escapedRow []string
+			for _, field := range row {
+				if strings.Contains(field, ",") || strings.Contains(field, "\"") || strings.Contains(field, "\n") {
+					field = "\"" + strings.ReplaceAll(field, "\"", "\"\"") + "\""
+				}
+				escapedRow = append(escapedRow, field)
+			}
+			csvContent.WriteString(strings.Join(escapedRow, ","))
+			csvContent.WriteString("\n")
+		}
+
+		// Save dialog
+		dialog.ShowFileSave(func(writer fyne.URIWriteCloser, err error) {
+			if err != nil {
+				ui.app.Events.Dispatch(events.Errorf("gui", "Error opening file for export: %v", err))
+				return
+			}
+			if writer == nil {
+				return // User cancelled
+			}
+			defer writer.Close()
+
+			_, err = writer.Write([]byte(csvContent.String()))
+			if err != nil {
+				ui.app.Events.Dispatch(events.Errorf("gui", "Error writing export file: %v", err))
+				return
+			}
+
+			ui.app.Events.Dispatch(events.Infof("gui", "Exported %d rows from %s (page %d) to %s",
+				len(currentPaginatedData.Data), currentTableName, currentPaginatedData.CurrentPage+1, writer.URI().Path()))
+		}, ui.window)
 	})
 
 	refreshButton := widget.NewButtonWithIcon("Refresh", theme.ViewRefreshIcon(), func() {
@@ -1151,10 +1471,15 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 			tableSelect.Refresh()
 			tableContainer.Objects = nil
 			tableContainer.Refresh()
+			pageInfoLabel.SetText("No data loaded")
+			prevBtn.Disable()
+			nextBtn.Disable()
+			firstPageBtn.Disable()
+			lastPageBtn.Disable()
 		}()
 	})
 
-	// Initial load
+	// Initial table list load
 	go func() {
 		tables, err := ui.app.DB.GetTables()
 		if err != nil {
@@ -1165,12 +1490,163 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 		tableSelect.Refresh()
 	}()
 
-	topContent := container.NewVBox(
-		widget.NewLabelWithStyle("Database Explorer", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		container.NewHBox(tableSelect, refreshButton),
+	// Layout - simplified top section
+	topRow := container.NewHBox(
+		widget.NewLabel("Table:"),
+		tableSelect,
+		refreshButton,
+		layout.NewSpacer(),
+		searchEntry,
 	)
 
-	return container.NewVScroll(container.NewBorder(topContent, nil, nil, nil, tableContainer))
+	topContent := container.NewVBox(
+		widget.NewLabelWithStyle("Database Explorer", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		topRow,
+	)
+
+	// Create a refresh data button for the pagination bar
+	refreshDataBtn := widget.NewButtonWithIcon("Refresh Data", theme.ViewRefreshIcon(), func() {
+		if currentTableName != "" && currentPaginatedData != nil {
+			loadPage(currentTableName, currentPaginatedData.CurrentPage, currentPageSize)
+		}
+	})
+
+	// Comprehensive bottom pagination bar
+	leftSection := container.NewHBox(
+		widget.NewLabel("Rows:"),
+		pageSizeSelect,
+		widget.NewSeparator(),
+		exportBtn,
+		refreshDataBtn,
+	)
+
+	centerSection := container.NewHBox(
+		firstPageBtn,
+		prevBtn,
+		widget.NewLabel(" "),
+		pageInfoLabel,
+		widget.NewLabel(" "),
+		nextBtn,
+		lastPageBtn,
+	)
+
+	rightSection := container.NewHBox(
+		widget.NewLabel("Jump to:"),
+		gotoPageEntry,
+		gotoPageBtn,
+	)
+
+	// Create a comprehensive pagination toolbar
+	paginationBar := container.NewBorder(
+		nil, nil,
+		leftSection,
+		rightSection,
+		container.NewCenter(centerSection),
+	)
+
+	// Add visual styling to the pagination bar with minimal padding
+	paginationBarStyled := container.NewVBox(
+		widget.NewSeparator(),
+		container.NewHBox( // Use HBox instead of Padded to reduce vertical space
+			widget.NewLabel(" "), // Small left spacer
+			paginationBar,
+			widget.NewLabel(" "), // Small right spacer
+		),
+	)
+
+	return container.NewVScroll(container.NewBorder(topContent, paginationBarStyled, nil, nil, tableContainer))
+}
+
+// OpenExplorerPendingChanges switches to the explorer tab and selects a pending changes table.
+func (ui *Gui) OpenExplorerPendingChanges() bool {
+	tableCandidates := []string{"AccountsPendingChanges", "AccountCheckinsPendingChanges"}
+	for _, table := range tableCandidates {
+		if ui.OpenExplorerTable(table) {
+			return true
+		}
+	}
+
+	ui.ShowToast("Pending changes tables are not available in the database.")
+	return false
+}
+
+// OpenExplorerTable activates the explorer tab and loads the specified table.
+func (ui *Gui) OpenExplorerTable(tableName string) bool {
+	if ui.app == nil || ui.app.DB == nil || !ui.app.DB.IsConnected() {
+		ui.ShowToast("Connect to the database to browse tables in Explorer.")
+		return false
+	}
+
+	if ui.tabs == nil {
+		return false
+	}
+
+	explorerIndex := -1
+	for idx, tab := range ui.tabs.Items {
+		if tab.Text == "Explorer" {
+			explorerIndex = idx
+			break
+		}
+	}
+	if explorerIndex == -1 {
+		ui.ShowToast("Explorer tab is not available.")
+		return false
+	}
+	ui.tabs.SelectIndex(explorerIndex)
+
+	if ui.explorerTableSelect == nil {
+		ui.ShowToast("Explorer controls are not initialized yet.")
+		return false
+	}
+
+	if !ui.ensureExplorerTableOption(tableName) {
+		ui.ShowToast(fmt.Sprintf("Table %s is not available.", tableName))
+		return false
+	}
+
+	if ui.explorerTableSelect.Selected != tableName {
+		ui.explorerTableSelect.SetSelected(tableName)
+	} else if ui.explorerLoadPage != nil {
+		pageSize := ui.explorerCurrentPageSize
+		if pageSize <= 0 {
+			pageSize = 50
+		}
+		ui.explorerLoadPage(tableName, 0, pageSize)
+	}
+
+	return true
+}
+
+func (ui *Gui) ensureExplorerTableOption(tableName string) bool {
+	if ui.explorerTableSelect == nil {
+		return false
+	}
+
+	if containsString(ui.explorerTableSelect.Options, tableName) {
+		return true
+	}
+
+	if ui.app != nil && ui.app.DB != nil && ui.app.DB.IsConnected() {
+		tables, err := ui.app.DB.GetTables()
+		if err != nil {
+			ui.app.Events.Dispatch(events.Errorf("gui", "Error refreshing explorer tables: %v", err))
+			return false
+		}
+		ui.explorerTableSelect.Options = tables
+		ui.explorerTableSelect.Refresh()
+		return containsString(tables, tableName)
+	}
+
+	return false
+}
+
+func containsString(haystack []string, needle string) bool {
+	for _, value := range haystack {
+		if value == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // createServerTab creates the content for the "Server" tab
@@ -1500,4 +1976,197 @@ func NewWrappingLabel(text string) *WrappingLabel {
 // CreateRenderer implements the Widget interface
 func (l *WrappingLabel) CreateRenderer() fyne.WidgetRenderer {
 	return widget.NewSimpleRenderer(l.label)
+}
+
+// TableData holds table structure for unified table handling
+type TableData struct {
+	Headers []string
+	Data    [][]string
+}
+
+// PaginatedTableData contains table data with pagination info
+type PaginatedTableData struct {
+	TableData
+	TotalRows   int
+	CurrentPage int
+	PageSize    int
+	TotalPages  int
+}
+
+// loadTableData loads data from a database table using unified approach
+func (ui *Gui) loadTableData(tableName string) *TableData {
+	paginatedData := ui.loadPaginatedTableData(tableName, 0, 100)
+	return &paginatedData.TableData
+}
+
+// loadPaginatedTableData loads a specific page of data from a database table
+func (ui *Gui) loadPaginatedTableData(tableName string, page, pageSize int) *PaginatedTableData {
+	if pageSize <= 0 {
+		pageSize = 50 // Default page size
+	}
+	if page < 0 {
+		page = 0
+	}
+
+	// First, get the total count
+	totalRows := ui.getTableRowCount(tableName)
+	totalPages := (totalRows + pageSize - 1) / pageSize
+	if totalPages == 0 {
+		totalPages = 1
+	}
+
+	// Ensure page is within bounds
+	if page >= totalPages {
+		page = totalPages - 1
+	}
+
+	offset := page * pageSize
+
+	// Build paginated query
+	var query string
+	dbType := ui.app.DB.GetType()
+	switch dbType {
+	case "mssql":
+		// MSSQL requires ORDER BY for OFFSET/FETCH
+		if offset == 0 {
+			query = fmt.Sprintf("SELECT TOP %d * FROM %s", pageSize, tableName)
+		} else {
+			columns := ui.getTableColumns(tableName)
+			orderBy := "1" // Default ordinal fallback
+			if len(columns) > 0 {
+				orderBy = columns[0]
+				for _, col := range columns {
+					if strings.Contains(strings.ToLower(col), "id") {
+						orderBy = col
+						break
+					}
+				}
+			}
+			query = fmt.Sprintf("SELECT * FROM %s ORDER BY %s OFFSET %d ROWS FETCH NEXT %d ROWS ONLY",
+				tableName, orderBy, offset, pageSize)
+		}
+	case "postgres":
+		query = fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d", tableName, pageSize, offset)
+	default: // sqlite3
+		query = fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d", tableName, pageSize, offset)
+	}
+
+	rows, err := ui.app.DB.ExecuteQuery(query)
+	if err != nil {
+		ui.app.Events.Dispatch(events.Errorf("gui", "Error executing paginated query: %v", err))
+		return &PaginatedTableData{
+			TableData: TableData{Headers: []string{}, Data: [][]string{}},
+			TotalRows: 0, CurrentPage: 0, PageSize: pageSize, TotalPages: 0,
+		}
+	}
+	defer rows.Close()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		ui.app.Events.Dispatch(events.Errorf("gui", "Error getting columns: %v", err))
+		return &PaginatedTableData{
+			TableData: TableData{Headers: []string{}, Data: [][]string{}},
+			TotalRows: 0, CurrentPage: 0, PageSize: pageSize, TotalPages: 0,
+		}
+	}
+
+	var data [][]string
+	for rows.Next() {
+		row := make([]interface{}, len(columns))
+		rowData := make([]string, len(columns))
+		for i := range row {
+			row[i] = new(interface{})
+		}
+		if err := rows.Scan(row...); err != nil {
+			ui.app.Events.Dispatch(events.Errorf("gui", "Error scanning row: %v", err))
+			continue
+		}
+		for i, val := range row {
+			if val == nil {
+				rowData[i] = "NULL"
+			} else {
+				v := val.(*interface{})
+				if b, ok := (*v).([]byte); ok {
+					rowData[i] = string(b)
+				} else {
+					rowData[i] = fmt.Sprintf("%v", *v)
+				}
+			}
+		}
+		data = append(data, rowData)
+	}
+
+	ui.app.Events.Dispatch(events.Infof("gui", "Explorer: Loaded page %d of %d (%d rows) from '%s'",
+		page+1, totalPages, len(data), tableName))
+
+	return &PaginatedTableData{
+		TableData:   TableData{Headers: columns, Data: data},
+		TotalRows:   totalRows,
+		CurrentPage: page,
+		PageSize:    pageSize,
+		TotalPages:  totalPages,
+	}
+}
+
+// getTableRowCount gets the total number of rows in a table
+func (ui *Gui) getTableRowCount(tableName string) int {
+	if ui.app.DB == nil || !ui.app.DB.IsConnected() {
+		return 0
+	}
+
+	query := fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)
+	rows, err := ui.app.DB.ExecuteQuery(query)
+	if err != nil {
+		ui.app.Events.Dispatch(events.Debugf("gui", "Error counting rows in %s: %v", tableName, err))
+		return 0
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		var count int
+		if err := rows.Scan(&count); err == nil {
+			return count
+		}
+	}
+
+	return 0
+}
+
+// getTableColumns gets the column names for a table
+func (ui *Gui) getTableColumns(tableName string) []string {
+	db := ui.app.DB
+	if db == nil || !db.IsConnected() {
+		return nil
+	}
+
+	if columns, err := db.GetTableColumns(tableName); err == nil && len(columns) > 0 {
+		return columns
+	}
+
+	var query string
+	switch strings.ToLower(db.GetType()) {
+	case "mssql":
+		query = fmt.Sprintf("SELECT TOP 1 * FROM %s", tableName)
+	default:
+		query = fmt.Sprintf("SELECT * FROM %s LIMIT 1", tableName)
+	}
+
+	rows, err := db.ExecuteQuery(query)
+	if err != nil {
+		if ui.app != nil && ui.app.Events != nil {
+			ui.app.Events.Dispatch(events.Debugf("gui", "Failed to inspect columns for %s: %v", tableName, err))
+		}
+		return nil
+	}
+	defer rows.Close()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		if ui.app != nil && ui.app.Events != nil {
+			ui.app.Events.Dispatch(events.Debugf("gui", "Failed to read column metadata for %s: %v", tableName, err))
+		}
+		return nil
+	}
+
+	return columns
 }

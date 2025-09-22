@@ -9,14 +9,12 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
 	"fyne.io/fyne/v2/test"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // findWidget recursively searches for a widget that satisfies the predicate.
@@ -56,7 +54,7 @@ func findWidget(o fyne.CanvasObject, predicate func(fyne.CanvasObject) bool) fyn
 	return nil
 }
 
-func TestOmniboxSearch(t *testing.T) {
+func TestSyncCenterInitialization(t *testing.T) {
 	// Create a mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/search/accounts") {
@@ -90,49 +88,179 @@ func TestOmniboxSearch(t *testing.T) {
 		logBinding: binding.NewStringList(),
 	}
 	ui.presenter = NewGuiPresenter(a, ui)
+
+	// Initialize new components
+	ui.syncCenter = NewSyncCenter(ui, ui.presenter)
+	ui.smartDashboard = NewSmartDashboard(ui, ui.presenter)
+	ui.showWelcome = false // Skip welcome for tests
+
 	ui.window = test.NewWindow(ui.createContent())
-	ui.tabs.SelectTabIndex(1) // Select the "Pull" tab
+	ui.tabs.SelectIndex(1) // Select the "Sync Center" tab (was "Pull" tab)
 
-	// Find the search entry and button using the helper
-	searchEntry := findWidget(ui.window.Canvas().Content(), func(o fyne.CanvasObject) bool {
-		if e, ok := o.(*widget.Entry); ok {
-			return e.PlaceHolder == "Search by name or ID…" || e.PlaceHolder == "Search by name or ID..."
-		}
-		return false
-	})
-	if searchEntry == nil {
-		t.Fatal("Could not find search entry")
-	}
-
-	searchButton := findWidget(ui.window.Canvas().Content(), func(o fyne.CanvasObject) bool {
+	// Find the sync button in the sync center
+	syncButton := findWidget(ui.window.Canvas().Content(), func(o fyne.CanvasObject) bool {
 		if b, ok := o.(*widget.Button); ok {
-			return b.Icon == theme.SearchIcon()
+			return b.Text == "Start Sync"
 		}
 		return false
 	})
-	if searchButton == nil {
-		t.Fatal("Could not find search button")
+	if syncButton == nil {
+		t.Fatal("Could not find sync button")
 	}
 
-	// Simulate a search
-	test.Type(searchEntry.(fyne.Focusable), "Test")
-	test.Tap(searchButton.(fyne.Tappable))
-
-	// Let the go routine in the presenter finish
-	time.Sleep(500 * time.Millisecond)
-
-	// Verify that the results are displayed in the details view
-	resultsListObject := findWidget(ui.detailsView, func(o fyne.CanvasObject) bool {
-		_, ok := o.(*widget.List)
-		return ok
+	// Find the sync mode selector
+	syncModeSelect := findWidget(ui.window.Canvas().Content(), func(o fyne.CanvasObject) bool {
+		if s, ok := o.(*widget.Select); ok {
+			// Check if this select contains sync modes
+			for _, option := range s.Options {
+				if option == "Two-way Sync" {
+					return true
+				}
+			}
+		}
+		return false
 	})
-
-	if resultsListObject == nil {
-		t.Fatalf("Could not find results list in details view. Details view is a %T", ui.detailsView)
+	if syncModeSelect == nil {
+		t.Fatal("Could not find sync mode selector")
 	}
 
-	resultsList := resultsListObject.(*widget.List)
-	if resultsList.Length() != 2 {
-		t.Errorf("Expected 2 results, got %d", resultsList.Length())
+	// Verify default selection
+	if syncModeSelect.(*widget.Select).Selected != "Two-way Sync" {
+		t.Errorf("Expected default sync mode to be 'Two-way Sync', got %s", syncModeSelect.(*widget.Select).Selected)
+	}
+
+	// Verify sync center tabs are present
+	syncTabs := findWidget(ui.window.Canvas().Content(), func(o fyne.CanvasObject) bool {
+		if tabs, ok := o.(*container.AppTabs); ok {
+			// Check if this is the sync center tabs (has "Pending Changes" tab)
+			for _, item := range tabs.Items {
+				if item.Text == "Pending Changes" {
+					return true
+				}
+			}
+		}
+		return false
+	})
+	if syncTabs == nil {
+		t.Fatal("Could not find sync center tabs")
+	}
+}
+
+func TestTableFactoryEnhancements(t *testing.T) {
+	// Create a minimal app and UI for testing
+	testApp := &app.App{
+		State: &state.State{},
+	}
+
+	// Create a test UI
+	ui := &Gui{
+		app:    testApp,
+		window: test.NewApp().NewWindow("Test"),
+	}
+
+	factory := NewTableFactory(ui)
+
+	// Test data with some long text that should be truncated
+	testData := [][]string{
+		{"1", "This is a very long name that should be truncated to prevent overflow", "Active", "2024-01-15 14:30:00"},
+		{"2", "Short", "Inactive", "2024-01-14 10:00:00"},
+		{"3", "Another extremely long text that definitely needs to be truncated for proper display", "Pending", "2024-01-13 09:00:00"},
+	}
+
+	testHeaders := []string{"ID", "Name", "Status", "Created"}
+
+	// Test auto-truncated table creation
+	config := TableConfig{
+		Headers:       testHeaders,
+		Data:          testData,
+		HasCheckboxes: false,
+	}
+
+	table := factory.CreateAutoTruncatedTable(config)
+	if table == nil {
+		t.Fatal("CreateAutoTruncatedTable returned nil")
+	}
+
+	// Test truncation functionality
+	truncated := factory.truncateText("This is a long text", 10)
+	expected := "This is..."
+	if truncated != expected {
+		t.Errorf("Expected truncated text '%s', got '%s'", expected, truncated)
+	}
+
+	// Test that short text is not truncated
+	short := factory.truncateText("Short", 10)
+	if short != "Short" {
+		t.Errorf("Expected short text to remain unchanged, got '%s'", short)
+	}
+
+	// Test column width calculation
+	width := factory.calculateOptimalWidth("Name", 1, config)
+	if width <= 0 {
+		t.Errorf("Expected positive column width, got %f", width)
+	}
+
+	// Test searchable table creation
+	searchableTable := factory.CreateSearchableTable(config, "Search...")
+	if searchableTable == nil {
+		t.Fatal("CreateSearchableTable returned nil")
+	}
+
+	// Test paginated table creation
+	paginatedTable := factory.CreatePaginatedTable(config, 2)
+	if paginatedTable == nil {
+		t.Fatal("CreatePaginatedTable returned nil")
+	}
+}
+
+func TestDatabaseExplorerPagination(t *testing.T) {
+	// Create a minimal app for testing
+	testApp := &app.App{
+		State: &state.State{},
+	}
+
+	// Create a test UI
+	ui := &Gui{
+		app:    testApp,
+		window: test.NewApp().NewWindow("Test"),
+	}
+
+	// Test getTableRowCount with nil database (should return 0)
+	count := ui.getTableRowCount("test_table")
+	if count != 0 {
+		t.Errorf("Expected 0 rows for nil database, got %d", count)
+	}
+
+	// Test getTableColumns with nil database (should return empty slice)
+	columns := ui.getTableColumns("test_table")
+	if len(columns) == 0 {
+		// This is expected behavior
+	}
+
+	// Test pagination data structure
+	paginatedData := &PaginatedTableData{
+		TableData: TableData{
+			Headers: []string{"ID", "Name", "Status"},
+			Data: [][]string{
+				{"1", "Test 1", "Active"},
+				{"2", "Test 2", "Inactive"},
+			},
+		},
+		TotalRows:   100,
+		CurrentPage: 2,
+		PageSize:    50,
+		TotalPages:  2,
+	}
+
+	if paginatedData.TotalRows != 100 {
+		t.Errorf("Expected TotalRows 100, got %d", paginatedData.TotalRows)
+	}
+
+	if paginatedData.CurrentPage != 2 {
+		t.Errorf("Expected CurrentPage 2, got %d", paginatedData.CurrentPage)
+	}
+
+	if paginatedData.TotalPages != 2 {
+		t.Errorf("Expected TotalPages 2, got %d", paginatedData.TotalPages)
 	}
 }

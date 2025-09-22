@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"runtime"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -262,18 +261,21 @@ func (hc *HealthChecker) checkDiskSpace() *ComponentHealth {
 
 	start := time.Now()
 
-	var stat syscall.Statfs_t
-	workingDir := "."
-	if err := syscall.Statfs(workingDir, &stat); err != nil {
+	available, total, err := diskUsage(".")
+	if err != nil {
 		health.Status = StatusUnhealthy
 		health.Error = err.Error()
 		health.Message = "Failed to get disk statistics"
 		return health
 	}
 
-	// Calculate disk usage (all values in bytes)
-	available := stat.Bavail * uint64(stat.Bsize)
-	total := stat.Blocks * uint64(stat.Bsize)
+	if total == 0 {
+		health.Status = StatusUnhealthy
+		health.Message = "Disk statistics unavailable"
+		health.Metadata = map[string]interface{}{"available_bytes": available, "total_bytes": total}
+		return health
+	}
+
 	used := total - available
 	usedPercent := float64(used) / float64(total) * 100
 
