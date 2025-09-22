@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -72,27 +74,75 @@ func NewActionFromConfig(config ActionConfig) (Action, error) {
 
 // ExecAction executes a shell command.
 type ExecAction struct {
-	Command string   `yaml:"command"`
-	Args    []string `yaml:"args"`
+	Command  string   `yaml:"command"`
+	Args     []string `yaml:"args"`
+	UseShell *bool    `yaml:"use_shell"`
 }
 
 // Execute runs the command.
 func (a *ExecAction) Execute(executor *Executor) error {
-	cmd := exec.Command("sh", "-c", a.Command)
-	cmd.Dir, _ = os.Getwd()
+	cmd := a.buildCommand()
+	if cmd.Dir == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			cmd.Dir = cwd
+		}
+	}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("%w: %s", err, string(output))
+		trimmed := strings.TrimSpace(string(output))
+		if trimmed != "" {
+			return fmt.Errorf("%w: %s", err, trimmed)
+		}
+		return err
 	}
 	return nil
 }
 
 // Validate checks if the action is configured correctly.
 func (a *ExecAction) Validate() error {
-	if a.Command == "" {
+	if strings.TrimSpace(a.Command) == "" {
 		return fmt.Errorf("exec action requires a 'command'")
 	}
+	if a.useShell() && len(a.Args) > 0 {
+		return fmt.Errorf("exec action 'args' are only supported when use_shell is set to false")
+	}
 	return nil
+}
+
+// UnmarshalYAML ensures backwards compatibility defaults when decoding from YAML.
+func (a *ExecAction) UnmarshalYAML(value *yaml.Node) error {
+	var raw struct {
+		Command  string   `yaml:"command"`
+		Args     []string `yaml:"args"`
+		UseShell *bool    `yaml:"use_shell"`
+	}
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	a.Command = raw.Command
+	a.Args = raw.Args
+	a.UseShell = raw.UseShell
+	return nil
+}
+
+func (a *ExecAction) useShell() bool {
+	return a.UseShell == nil || *a.UseShell
+}
+
+func (a *ExecAction) buildCommand() *exec.Cmd {
+	if a.useShell() {
+		shell, args := defaultShell()
+		combined := append(args, a.Command)
+		return exec.Command(shell, combined...)
+	}
+	return exec.Command(a.Command, a.Args...)
+}
+
+func defaultShell() (string, []string) {
+	if runtime.GOOS == "windows" {
+		return "cmd.exe", []string{"/C"}
+	}
+	return "sh", []string{"-c"}
 }
 
 // DbAction executes a database function, procedure, or raw query.

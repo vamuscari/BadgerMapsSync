@@ -2,8 +2,8 @@ package push
 
 import (
 	"badgermaps/app"
-	"badgermaps/events"
 	"badgermaps/database"
+	"badgermaps/events"
 	"encoding/json"
 	"fmt"
 )
@@ -30,8 +30,14 @@ func RunPushAccounts(a *app.App) error {
 		a.Events.Dispatch(events.Event{Type: "push.item.start", Source: "accounts", Payload: events.PushItemStartPayload{Change: change}})
 		database.UpdatePendingChangeStatus(a.DB, "AccountsPendingChanges", change.ChangeId, "processing")
 
-		var data map[string]string
-		json.Unmarshal([]byte(change.Changes), &data)
+		data := make(map[string]string)
+		if err := json.Unmarshal([]byte(change.Changes), &data); err != nil {
+			parseErr := fmt.Errorf("invalid pending change payload (change_id=%d): %w", change.ChangeId, err)
+			a.Events.Dispatch(events.Event{Type: "push.item.error", Source: "accounts", Payload: events.PushItemErrorPayload{Error: parseErr}})
+			database.UpdatePendingChangeStatus(a.DB, "AccountsPendingChanges", change.ChangeId, "failed")
+			errorCount++
+			continue
+		}
 
 		var apiErr error
 		switch change.ChangeType {
@@ -79,8 +85,14 @@ func RunPushCheckins(a *app.App) error {
 		a.Events.Dispatch(events.Event{Type: "push.item.start", Source: "checkins", Payload: events.PushItemStartPayload{Change: change}})
 		database.UpdatePendingChangeStatus(a.DB, "AccountCheckinsPendingChanges", change.ChangeId, "processing")
 
-		var data map[string]string
-		json.Unmarshal([]byte(change.Changes), &data)
+		data := make(map[string]string)
+		if err := json.Unmarshal([]byte(change.Changes), &data); err != nil {
+			parseErr := fmt.Errorf("invalid pending change payload (change_id=%d): %w", change.ChangeId, err)
+			a.Events.Dispatch(events.Event{Type: "push.item.error", Source: "checkins", Payload: events.PushItemErrorPayload{Error: parseErr}})
+			database.UpdatePendingChangeStatus(a.DB, "AccountCheckinsPendingChanges", change.ChangeId, "failed")
+			errorCount++
+			continue
+		}
 
 		var apiErr error
 		switch change.ChangeType {

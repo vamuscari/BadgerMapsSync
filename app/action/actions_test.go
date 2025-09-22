@@ -5,6 +5,7 @@ import (
 	"badgermaps/app/action"
 	"badgermaps/app/state"
 	"badgermaps/database"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -95,6 +96,34 @@ func TestExecAction(t *testing.T) {
 	}
 }
 
+func TestExecActionWithArgs(t *testing.T) {
+	executor, teardown := setupTestExecutor(t)
+	defer teardown()
+
+	outputFile := filepath.Join(t.TempDir(), "direct_exec_output.txt")
+	payload := time.Now().Format(time.RFC3339Nano)
+
+	execAction := &action.ExecAction{
+		Command:  os.Args[0],
+		Args:     []string{"-test.run=TestExecActionHelperProcess", "--", outputFile, payload},
+		UseShell: boolPtr(false),
+	}
+
+	t.Setenv("GO_WANT_EXEC_ACTION_HELPER", "1")
+	if err := execAction.Execute(executor); err != nil {
+		t.Fatalf("ExecAction.Execute() with args failed: %v", err)
+	}
+
+	content, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatalf("Failed to read helper output: %v", err)
+	}
+
+	if strings.TrimSpace(string(content)) != payload {
+		t.Errorf("Expected helper payload '%s', got '%s'", payload, strings.TrimSpace(string(content)))
+	}
+}
+
 func TestDbAction(t *testing.T) {
 	executor, teardown := setupTestExecutor(t)
 	defer teardown()
@@ -135,4 +164,28 @@ func TestDbAction(t *testing.T) {
 	if value != timestamp {
 		t.Errorf("Expected database value '%s', got '%s'", timestamp, value)
 	}
+}
+
+func TestExecActionHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_EXEC_ACTION_HELPER") != "1" {
+		return
+	}
+
+	for i, arg := range os.Args {
+		if arg == "--" && i+2 < len(os.Args) {
+			output := os.Args[i+1]
+			payload := os.Args[i+2]
+			if err := os.WriteFile(output, []byte(payload), 0o644); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to write helper output: %v", err)
+				os.Exit(1)
+			}
+			os.Exit(0)
+		}
+	}
+
+	os.Exit(1)
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }

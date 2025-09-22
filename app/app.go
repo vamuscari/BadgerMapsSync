@@ -2,9 +2,9 @@ package app
 
 import (
 	"badgermaps/api"
+	"badgermaps/app/action"
 	"badgermaps/app/server"
 	"badgermaps/app/state"
-	"badgermaps/app/action"
 	"badgermaps/database"
 	"badgermaps/events"
 	"badgermaps/utils"
@@ -149,6 +149,7 @@ func (a *App) LoadConfig() error {
 		}
 		a.migrateActionNames()
 		a.validateAndCleanActions()
+		a.ensureExecActionShellDefaults()
 	}
 
 	// Transfer server config to state
@@ -163,10 +164,14 @@ func (a *App) LoadConfig() error {
 	var dbErr error
 	a.DB, dbErr = database.NewDB(&a.Config.DB)
 	if dbErr != nil {
-		a.Events.Dispatch(events.Errorf("db", "Failed to connect to database: %v", dbErr))
-		a.DB = nil // Set DB to nil to indicate connection failure
+		a.Events.Dispatch(events.Errorf("db", "Failed to initialize database handle: %v", dbErr))
+		a.DB = nil
 	} else if a.DB != nil {
-		if err := a.DB.Connect(); err == nil {
+		if err := a.DB.Connect(); err != nil {
+			a.Events.Dispatch(events.Errorf("db", "Failed to connect to database: %v", err))
+			a.DB.Close()
+			a.DB = nil
+		} else {
 			a.DB.TestConnection()
 		}
 	}
@@ -186,6 +191,8 @@ func (a *App) LoadConfig() error {
 		}
 	})
 
+	// Respect configured concurrency before enforcing the default bounds.
+	a.MaxConcurrentRequests = a.Config.MaxConcurrentRequests
 	// Limit between
 	if a.MaxConcurrentRequests < 1 || a.MaxConcurrentRequests > 10 {
 		a.MaxConcurrentRequests = 5
@@ -224,6 +231,39 @@ func (a *App) migrateActionNames() {
 		} else {
 			a.Events.Dispatch(events.Infof("config", "Configuration updated to remove 'on_' prefix from action names."))
 		}
+	}
+}
+
+func (a *App) ensureExecActionShellDefaults() {
+	if a.ConfigFile == "" {
+		return
+	}
+
+	updated := false
+	for i := range a.Config.EventActions {
+		for j := range a.Config.EventActions[i].Run {
+			actionConfig := &a.Config.EventActions[i].Run[j]
+			if actionConfig.Type != "exec" {
+				continue
+			}
+			if actionConfig.Args == nil {
+				actionConfig.Args = make(map[string]interface{})
+			}
+			if _, ok := actionConfig.Args["use_shell"]; !ok {
+				actionConfig.Args["use_shell"] = true
+				updated = true
+			}
+		}
+	}
+
+	if !updated {
+		return
+	}
+
+	if err := a.SaveConfig(); err != nil {
+		a.Events.Dispatch(events.Warningf("config", "Failed to save config after backfilling exec use_shell flag: %v", err))
+	} else {
+		a.Events.Dispatch(events.Infof("config", "Configuration updated to backfill exec action 'use_shell' flag."))
 	}
 }
 

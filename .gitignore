@@ -46,5 +46,5 @@ badgermaps
 BadgerMapsSync
 
 # System Files 
-.DS_Store
+\.DS_Store
 
