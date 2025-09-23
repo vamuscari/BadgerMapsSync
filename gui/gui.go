@@ -1,15 +1,8 @@
 package gui
 
 import (
-	"badgermaps/app"
-	"badgermaps/app/action"
-	"badgermaps/app/push"
-	"badgermaps/database"
-	"badgermaps/events"
 	"fmt"
-	"fyne.io/fyne/v2/canvas"
-	"fyne.io/fyne/v2/data/binding"
-
+	"image/color"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,10 +12,18 @@ import (
 
 	"fyne.io/fyne/v2"
 	fapp "fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/data/binding"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+
+	"badgermaps/app"
+	"badgermaps/app/action"
+	"badgermaps/app/push"
+	"badgermaps/database"
+	"badgermaps/events"
 )
 
 // SecondaryButton is a custom button that can be styled with a secondary color
@@ -139,6 +140,41 @@ func (r *spacerRenderer) Objects() []fyne.CanvasObject {
 
 func (r *spacerRenderer) Destroy() {}
 
+type backdropOverlay struct {
+	widget.BaseWidget
+	background *canvas.Rectangle
+	onTapped   func()
+}
+
+func newBackdropOverlay(fill color.Color, tapped func()) *backdropOverlay {
+	o := &backdropOverlay{
+		background: canvas.NewRectangle(fill),
+		onTapped:   tapped,
+	}
+	o.ExtendBaseWidget(o)
+	return o
+}
+
+func (o *backdropOverlay) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(o.background)
+}
+
+func (o *backdropOverlay) MinSize() fyne.Size {
+	return fyne.NewSize(0, 0)
+}
+
+func (o *backdropOverlay) Tapped(*fyne.PointEvent) {
+	if o.onTapped != nil {
+		o.onTapped()
+	}
+}
+
+func (o *backdropOverlay) TappedSecondary(*fyne.PointEvent) {
+	if o.onTapped != nil {
+		o.onTapped()
+	}
+}
+
 type logEntry struct {
 	widget.BaseWidget
 	label *widget.Label
@@ -215,6 +251,8 @@ func (r *logEntryRenderer) Objects() []fyne.CanvasObject {
 
 func (r *logEntryRenderer) Destroy() {}
 
+const rightPaneWidth float32 = 360
+
 // Gui struct holds all the UI components and application state
 type Gui struct {
 	app       *app.App
@@ -225,14 +263,18 @@ type Gui struct {
 	logMutex   sync.Mutex
 	toastMutex sync.Mutex
 
-	logBinding        binding.StringList
-	logView           *widget.List
-	detailsView       fyne.CanvasObject
-	rightPane         *fyne.Container
-	configTab         fyne.CanvasObject
-	progressBar       *widget.ProgressBar
-	progressContainer *fyne.Container
-	progressTitle     *widget.Label
+	logBinding            binding.StringList
+	logView               *widget.List
+	detailsView           fyne.CanvasObject
+	rightPaneContent      *fyne.Container
+	rightPaneOverlay      *fyne.Container
+	rightPaneBackdrop     fyne.CanvasObject
+	rightPaneToggleButton *widget.Button
+	rightPaneVisible      bool
+	configTab             fyne.CanvasObject
+	progressBar           *widget.ProgressBar
+	progressContainer     *fyne.Container
+	progressTitle         *widget.Label
 
 	terminalVisible bool
 	tabs            *container.AppTabs // Hold a reference to the tabs container
@@ -289,16 +331,18 @@ func Launch(a *app.App, icon fyne.Resource) {
 		if ui.app.State.Debug {
 			a.Events.Dispatch(events.Debugf("gui", "GUI received event: %s", e.Type))
 		}
-		if ui.tabs != nil {
-			for _, tab := range ui.tabs.Items {
-				if tab.Text == "Actions" {
-					// Re-create the content of the events tab
-					tab.Content = ui.createActionsTab()
-					ui.tabs.Refresh()
-					break
+		fyne.Do(func() {
+			if ui.tabs != nil {
+				for _, tab := range ui.tabs.Items {
+					if tab.Text == "Actions" {
+						// Re-create the content of the events tab
+						tab.Content = ui.createActionsTab()
+						ui.tabs.Refresh()
+						break
+					}
 				}
 			}
-		}
+		})
 	}
 	a.Events.Subscribe("action.config.*", eventListener)
 
@@ -315,15 +359,17 @@ func Launch(a *app.App, icon fyne.Resource) {
 		}
 
 		if msg != "" {
-			ui.logMutex.Lock()
-			defer ui.logMutex.Unlock()
 			lines := strings.Split(msg, "\n")
-			for _, line := range lines {
-				ui.logBinding.Append(line)
-			}
-			if ui.logView != nil {
-				ui.logView.ScrollToBottom()
-			}
+			fyne.Do(func() {
+				ui.logMutex.Lock()
+				defer ui.logMutex.Unlock()
+				for _, line := range lines {
+					ui.logBinding.Append(line)
+				}
+				if ui.logView != nil {
+					ui.logView.ScrollToBottom()
+				}
+			})
 		}
 	}
 	a.Events.Subscribe("log", logListener)
@@ -332,25 +378,39 @@ func Launch(a *app.App, icon fyne.Resource) {
 	pullNotificationListener := func(e events.Event) {
 		switch e.Type {
 		case "pull.start":
-			ui.ShowToast(fmt.Sprintf("Pulling %s from API...", e.Source))
+			fyne.Do(func() {
+				ui.ShowToast(fmt.Sprintf("Pulling %s from API...", e.Source))
+			})
 		case "pull.complete":
-			ui.ShowToast(fmt.Sprintf("Successfully pulled %s.", e.Source))
+			fyne.Do(func() {
+				ui.ShowToast(fmt.Sprintf("Successfully pulled %s.", e.Source))
+			})
 		case "pull.error":
-			ui.ShowToast(fmt.Sprintf("Error pulling %s.", e.Source))
+			fyne.Do(func() {
+				ui.ShowToast(fmt.Sprintf("Error pulling %s.", e.Source))
+			})
 		case "pull.group.start":
-			ui.ShowToast(fmt.Sprintf("Starting full pull for %s...", e.Source))
+			fyne.Do(func() {
+				ui.ShowToast(fmt.Sprintf("Starting full pull for %s...", e.Source))
+			})
 		case "pull.group.complete":
-			ui.ShowToast(fmt.Sprintf("Successfully pulled all %s.", e.Source))
+			fyne.Do(func() {
+				ui.ShowToast(fmt.Sprintf("Successfully pulled all %s.", e.Source))
+			})
 		case "pull.group.error":
-			ui.ShowToast(fmt.Sprintf("Error pulling all %s.", e.Source))
+			fyne.Do(func() {
+				ui.ShowToast(fmt.Sprintf("Error pulling all %s.", e.Source))
+			})
 		}
 	}
 	a.Events.Subscribe("pull.*", pullNotificationListener)
 
 	// Subscribe to connection status changes to refresh UI
 	connectionListener := func(e events.Event) {
-		ui.RefreshConfigTab()
-		ui.RefreshHomeTab()
+		fyne.Do(func() {
+			ui.RefreshConfigTab()
+			ui.RefreshHomeTab()
+		})
 	}
 	a.Events.Subscribe("connection.status.changed", connectionListener)
 
@@ -394,9 +454,9 @@ func (ui *Gui) createMainContent() fyne.CanvasObject {
 		explorerContent = ui.createDisabledTabView(configTab)
 	}
 
-	syncTab := container.NewTabItemWithIcon("Sync Center", theme.ViewRefreshIcon(), syncContent)
+	syncTab := container.NewTabItemWithIcon("Sync Center", theme.DownloadIcon(), syncContent)
 	explorerTab := container.NewTabItemWithIcon("Explorer", theme.FolderIcon(), explorerContent)
-	actionsTab := container.NewTabItemWithIcon("Actions", theme.ListIcon(), ui.createActionsTab())
+	actionsTab := container.NewTabItemWithIcon("Actions", theme.ViewRefreshIcon(), ui.createActionsTab())
 	serverTab := container.NewTabItemWithIcon("Server", theme.ComputerIcon(), ui.createServerTab())
 
 	tabs := []*container.TabItem{
@@ -441,20 +501,130 @@ func (ui *Gui) createMainContent() fyne.CanvasObject {
 
 	// Initialize details view
 	ui.detailsView = container.NewCenter(widget.NewLabel("Select an item to see details"))
+	ui.rightPaneContent = container.NewMax(ui.detailsView)
 
-	rightPaneContent := container.NewBorder(
+	rightPanePanel := container.NewBorder(
 		ui.createRightPaneHeader(), nil, nil, nil,
-		ui.detailsView,
+		ui.rightPaneContent,
 	)
-	ui.rightPane = rightPaneContent
+	panelWithPadding := container.NewPadded(rightPanePanel)
+	panelBackground := canvas.NewRectangle(theme.BackgroundColor())
+	//panelBackground.CornerRadius = theme.Padding()
+	panelBackground.StrokeColor = theme.SeparatorColor()
+	panelBackground.StrokeWidth = 1
+	panelWrapper := container.NewStack(panelBackground, panelWithPadding)
+
+	ui.rightPaneBackdrop = newBackdropOverlay(color.NRGBA{R: 0, G: 0, B: 0, A: 144}, ui.hideRightPane)
+	ui.rightPaneBackdrop.Hide()
+
+	ui.rightPaneOverlay = container.New(&slideOverLayout{
+		panelWidth:   rightPaneWidth,
+		panelPadding: theme.Padding(),
+	}, ui.rightPaneBackdrop, panelWrapper)
+	ui.rightPaneOverlay.Hide()
+	ui.rightPaneVisible = false
+
+	toggleButton := widget.NewButtonWithIcon("", theme.NavigateNextIcon(), func() {
+		ui.toggleRightPane()
+	})
+	toggleButton.Importance = widget.LowImportance
+	ui.rightPaneToggleButton = toggleButton
+	floatingToggle := container.New(&floatingButtonLayout{padding: theme.Padding()}, toggleButton)
+	ui.updateRightPaneToggle()
+
 	if ui.syncCenter != nil {
 		ui.syncCenter.applyStoredDetail()
 	}
 
-	split := container.NewHSplit(mainContent, ui.rightPane)
-	split.Offset = 0.8 // Give main content more space
-	split.SetOffset(split.Offset)
-	return split
+	return container.NewStack(mainContent, ui.rightPaneOverlay, floatingToggle)
+}
+
+type slideOverLayout struct {
+	panelWidth   float32
+	panelPadding float32
+}
+
+func (l *slideOverLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	if len(objects) == 0 {
+		return
+	}
+	if backdrop := objects[0]; backdrop != nil {
+		backdrop.Resize(size)
+		backdrop.Move(fyne.NewPos(0, 0))
+	}
+	panelWidth := l.panelWidth
+	if panelWidth <= 0 || panelWidth > size.Width {
+		panelWidth = size.Width
+	}
+	x := size.Width - panelWidth - l.panelPadding
+	if x < 0 {
+		x = 0
+	}
+	for i := 1; i < len(objects); i++ {
+		obj := objects[i]
+		if obj == nil {
+			continue
+		}
+		obj.Resize(fyne.NewSize(panelWidth, size.Height))
+		obj.Move(fyne.NewPos(x, 0))
+	}
+}
+
+func (l *slideOverLayout) MinSize([]fyne.CanvasObject) fyne.Size {
+	return fyne.NewSize(l.panelWidth+l.panelPadding, 0)
+}
+
+type floatingButtonLayout struct {
+	padding float32
+}
+
+func (l *floatingButtonLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	for _, obj := range objects {
+		if obj == nil {
+			continue
+		}
+		min := obj.MinSize()
+		width := min.Width
+		height := min.Height
+		if width > size.Width {
+			width = size.Width
+		}
+		if height > size.Height {
+			height = size.Height
+		}
+		x := size.Width - width - l.padding
+		if x < l.padding {
+			x = l.padding
+		}
+		y := l.padding
+		if y+height > size.Height {
+			y = size.Height - height
+			if y < 0 {
+				y = 0
+			}
+		}
+		obj.Resize(fyne.NewSize(width, height))
+		obj.Move(fyne.NewPos(x, y))
+	}
+}
+
+func (l *floatingButtonLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	var maxWidth, maxHeight float32
+	for _, obj := range objects {
+		if obj == nil {
+			continue
+		}
+		min := obj.MinSize()
+		w := min.Width + l.padding*2
+		h := min.Height + l.padding*2
+		if w > maxWidth {
+			maxWidth = w
+		}
+		if h > maxHeight {
+			maxHeight = h
+		}
+	}
+	return fyne.NewSize(maxWidth, maxHeight)
 }
 
 func (ui *Gui) createHomeTab() fyne.CanvasObject {
@@ -600,19 +770,22 @@ func (ui *Gui) RefreshHomeTab() {
 }
 
 func (ui *Gui) createRightPaneHeader() fyne.CanvasObject {
-	detailsButton := widget.NewButtonWithIcon("Details", theme.InfoIcon(), func() {
+	detailsButton := widget.NewButtonWithIcon("Details", theme.ListIcon(), func() {
 		ui.terminalVisible = false
-		ui.rightPane.Objects[0] = ui.detailsView
-		ui.rightPane.Refresh()
+		if ui.detailsView != nil {
+			ui.setRightPaneContent(ui.detailsView)
+		}
+		ui.showRightPane()
 	})
 
 	logButton := widget.NewButtonWithIcon("Log", theme.ComputerIcon(), func() {
 		ui.terminalVisible = true
-		ui.rightPane.Objects[0] = ui.logView
-		ui.rightPane.Refresh()
+		ui.setRightPaneContent(ui.logView)
+		ui.showRightPane()
 	})
 
-	return container.NewHBox(detailsButton, logButton)
+	buttonRow := container.NewHBox(detailsButton, logButton)
+	return container.NewBorder(nil, nil, nil, nil, buttonRow)
 }
 
 func (ui *Gui) createDisabledTabView(configTab *container.TabItem) fyne.CanvasObject {
@@ -630,39 +803,109 @@ func (ui *Gui) createDisabledTabView(configTab *container.TabItem) fyne.CanvasOb
 	))
 }
 
-// ShowDetails updates the right-hand pane to show the provided details object.
-func (ui *Gui) ShowDetails(details fyne.CanvasObject) {
-	var text string
-	if l, ok := details.(*widget.Label); ok {
-		text = l.Text
-	} else if e, ok := details.(*widget.Entry); ok {
-		text = e.Text
-	} else if s, ok := details.(*container.Scroll); ok {
-		if l, ok := s.Content.(*widget.Label); ok {
-			text = l.Text
-		} else {
-			// Not a label in a scroll, just show it.
-			ui.detailsView = s
-			ui.terminalVisible = false
-			ui.rightPane.Objects[0] = ui.detailsView
-			ui.rightPane.Refresh()
-			return
-		}
-	} else {
-		// Not a label or entry, just show it.
-		ui.detailsView = container.NewScroll(details)
-		ui.terminalVisible = false
-		ui.rightPane.Objects[0] = ui.detailsView
-		ui.rightPane.Refresh()
+func (ui *Gui) toggleRightPane() {
+	if ui.rightPaneVisible {
+		ui.hideRightPane()
 		return
 	}
+	if ui.rightPaneContent == nil {
+		return
+	}
+	if len(ui.rightPaneContent.Objects) == 0 {
+		ui.setRightPaneContent(ui.detailsView)
+	}
+	ui.showRightPane()
+}
 
-	label := widget.NewLabel(text)
-	label.Wrapping = fyne.TextWrapWord
-	ui.detailsView = container.NewScroll(label)
+func (ui *Gui) showRightPane() {
+	if ui.rightPaneOverlay == nil {
+		return
+	}
+	if ui.rightPaneBackdrop != nil {
+		ui.rightPaneBackdrop.Show()
+	}
+	ui.rightPaneOverlay.Show()
+	ui.rightPaneOverlay.Refresh()
+	ui.rightPaneVisible = true
+	ui.updateRightPaneToggle()
+}
+
+func (ui *Gui) hideRightPane() {
+	if ui.rightPaneOverlay == nil {
+		return
+	}
+	ui.rightPaneOverlay.Hide()
+	if ui.rightPaneBackdrop != nil {
+		ui.rightPaneBackdrop.Hide()
+	}
+	ui.rightPaneVisible = false
+	ui.updateRightPaneToggle()
+}
+
+func (ui *Gui) setRightPaneContent(content fyne.CanvasObject) {
+	if ui.rightPaneContent == nil || content == nil {
+		return
+	}
+	ui.rightPaneContent.Objects = []fyne.CanvasObject{content}
+	ui.rightPaneContent.Refresh()
+}
+
+// ShowDetails updates the right-hand pane to show the provided details object.
+func (ui *Gui) ShowDetails(details fyne.CanvasObject) {
+	ui.setDetails(details, true)
+}
+
+func (ui *Gui) updateRightPaneToggle() {
+	if ui.rightPaneToggleButton == nil {
+		return
+	}
+	if ui.rightPaneVisible {
+		ui.rightPaneToggleButton.SetIcon(theme.NavigateNextIcon())
+	} else {
+		ui.rightPaneToggleButton.SetIcon(theme.ListIcon())
+	}
+	ui.rightPaneToggleButton.Refresh()
+}
+
+func (ui *Gui) setDetails(details fyne.CanvasObject, reveal bool) {
+	display := ui.formatDetails(details)
+	if display == nil {
+		return
+	}
+	ui.detailsView = display
 	ui.terminalVisible = false
-	ui.rightPane.Objects[0] = ui.detailsView
-	ui.rightPane.Refresh()
+	ui.setRightPaneContent(ui.detailsView)
+	if reveal {
+		ui.showRightPane()
+	} else {
+		ui.updateRightPaneToggle()
+	}
+}
+
+func (ui *Gui) formatDetails(details fyne.CanvasObject) fyne.CanvasObject {
+	if details == nil {
+		return nil
+	}
+
+	switch d := details.(type) {
+	case *widget.Label:
+		label := widget.NewLabel(d.Text)
+		label.Wrapping = fyne.TextWrapWord
+		return container.NewScroll(label)
+	case *widget.Entry:
+		label := widget.NewLabel(d.Text)
+		label.Wrapping = fyne.TextWrapWord
+		return container.NewScroll(label)
+	case *container.Scroll:
+		if l, ok := d.Content.(*widget.Label); ok {
+			label := widget.NewLabel(l.Text)
+			label.Wrapping = fyne.TextWrapWord
+			return container.NewScroll(label)
+		}
+		return d
+	default:
+		return container.NewScroll(details)
+	}
 }
 
 // createPullTab creates the content for the "Pull" tab
@@ -972,9 +1215,40 @@ func (ui *Gui) createActionPopup(eventAction *action.EventAction, actionIndex in
 		sourceEntry.SetText(source)
 	}
 
+	tokenOptions := eventTokenOptions()
+	tokenLabels := make([]string, 0, len(tokenOptions))
+	optionLookup := make(map[string]eventTokenOption, len(tokenOptions))
+	for _, opt := range tokenOptions {
+		tokenLabels = append(tokenLabels, opt.Label)
+		optionLookup[opt.Label] = opt
+	}
+
+	tokenSelect := widget.NewSelect(tokenLabels, nil)
+	tokenSelect.PlaceHolder = "Insert event token"
+
+	var currentTarget *tokenInsertionTarget
+	registerTarget := func(entry *widget.Entry) *tokenInsertionTarget {
+		target := &tokenInsertionTarget{entry: entry}
+		entry.OnCursorChanged = func() {
+			target.row = entry.CursorRow
+			target.col = entry.CursorColumn
+			target.hasCursor = true
+			currentTarget = target
+		}
+		return target
+	}
+
+	var defaultTarget *tokenInsertionTarget
+
 	// --- Exec Tab ---
 	execCommandEntry := widget.NewEntry()
 	execArgsEntry := widget.NewEntry()
+	execCommandTarget := registerTarget(execCommandEntry)
+	registerTarget(execArgsEntry)
+	defaultTarget = execCommandTarget
+	if currentTarget == nil {
+		currentTarget = execCommandTarget
+	}
 	if actionConfig.Type == "exec" {
 		if cmd, ok := actionConfig.Args["command"].(string); ok {
 			execCommandEntry.SetText(cmd)
@@ -998,6 +1272,10 @@ func (ui *Gui) createActionPopup(eventAction *action.EventAction, actionIndex in
 	dbFunctionEntry := widget.NewEntry()
 	dbProcedureEntry := widget.NewEntry()
 	dbQueryEntry := widget.NewMultiLineEntry()
+	registerTarget(dbCommandEntry)
+	registerTarget(dbFunctionEntry)
+	registerTarget(dbProcedureEntry)
+	registerTarget(dbQueryEntry)
 	dbQueryEntry.SetPlaceHolder("SELECT ...")
 
 	dbActionType := "command"
@@ -1054,6 +1332,8 @@ func (ui *Gui) createActionPopup(eventAction *action.EventAction, actionIndex in
 	apiEndpointEntry := widget.NewEntry()
 	apiMethodEntry := widget.NewSelect([]string{"GET", "POST", "PATCH", "DELETE"}, nil)
 	apiDataEntry := widget.NewMultiLineEntry()
+	registerTarget(apiEndpointEntry)
+	registerTarget(apiDataEntry)
 	apiDataEntry.SetPlaceHolder("key1=value1\nkey2=value2")
 
 	if actionConfig.Type == "api" {
@@ -1111,6 +1391,64 @@ func (ui *Gui) createActionPopup(eventAction *action.EventAction, actionIndex in
 
 	apiTab := container.NewTabItemWithIcon("API", theme.ComputerIcon(), apiForm)
 
+	performInsert := func(token string) {
+		if token == "" {
+			return
+		}
+		target := currentTarget
+		if target == nil {
+			target = defaultTarget
+		}
+		if target == nil || target.entry == nil {
+			return
+		}
+		insertTokenIntoEntry(target, token)
+		tokenSelect.ClearSelected()
+	}
+
+	insertButton := widget.NewButtonWithIcon("Insert Token", theme.ContentAddIcon(), func() {
+		selected := tokenSelect.Selected
+		opt, ok := optionLookup[selected]
+		if !ok {
+			return
+		}
+		if opt.RequiresPath {
+			entry := widget.NewEntry()
+			if opt.Placeholder != "" {
+				entry.SetPlaceHolder(opt.Placeholder)
+			}
+			dlg := dialog.NewForm("Insert Payload Field", "Insert", "Cancel", []*widget.FormItem{
+				widget.NewFormItem("Field path", entry),
+			}, func(confirm bool) {
+				if !confirm {
+					return
+				}
+				path := strings.TrimSpace(entry.Text)
+				if path == "" {
+					return
+				}
+				token := fmt.Sprintf(opt.Format, path)
+				performInsert(token)
+			}, ui.window)
+			dlg.Resize(fyne.NewSize(420, 0))
+			dlg.Show()
+			return
+		}
+		token := opt.Token
+		if token == "" && opt.Format != "" {
+			token = fmt.Sprintf(opt.Format, "")
+		}
+		performInsert(token)
+	})
+
+	tokenControls := container.NewVBox(
+		widget.NewSeparator(),
+		container.NewHBox(
+			widget.NewLabel("Event tokens"),
+			container.NewAdaptiveGrid(2, tokenSelect, insertButton),
+		),
+	)
+
 	actionTabs := container.NewAppTabs(execTab, dbTab, apiTab)
 	switch actionConfig.Type {
 	case "db":
@@ -1121,13 +1459,15 @@ func (ui *Gui) createActionPopup(eventAction *action.EventAction, actionIndex in
 		actionTabs.Select(execTab)
 	}
 
-	dialogContent := container.NewVBox(
+	dialogBody := container.NewVBox(
 		widget.NewForm(
 			widget.NewFormItem("Event", eventEntry),
 			widget.NewFormItem("Source", sourceEntry),
 		),
 		actionTabs,
 	)
+
+	dialogContent := container.NewBorder(nil, tokenControls, nil, nil, dialogBody)
 
 	d := dialog.NewCustomConfirm("Save Action", "Save", "Cancel", dialogContent, func(confirm bool) {
 		if !confirm {
@@ -1227,6 +1567,109 @@ func (ui *Gui) createActionPopup(eventAction *action.EventAction, actionIndex in
 
 	d.Resize(fyne.NewSize(500, 400))
 	d.Show()
+}
+
+type eventTokenOption struct {
+	Label        string
+	Token        string
+	Format       string
+	RequiresPath bool
+	Placeholder  string
+}
+
+func eventTokenOptions() []eventTokenOption {
+	return []eventTokenOption{
+		{Label: "Event Type ($EVENT_TYPE)", Token: "$EVENT_TYPE"},
+		{Label: "Event Source ($EVENT_SOURCE)", Token: "$EVENT_SOURCE"},
+		{Label: "Event JSON ($EVENT_JSON)", Token: "$EVENT_JSON"},
+		{Label: "Event Payload JSON ($EVENT_PAYLOAD_JSON)", Token: "$EVENT_PAYLOAD_JSON"},
+		{Label: "Event Payload Text ($EVENT_PAYLOAD)", Token: "$EVENT_PAYLOAD"},
+		{Label: "Payload Field… ($EVENT_PAYLOAD[path])", Format: "$EVENT_PAYLOAD[%s]", RequiresPath: true, Placeholder: "e.g. ResourceID"},
+	}
+}
+
+type tokenInsertionTarget struct {
+	entry     *widget.Entry
+	row       int
+	col       int
+	hasCursor bool
+}
+
+func insertTokenIntoEntry(target *tokenInsertionTarget, token string) {
+	if target == nil || target.entry == nil || token == "" {
+		return
+	}
+
+	entry := target.entry
+	currentText := entry.Text
+	currentRunes := []rune(currentText)
+
+	insertIndex := len(currentRunes)
+	if target.hasCursor {
+		insertIndex = runeIndexForCursor(currentText, target.row, target.col)
+	}
+	if insertIndex < 0 || insertIndex > len(currentRunes) {
+		insertIndex = len(currentRunes)
+	}
+
+	before := string(currentRunes[:insertIndex])
+	after := string(currentRunes[insertIndex:])
+	newText := before + token + after
+	entry.SetText(newText)
+
+	newIndex := insertIndex + len([]rune(token))
+	newRow, newCol := cursorForIndex(newText, newIndex)
+	entry.CursorRow = newRow
+	entry.CursorColumn = newCol
+	entry.Refresh()
+
+	target.row = newRow
+	target.col = newCol
+	target.hasCursor = true
+}
+
+func runeIndexForCursor(text string, row, col int) int {
+	if row < 0 || col < 0 {
+		return len([]rune(text))
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) == 0 {
+		return 0
+	}
+	if row >= len(lines) {
+		row = len(lines) - 1
+	}
+	index := 0
+	for i := 0; i < row; i++ {
+		index += len([]rune(lines[i]))
+		index++ // account for newline
+	}
+	lineRunes := []rune(lines[row])
+	if col > len(lineRunes) {
+		col = len(lineRunes)
+	}
+	index += col
+	return index
+}
+
+func cursorForIndex(text string, index int) (int, int) {
+	runes := []rune(text)
+	if index < 0 {
+		index = 0
+	}
+	if index > len(runes) {
+		index = len(runes)
+	}
+	row, col := 0, 0
+	for i := 0; i < index; i++ {
+		if runes[i] == '\n' {
+			row++
+			col = 0
+		} else {
+			col++
+		}
+	}
+	return row, col
 }
 
 // createExplorerTab creates the content for the "Explorer" tab with pagination support
@@ -2165,9 +2608,11 @@ func (ui *Gui) ShowToast(content string) {
 	go func() {
 		// We need a short delay to allow the popup to be sized
 		time.Sleep(10 * time.Millisecond)
-		winSize := ui.window.Canvas().Size()
-		popupSize := popup.MinSize()
-		popup.Move(fyne.NewPos(winSize.Width-popupSize.Width-theme.Padding(), winSize.Height-popupSize.Height-theme.Padding()))
+		fyne.Do(func() {
+			winSize := ui.window.Canvas().Size()
+			popupSize := popup.MinSize()
+			popup.Move(fyne.NewPos(winSize.Width-popupSize.Width-theme.Padding(), winSize.Height-popupSize.Height-theme.Padding()))
+		})
 	}()
 
 	popup.Show()
@@ -2175,8 +2620,10 @@ func (ui *Gui) ShowToast(content string) {
 	// Hide the popup after a short duration
 	go func() {
 		time.Sleep(3 * time.Second)
-		popup.Hide()
-		ui.toastMutex.Unlock()
+		fyne.Do(func() {
+			popup.Hide()
+			ui.toastMutex.Unlock()
+		})
 	}()
 }
 

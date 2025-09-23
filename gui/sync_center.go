@@ -205,7 +205,7 @@ func (sc *SyncCenter) updateControls() {
 
 	sc.rebuildControlsLayout()
 	if sc.canShowDetails() && sc.lastDetail != "" {
-		sc.ui.ShowDetails(NewWrappingLabel(sc.lastDetail))
+		sc.ui.setDetails(NewWrappingLabel(sc.lastDetail), sc.ui.rightPaneVisible)
 	}
 }
 
@@ -679,14 +679,14 @@ func (sc *SyncCenter) setDetail(message string) {
 	if !sc.canShowDetails() {
 		return
 	}
-	sc.ui.ShowDetails(NewWrappingLabel(message))
+	sc.ui.setDetails(NewWrappingLabel(message), sc.ui.rightPaneVisible)
 }
 
 func (sc *SyncCenter) canShowDetails() bool {
-	if sc.ui == nil || sc.ui.rightPane == nil {
+	if sc.ui == nil || sc.ui.rightPaneContent == nil {
 		return false
 	}
-	return len(sc.ui.rightPane.Objects) > 0
+	return len(sc.ui.rightPaneContent.Objects) > 0
 }
 
 func (sc *SyncCenter) applyStoredDetail() {
@@ -696,7 +696,7 @@ func (sc *SyncCenter) applyStoredDetail() {
 	if !sc.canShowDetails() {
 		return
 	}
-	sc.ui.ShowDetails(NewWrappingLabel(sc.lastDetail))
+	sc.ui.setDetails(NewWrappingLabel(sc.lastDetail), sc.ui.rightPaneVisible)
 }
 
 func (sc *SyncCenter) ensureConnections() bool {

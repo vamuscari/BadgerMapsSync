@@ -57,7 +57,7 @@ func (d *SmartDashboard) CreateContent() fyne.CanvasObject {
 	)
 
 	// Show recent activity in the details panel on load (if UI is fully initialized)
-	if d.ui.rightPane != nil {
+	if d.ui.rightPaneContent != nil {
 		d.showRecentActivityInDetails()
 	}
 
@@ -227,7 +227,7 @@ func (d *SmartDashboard) showRecentActivityInDetails() {
 
 	// Show in details panel (only if UI is fully initialized)
 	detailsContainer := container.NewVScroll(container.NewVBox(activityContent...))
-	if d.ui.rightPane != nil {
+	if d.ui.rightPaneContent != nil {
 		d.ui.ShowDetails(detailsContainer)
 	}
 }

@@ -15,3 +15,5 @@
 - [ ] GUI Explorer: Expand the search bar further left so it has room for multi-word queries (`temp_task_list.md`).
 - [ ] GUI Actions: Format event names (e.g., display `pull.group.complete` as "Pull Group Complete") for readability (`temp_task_list.md`).
 - [ ] GUI Log: Fix wrapped log lines so they do not overlap subsequent entries (`temp_task_list.md`).
+- [x] GUI Layout: Allow clicking the slide-over backdrop to dismiss the panel for faster interaction (`gui/gui.go`).
+- [x] GUI Layout: Add a floating button at the top-right of the tab area to toggle the slide-over on demand (`temp_task_list.md`).

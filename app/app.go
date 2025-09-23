@@ -199,14 +199,21 @@ func (a *App) LoadConfig() error {
 
 	a.ActionExecutor = action.NewExecutor(a.DB, a.API)
 	a.Events.Subscribe("*", func(event events.Event) {
+		execCtx := &action.ExecutionContext{
+			EventType: string(event.Type),
+			Source:    event.Source,
+			Payload:   event.Payload,
+		}
 		for _, eventAction := range a.Config.EventActions {
 			if eventAction.Event == string(event.Type) && (eventAction.Source == "" || eventAction.Source == event.Source) {
 				for _, actionConfig := range eventAction.Run {
-					go func(ac action.ActionConfig) {
-						if err := a.ExecuteAction(ac); err != nil {
+					ac := actionConfig
+					execCopy := execCtx
+					go func(cfg action.ActionConfig, ctx *action.ExecutionContext) {
+						if err := a.ExecuteActionWithContext(cfg, ctx); err != nil {
 							a.Events.Dispatch(events.Errorf("action", "Error executing action: %v", err))
 						}
-					}(actionConfig)
+					}(ac, execCopy)
 				}
 			}
 		}
@@ -452,28 +459,51 @@ func (a *App) RemoveEventAction(eventName string, actionIndex int) error {
 }
 
 func (a *App) ExecuteAction(actionConfig action.ActionConfig) error {
-	action, err := action.NewActionFromConfig(actionConfig)
+	return a.ExecuteActionWithContext(actionConfig, nil)
+}
+
+func (a *App) ExecuteActionWithContext(actionConfig action.ActionConfig, execCtx *action.ExecutionContext) error {
+	logSource := resolveActionLogSource(execCtx)
+	actionInstance, err := action.NewActionFromConfig(actionConfig)
 	if err != nil {
-		a.Events.Dispatch(events.Errorf("manual_run", "error creating action: %v", err))
+		a.Events.Dispatch(events.Errorf(logSource, "error creating action: %v", err))
 		return err
 	}
 
-	if err := action.Validate(); err != nil {
-		a.Events.Dispatch(events.Errorf("manual_run", "invalid action configuration: %v", err))
+	if err := actionInstance.Validate(); err != nil {
+		a.Events.Dispatch(events.Errorf(logSource, "invalid action configuration: %v", err))
 		return err
 	}
 
-	a.Events.Dispatch(events.Debugf("manual_run", "Executing action type '%s'", actionConfig.Type))
+	a.Events.Dispatch(events.Debugf(logSource, "Executing action type '%s'", actionConfig.Type))
 
-	go func() { // run in a goroutine to not block the GUI
-		if err := action.Execute(a.ActionExecutor); err != nil {
-			a.Events.Dispatch(events.Errorf("manual_run", "action '%s' failed: %v", actionConfig.Type, err))
+	baseExecutor := a.ActionExecutor
+	if baseExecutor == nil {
+		baseExecutor = action.NewExecutor(a.DB, a.API)
+		a.ActionExecutor = baseExecutor
+	}
+	executorWithContext := baseExecutor.WithContext(execCtx)
+	actionType := actionConfig.Type
+
+	go func(execCopy *action.Executor) { // run in a goroutine to not block the GUI
+		if err := actionInstance.Execute(execCopy); err != nil {
+			a.Events.Dispatch(events.Errorf(logSource, "action '%s' failed: %v", actionType, err))
 		} else {
-			a.Events.Dispatch(events.Debugf("manual_run", "Action '%s' completed successfully", actionConfig.Type))
+			a.Events.Dispatch(events.Debugf(logSource, "Action '%s' completed successfully", actionType))
 		}
-	}()
+	}(executorWithContext)
 
 	return nil
+}
+
+func resolveActionLogSource(ctx *action.ExecutionContext) string {
+	if ctx == nil {
+		return "manual_run"
+	}
+	if ctx.EventType != "" {
+		return fmt.Sprintf("action.%s", ctx.EventType)
+	}
+	return "action"
 }
 
 // TriggerEventAction executes a specific action string (e.g., "db:my_function", "exec:ls").
