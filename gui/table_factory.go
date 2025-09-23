@@ -9,6 +9,13 @@ import (
 	"strings"
 )
 
+const (
+	checkboxColumnWidth float32 = 30
+	idColumnWidth       float32 = 60
+	nameColumnWidth     float32 = 100
+	defaultPageSize             = 50
+)
+
 // TableConfig holds configuration for table creation
 type TableConfig struct {
 	Headers           []string
@@ -32,6 +39,13 @@ func NewTableFactory(ui *Gui) *TableFactory {
 	return &TableFactory{ui: ui}
 }
 
+func (tf *TableFactory) newTableLabel() *widget.Label {
+	label := widget.NewLabel("template")
+	label.Alignment = fyne.TextAlignLeading
+	label.Wrapping = fyne.TextTruncate
+	return label
+}
+
 // CreateTable creates a standardized table with consistent functionality
 func (tf *TableFactory) CreateTable(config TableConfig) *widget.Table {
 	if len(config.Data) == 0 {
@@ -50,10 +64,10 @@ func (tf *TableFactory) CreateTable(config TableConfig) *widget.Table {
 			if config.HasCheckboxes {
 				return container.NewHBox(
 					widget.NewCheck("", nil),
-					widget.NewLabel("template"),
+					tf.newTableLabel(),
 				)
 			}
-			return widget.NewLabel("template")
+			return tf.newTableLabel()
 		},
 		func(i widget.TableCellID, o fyne.CanvasObject) {
 			if config.HasCheckboxes {
@@ -190,7 +204,7 @@ func (tf *TableFactory) applyStatusColor(label *widget.Label, i widget.TableCell
 func (tf *TableFactory) createEmptyTable(headers []string) *widget.Table {
 	return widget.NewTable(
 		func() (int, int) { return 1, len(headers) },
-		func() fyne.CanvasObject { return widget.NewLabel("template") },
+		func() fyne.CanvasObject { return tf.newTableLabel() },
 		func(i widget.TableCellID, o fyne.CanvasObject) {
 			label := o.(*widget.Label)
 			if i.Row == 0 {

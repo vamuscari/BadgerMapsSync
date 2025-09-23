@@ -18,12 +18,25 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	WebhookAccountCreate = "account_create"
+	WebhookCheckin       = "checkin"
+)
+
 type ServerConfig struct {
-	Host       string `yaml:"host"`
-	Port       int    `yaml:"port"`
-	TLSEnabled bool   `yaml:"tls_enabled"`
-	TLSCert    string `yaml:"tls_cert"`
-	TLSKey     string `yaml:"tls_key"`
+	Host       string          `yaml:"host"`
+	Port       int             `yaml:"port"`
+	TLSEnabled bool            `yaml:"tls_enabled"`
+	TLSCert    string          `yaml:"tls_cert"`
+	TLSKey     string          `yaml:"tls_key"`
+	Webhooks   map[string]bool `yaml:"webhooks"`
+}
+
+func defaultWebhookConfig() map[string]bool {
+	return map[string]bool{
+		WebhookAccountCreate: true,
+		WebhookCheckin:       true,
+	}
 }
 
 type Config struct {
@@ -106,8 +119,9 @@ func NewApp() *App {
 				Path: utils.GetConfigDirFile("badgermaps.db"),
 			},
 			Server: ServerConfig{
-				Host: "localhost",
-				Port: 8080,
+				Host:     "localhost",
+				Port:     8080,
+				Webhooks: defaultWebhookConfig(),
 			},
 			MaxConcurrentRequests: 5,
 		},
@@ -157,6 +171,7 @@ func (a *App) LoadConfig() error {
 		a.validateAndCleanActions()
 		a.ensureExecActionShellDefaults()
 	}
+	a.ensureServerWebhookDefaults()
 
 	// Transfer server config to state
 	a.State.ServerHost = a.Config.Server.Host
@@ -272,6 +287,19 @@ func (a *App) ensureExecActionShellDefaults() {
 		a.Events.Dispatch(events.Warningf("config", "Failed to save config after backfilling exec use_shell flag: %v", err))
 	} else {
 		a.Events.Dispatch(events.Infof("config", "Configuration updated to backfill exec action 'use_shell' flag."))
+	}
+}
+
+func (a *App) ensureServerWebhookDefaults() {
+	if len(a.Config.Server.Webhooks) == 0 {
+		a.Config.Server.Webhooks = defaultWebhookConfig()
+		return
+	}
+
+	for key, defaultValue := range defaultWebhookConfig() {
+		if _, ok := a.Config.Server.Webhooks[key]; !ok {
+			a.Config.Server.Webhooks[key] = defaultValue
+		}
 	}
 }
 

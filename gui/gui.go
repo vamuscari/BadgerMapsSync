@@ -11,15 +11,16 @@ import (
 	"fyne.io/fyne/v2/data/binding"
 
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"fyne.io/fyne/v2"
 	fapp "fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
@@ -141,11 +142,13 @@ func (r *spacerRenderer) Destroy() {}
 type logEntry struct {
 	widget.BaseWidget
 	label *widget.Label
+	lines int
 }
 
 func newLogEntry() *logEntry {
 	e := &logEntry{
 		label: widget.NewLabel(""),
+		lines: 1,
 	}
 	e.label.Wrapping = fyne.TextWrapWord
 	e.ExtendBaseWidget(e)
@@ -156,24 +159,61 @@ func (e *logEntry) SetText(text string) {
 	lines := strings.Split(text, "\n")
 	if len(lines) > 3 {
 		text = strings.Join(lines[:3], "\n") + "..."
+		lines = lines[:3]
 	}
 	e.label.SetText(text)
+	e.lines = len(lines)
+	if e.lines < 1 {
+		e.lines = 1
+	}
 }
 
 func (e *logEntry) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(e.label)
+	renderer := &logEntryRenderer{
+		entry:   e,
+		objects: []fyne.CanvasObject{e.label},
+	}
+	return renderer
 }
 
-func (e *logEntry) MinSize() fyne.Size {
-	min := e.label.MinSize()
-	if e.label.Text != "" {
-		lines := strings.Count(e.label.Text, "\n") + 1
-		if lines > 3 {
-			min.Height = e.label.MinSize().Height * 3
-		}
-	}
-	return min
+type logEntryRenderer struct {
+	entry   *logEntry
+	objects []fyne.CanvasObject
 }
+
+func (r *logEntryRenderer) Layout(size fyne.Size) {
+	r.entry.label.Resize(size)
+}
+
+func (r *logEntryRenderer) MinSize() fyne.Size {
+	labelMin := r.entry.label.MinSize()
+	lineHeight := labelMin.Height
+	if lineHeight <= 0 {
+		lineHeight = float32(theme.TextSize())
+	}
+	lines := r.entry.lines + 1 // Allow an extra wrapped line for narrow layouts
+	const maxLines = 5
+	if lines > maxLines {
+		lines = maxLines
+	}
+	height := lineHeight * float32(lines)
+	height += theme.Padding()
+	width := labelMin.Width
+	if width <= 0 {
+		width = float32(theme.TextSize()) * 10
+	}
+	return fyne.NewSize(width, height)
+}
+
+func (r *logEntryRenderer) Refresh() {
+	r.entry.label.Refresh()
+}
+
+func (r *logEntryRenderer) Objects() []fyne.CanvasObject {
+	return r.objects
+}
+
+func (r *logEntryRenderer) Destroy() {}
 
 // Gui struct holds all the UI components and application state
 type Gui struct {
@@ -407,9 +447,13 @@ func (ui *Gui) createMainContent() fyne.CanvasObject {
 		ui.detailsView,
 	)
 	ui.rightPane = rightPaneContent
+	if ui.syncCenter != nil {
+		ui.syncCenter.applyStoredDetail()
+	}
 
 	split := container.NewHSplit(mainContent, ui.rightPane)
-	split.Offset = 0.75 // Give more space to main content
+	split.Offset = 0.8 // Give main content more space
+	split.SetOffset(split.Offset)
 	return split
 }
 
@@ -881,7 +925,20 @@ func (ui *Gui) createActionsTab() fyne.CanvasObject {
 			actionsContainer.Add(container.NewBorder(nil, nil, icon, toolbar, label))
 		}
 
-		card := widget.NewCard(ea.Name, fmt.Sprintf("Event: %s, Source: %s", ea.Event, ea.Source), actionsContainer)
+		friendlyEvent := formatEventName(ea.Event)
+		friendlySource := "Any"
+		if strings.TrimSpace(ea.Source) != "" {
+			friendlySource = formatEventName(ea.Source)
+		}
+
+		cardTitle := strings.TrimSpace(ea.Name)
+		if cardTitle == "" {
+			cardTitle = friendlyEvent
+		}
+
+		subtitle := fmt.Sprintf("Event: %s | Source: %s", friendlyEvent, friendlySource)
+
+		card := widget.NewCard(cardTitle, subtitle, actionsContainer)
 		actionsContent.Add(card)
 	}
 
@@ -1491,13 +1548,9 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 	}()
 
 	// Layout - simplified top section
-	topRow := container.NewHBox(
-		widget.NewLabel("Table:"),
-		tableSelect,
-		refreshButton,
-		layout.NewSpacer(),
-		searchEntry,
-	)
+	controlsLeft := container.NewHBox(widget.NewLabel("Table:"), tableSelect, refreshButton)
+	searchControls := container.NewBorder(nil, nil, widget.NewLabel("Search:"), nil, searchEntry)
+	topRow := container.NewBorder(nil, nil, controlsLeft, nil, searchControls)
 
 	topContent := container.NewVBox(
 		widget.NewLabelWithStyle("Database Explorer", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
@@ -1617,6 +1670,36 @@ func (ui *Gui) OpenExplorerTable(tableName string) bool {
 	return true
 }
 
+func (ui *Gui) OpenConfigTab() bool {
+	if ui.tabs == nil {
+		return false
+	}
+
+	for idx, tab := range ui.tabs.Items {
+		if tab.Text == "Configuration" {
+			ui.tabs.SelectIndex(idx)
+			return true
+		}
+	}
+
+	return false
+}
+
+func (ui *Gui) OpenServerTab() bool {
+	if ui.tabs == nil {
+		return false
+	}
+
+	for idx, tab := range ui.tabs.Items {
+		if tab.Text == "Server" {
+			ui.tabs.SelectIndex(idx)
+			return true
+		}
+	}
+
+	return false
+}
+
 func (ui *Gui) ensureExplorerTableOption(tableName string) bool {
 	if ui.explorerTableSelect == nil {
 		return false
@@ -1649,11 +1732,97 @@ func containsString(haystack []string, needle string) bool {
 	return false
 }
 
+func formatEventName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "Any"
+	}
+
+	replacer := strings.NewReplacer(".", " ", "_", " ", "-", " ")
+	normalized := replacer.Replace(value)
+	parts := strings.Fields(normalized)
+	if len(parts) == 0 {
+		return value
+	}
+	for i, part := range parts {
+		runes := []rune(strings.ToLower(part))
+		if len(runes) > 0 {
+			runes[0] = unicode.ToUpper(runes[0])
+			parts[i] = string(runes)
+		} else {
+			parts[i] = part
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func (ui *Gui) buildSyncAutomationCard() fyne.CanvasObject {
+	autoSyncCheck := widget.NewCheck("Enable automatic sync", nil)
+	autoSyncCheck.SetChecked(false)
+
+	scheduleSelect := widget.NewSelect([]string{
+		"Every 5 minutes",
+		"Every 15 minutes",
+		"Every 30 minutes",
+		"Hourly",
+		"Every 6 hours",
+		"Daily",
+	}, nil)
+	scheduleSelect.SetSelected("Every 30 minutes")
+
+	saveBtn := widget.NewButtonWithIcon("Save Automation Settings", theme.DocumentSaveIcon(), func() {
+		ui.ShowToast("Sync automation settings saved (coming soon)")
+	})
+
+	return widget.NewCard(
+		"Sync Automation",
+		"Manage how the embedded server schedules sync runs.",
+		container.NewVBox(
+			autoSyncCheck,
+			container.NewGridWithColumns(2, widget.NewLabel("Interval"), scheduleSelect),
+			container.NewCenter(saveBtn),
+		),
+	)
+}
+
 // createServerTab creates the content for the "Server" tab
 func (ui *Gui) createServerTab() fyne.CanvasObject {
 	serverStatusLabel := widget.NewLabel("Status: Unknown")
 	startButton := widget.NewButtonWithIcon("Start Server", theme.MediaPlayIcon(), nil)
 	stopButton := widget.NewButtonWithIcon("Stop Server", theme.MediaStopIcon(), nil)
+
+	webhooks := ui.app.Config.Server.Webhooks
+	if webhooks == nil {
+		webhooks = map[string]bool{
+			app.WebhookAccountCreate: true,
+			app.WebhookCheckin:       true,
+		}
+	}
+
+	accountWebhookCheck := widget.NewCheck("Account create webhook", nil)
+	checkinWebhookCheck := widget.NewCheck("Check-in webhook", nil)
+	accountWebhookCheck.SetChecked(webhooks[app.WebhookAccountCreate])
+	checkinWebhookCheck.SetChecked(webhooks[app.WebhookCheckin])
+	webhookStatusLabel := widget.NewLabel("")
+	updateWebhookStatus := func(accountEnabled, checkinEnabled bool) {
+		if !accountEnabled && !checkinEnabled {
+			webhookStatusLabel.SetText("All webhooks disabled; server will only serve /health.")
+			return
+		}
+		webhookStatusLabel.SetText("Select which webhooks the embedded server should handle.")
+	}
+	updateWebhookStatus(accountWebhookCheck.Checked, checkinWebhookCheck.Checked)
+
+	accountWebhookCheck.OnChanged = func(enabled bool) {
+		currentCheckin := checkinWebhookCheck.Checked
+		updateWebhookStatus(enabled, currentCheckin)
+		ui.presenter.HandleUpdateServerWebhooks(enabled, currentCheckin)
+	}
+	checkinWebhookCheck.OnChanged = func(enabled bool) {
+		currentAccount := accountWebhookCheck.Checked
+		updateWebhookStatus(currentAccount, enabled)
+		ui.presenter.HandleUpdateServerWebhooks(currentAccount, enabled)
+	}
 
 	var refreshServerStatus func()
 	refreshServerStatus = func() {
@@ -1683,9 +1852,16 @@ func (ui *Gui) createServerTab() fyne.CanvasObject {
 	serverCard := widget.NewCard("Server Management", "", container.NewVBox(
 		serverStatusLabel,
 		container.NewGridWithColumns(2, startButton, stopButton),
+		widget.NewSeparator(),
+		widget.NewLabelWithStyle("Webhooks", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		accountWebhookCheck,
+		checkinWebhookCheck,
+		webhookStatusLabel,
 	))
 
-	return container.NewVScroll(container.NewVBox(serverCard))
+	syncAutomationCard := ui.buildSyncAutomationCard()
+
+	return container.NewVScroll(container.NewVBox(serverCard, syncAutomationCard))
 }
 
 // createDebugTab creates the content for the "Debug" tab
@@ -1845,6 +2021,90 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 		serverForm,
 	))
 
+	// Sync Preferences
+	conflictStrategyRadio := widget.NewRadioGroup([]string{
+		"Always use local changes",
+		"Always use remote changes",
+		"Use most recent",
+		"Ask every time",
+	}, nil)
+	conflictStrategyRadio.SetSelected("Ask every time")
+
+	maxConcurrent := ui.app.Config.MaxConcurrentRequests
+	if maxConcurrent < 1 {
+		maxConcurrent = 1
+	}
+	defaultParallelConcurrency := maxConcurrent
+	if defaultParallelConcurrency < 2 {
+		defaultParallelConcurrency = 2
+	}
+
+	parallelProcessingCheck := widget.NewCheck("Enable parallel processing", nil)
+	parallelProcessingCheck.SetChecked(maxConcurrent > 1)
+	maxConcurrentEntry := widget.NewEntry()
+	maxConcurrentEntry.SetText(strconv.Itoa(maxConcurrent))
+	lastParallelValue := strconv.Itoa(defaultParallelConcurrency)
+	if maxConcurrent > 1 {
+		lastParallelValue = strconv.Itoa(maxConcurrent)
+	}
+	if !parallelProcessingCheck.Checked {
+		maxConcurrentEntry.Disable()
+	}
+	maxConcurrentEntry.OnChanged = func(value string) {
+		if !parallelProcessingCheck.Checked {
+			return
+		}
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" || trimmed == "0" || trimmed == "1" {
+			return
+		}
+		lastParallelValue = trimmed
+	}
+	parallelProcessingCheck.OnChanged = func(enabled bool) {
+		if enabled {
+			value := strings.TrimSpace(maxConcurrentEntry.Text)
+			if value == "" || value == "1" {
+				maxConcurrentEntry.SetText(lastParallelValue)
+			}
+			maxConcurrentEntry.Enable()
+			return
+		}
+		current := strings.TrimSpace(maxConcurrentEntry.Text)
+		if current != "" && current != "0" && current != "1" {
+			lastParallelValue = current
+		}
+		maxConcurrentEntry.SetText("1")
+		maxConcurrentEntry.Disable()
+	}
+
+	batchSizeEntry := widget.NewEntry()
+	batchSizeEntry.SetText("100")
+
+	verboseLoggingCheck := widget.NewCheck("Verbose logging", nil)
+	logRetentionSelect := widget.NewSelect([]string{
+		"7 days",
+		"30 days",
+		"90 days",
+		"Forever",
+	}, nil)
+	logRetentionSelect.SetSelected("30 days")
+
+	saveSyncPrefsBtn := widget.NewButtonWithIcon("Save Sync Preferences", theme.DocumentSaveIcon(), func() {
+		ui.ShowToast("Sync preferences saved (coming soon)")
+	})
+
+	syncPreferencesCard := widget.NewCard("Sync Preferences", "Control conflict handling and logging for manual sync runs.", container.NewVBox(
+		widget.NewForm(
+			widget.NewFormItem("Conflict Resolution", conflictStrategyRadio),
+			widget.NewFormItem("Batch Size", batchSizeEntry),
+			widget.NewFormItem("Verbose Logging", verboseLoggingCheck),
+			widget.NewFormItem("Log Retention", logRetentionSelect),
+			widget.NewFormItem("Parallel Processing", parallelProcessingCheck),
+			widget.NewFormItem("Max Concurrent", maxConcurrentEntry),
+		),
+		container.NewCenter(saveSyncPrefsBtn),
+	))
+
 	// Other Settings
 	verboseCheck := widget.NewCheck("Debug", nil)
 	verboseCheck.SetChecked(ui.app.State.Debug)
@@ -1858,6 +2118,8 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 			serverHostEntry.Text, serverPortEntry.Text, tlsEnabledCheck.Checked, tlsCertEntry.Text, tlsKeyEntry.Text,
 			false, // verbose is deprecated in gui
 			verboseCheck.Checked,
+			maxConcurrentEntry.Text,
+			parallelProcessingCheck.Checked,
 		)
 	})
 
@@ -1882,6 +2144,7 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 		apiCard,
 		dbCard,
 		serverCard,
+		syncPreferencesCard,
 		otherCard,
 		schemaCard,
 	)

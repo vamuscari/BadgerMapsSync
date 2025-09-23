@@ -65,8 +65,29 @@ func (p *CliPresenter) RunServer(config *ServerConfig) {
 	accountCreateHandler := http.HandlerFunc(p.HandleAccountCreateWebhook)
 	checkinHandler := http.HandlerFunc(p.HandleCheckinWebhook)
 
-	mux.Handle("/webhook/account/create", WebhookLoggingMiddleware(accountCreateHandler, p.App))
-	mux.Handle("/webhook/checkin", WebhookLoggingMiddleware(checkinHandler, p.App))
+	enabledWebhooks := p.App.Config.Server.Webhooks
+	if len(enabledWebhooks) == 0 {
+		enabledWebhooks = map[string]bool{
+			app.WebhookAccountCreate: true,
+			app.WebhookCheckin:       true,
+		}
+	}
+
+	if enabledWebhooks[app.WebhookAccountCreate] {
+		mux.Handle("/webhook/account/create", WebhookLoggingMiddleware(accountCreateHandler, p.App))
+	} else {
+		p.App.Events.Dispatch(events.Infof("server", "Account create webhook disabled by configuration"))
+	}
+
+	if enabledWebhooks[app.WebhookCheckin] {
+		mux.Handle("/webhook/checkin", WebhookLoggingMiddleware(checkinHandler, p.App))
+	} else {
+		p.App.Events.Dispatch(events.Infof("server", "Checkin webhook disabled by configuration"))
+	}
+
+	if !enabledWebhooks[app.WebhookAccountCreate] && !enabledWebhooks[app.WebhookCheckin] {
+		p.App.Events.Dispatch(events.Warningf("server", "All webhooks are disabled; server will only serve /health"))
+	}
 
 	if p.App.Config.WebhookCatchAll {
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -141,8 +162,16 @@ func (p *CliPresenter) HandleReplayWebhook(id int) {
 
 	switch uri {
 	case "/webhook/account/create":
+		if !p.App.Config.Server.Webhooks[app.WebhookAccountCreate] {
+			p.App.Events.Dispatch(events.Warningf("server", "Replay requested for disabled account create webhook"))
+			return
+		}
 		p.HandleAccountCreateWebhook(rr, req)
 	case "/webhook/checkin":
+		if !p.App.Config.Server.Webhooks[app.WebhookCheckin] {
+			p.App.Events.Dispatch(events.Warningf("server", "Replay requested for disabled checkin webhook"))
+			return
+		}
 		p.HandleCheckinWebhook(rr, req)
 	default:
 		p.App.Events.Dispatch(events.Warningf("server", "No handler for path: %s", uri))

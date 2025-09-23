@@ -95,54 +95,47 @@ func TestSyncCenterInitialization(t *testing.T) {
 	ui.showWelcome = false // Skip welcome for tests
 
 	ui.window = test.NewWindow(ui.createContent())
-	ui.tabs.SelectIndex(1) // Select the "Sync Center" tab (was "Pull" tab)
+	ui.tabs.SelectIndex(1) // Select the "Sync Center" tab
 
-	// Find the sync button in the sync center
-	syncButton := findWidget(ui.window.Canvas().Content(), func(o fyne.CanvasObject) bool {
-		if b, ok := o.(*widget.Button); ok {
-			return b.Text == "Start Sync"
-		}
-		return false
-	})
-	if syncButton == nil {
-		t.Fatal("Could not find sync button")
+	if ui.syncCenter.syncTypeSelect == nil {
+		t.Fatal("Sync type selector not initialized")
+	}
+	if ui.syncCenter.scopeSelect == nil {
+		t.Fatal("Scope selector not initialized")
+	}
+	if ui.syncCenter.actionButton == nil {
+		t.Fatal("Action button not initialized")
 	}
 
-	// Find the sync mode selector
-	syncModeSelect := findWidget(ui.window.Canvas().Content(), func(o fyne.CanvasObject) bool {
-		if s, ok := o.(*widget.Select); ok {
-			// Check if this select contains sync modes
-			for _, option := range s.Options {
-				if option == "Two-way Sync" {
-					return true
-				}
-			}
-		}
-		return false
-	})
-	if syncModeSelect == nil {
-		t.Fatal("Could not find sync mode selector")
+	if ui.syncCenter.currentType != syncKindAll {
+		t.Errorf("expected default sync type %q, got %q", syncKindAll, ui.syncCenter.currentType)
+	}
+	if ui.syncCenter.actionButton.Text != "Sync Everything" {
+		t.Fatalf("expected default action label 'Sync Everything', got %q", ui.syncCenter.actionButton.Text)
+	}
+	if ui.syncCenter.scopeGroup.Visible() {
+		t.Fatalf("scope controls should be hidden for %s", syncKindAll)
 	}
 
-	// Verify default selection
-	if syncModeSelect.(*widget.Select).Selected != "Two-way Sync" {
-		t.Errorf("Expected default sync mode to be 'Two-way Sync', got %s", syncModeSelect.(*widget.Select).Selected)
+	ui.syncCenter.syncTypeSelect.SetSelected(syncKindAccounts)
+
+	if !ui.syncCenter.scopeGroup.Visible() {
+		t.Fatal("scope selector should be visible when Accounts is active")
+	}
+	if ui.syncCenter.scopeSelect.Selected != scopeAll {
+		t.Fatalf("expected scope default %q, got %q", scopeAll, ui.syncCenter.scopeSelect.Selected)
+	}
+	if ui.syncCenter.actionButton.Text != "Pull All Accounts" {
+		t.Fatalf("expected action label 'Pull All Accounts', got %q", ui.syncCenter.actionButton.Text)
 	}
 
-	// Verify sync center tabs are present
-	syncTabs := findWidget(ui.window.Canvas().Content(), func(o fyne.CanvasObject) bool {
-		if tabs, ok := o.(*container.AppTabs); ok {
-			// Check if this is the sync center tabs (has "Pending Changes" tab)
-			for _, item := range tabs.Items {
-				if item.Text == "Pending Changes" {
-					return true
-				}
-			}
-		}
-		return false
-	})
-	if syncTabs == nil {
-		t.Fatal("Could not find sync center tabs")
+	ui.syncCenter.scopeSelect.SetSelected(scopeSingle)
+
+	if !ui.syncCenter.omniGroup.Visible() {
+		t.Fatal("omnibox should be visible when Single scope is selected")
+	}
+	if ui.syncCenter.actionButton.Text != "Pull Account" {
+		t.Fatalf("expected action label 'Pull Account', got %q", ui.syncCenter.actionButton.Text)
 	}
 }
 

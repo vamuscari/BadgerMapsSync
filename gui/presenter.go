@@ -330,6 +330,21 @@ func (p *GuiPresenter) HandlePullCheckins() {
 	}()
 }
 
+// HandlePullCheckinsForAccount pulls all check-ins for a specific account ID.
+func (p *GuiPresenter) HandlePullCheckinsForAccount(accountID int) {
+	p.app.Events.Dispatch(events.Debugf("presenter", "HandlePullCheckinsForAccount called for account %d", accountID))
+	p.app.Events.Dispatch(events.Infof("presenter", "Pulling check-ins for account %d...", accountID))
+
+	go func() {
+		if err := pull.PullCheckinsForAccount(p.app, accountID); err != nil {
+			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
+			p.view.ShowToast(fmt.Sprintf("Error: Failed to pull check-ins for account %d.", accountID))
+			return
+		}
+		p.view.ShowToast(fmt.Sprintf("Success: Pulled check-ins for account %d.", accountID))
+	}()
+}
+
 // HandlePullRoute pulls a single route by its ID.
 func (p *GuiPresenter) HandlePullRoute(idStr string) {
 	p.app.Events.Dispatch(events.Debugf("presenter", "HandlePullRoute called with id: %s", idStr))
@@ -453,6 +468,8 @@ func (p *GuiPresenter) HandleSaveConfig(
 	apiKey, baseURL, dbType, dbPath, dbHost, dbPortStr, dbUser, dbPass, dbName,
 	serverHost, serverPortStr string, tlsEnabled bool, tlsCert, tlsKey string,
 	verbose, debug bool,
+	maxConcurrentStr string,
+	parallelProcessing bool,
 ) {
 	p.app.Events.Dispatch(events.Debugf("presenter", "HandleSaveConfig called"))
 	p.app.Events.Dispatch(events.Infof("presenter", "Saving configuration..."))
@@ -469,6 +486,25 @@ func (p *GuiPresenter) HandleSaveConfig(
 	p.app.Config.Server.TLSCert = tlsCert
 	p.app.Config.Server.TLSKey = tlsKey
 	p.app.State.Debug = debug
+
+	trimmedMax := strings.TrimSpace(maxConcurrentStr)
+	maxConcurrent := 1
+	if parallelProcessing {
+		parsed, err := strconv.Atoi(trimmedMax)
+		if err != nil {
+			p.app.Events.Dispatch(events.Warningf("presenter", "Invalid max concurrent setting '%s'; defaulting to 2", trimmedMax))
+			maxConcurrent = 2
+		} else {
+			maxConcurrent = parsed
+		}
+		if maxConcurrent < 2 {
+			maxConcurrent = 2
+		}
+	}
+	if maxConcurrent > 10 {
+		maxConcurrent = 10
+	}
+	p.app.Config.MaxConcurrentRequests = maxConcurrent
 
 	port, _ := strconv.Atoi(dbPortStr)
 
@@ -662,6 +698,27 @@ func (p *GuiPresenter) HandleStopServer() {
 		p.view.ShowErrorDialog(err)
 	}
 	p.view.RefreshHomeTab()
+}
+
+// HandleUpdateServerWebhooks persists the enabled webhook set.
+func (p *GuiPresenter) HandleUpdateServerWebhooks(accountEnabled, checkinEnabled bool) {
+	if p.app.Config.Server.Webhooks == nil {
+		p.app.Config.Server.Webhooks = make(map[string]bool)
+	}
+	p.app.Config.Server.Webhooks[app.WebhookAccountCreate] = accountEnabled
+	p.app.Config.Server.Webhooks[app.WebhookCheckin] = checkinEnabled
+	if err := p.app.SaveConfig(); err != nil {
+		errWrapped := fmt.Errorf("failed to save webhook configuration: %w", err)
+		p.app.Events.Dispatch(events.Errorf("presenter", errWrapped.Error()))
+		p.view.ShowErrorDialog(errWrapped)
+		return
+	}
+	p.app.Events.Dispatch(events.Infof("presenter", "Updated webhook configuration (account: %t, checkin: %t)", accountEnabled, checkinEnabled))
+	if !accountEnabled && !checkinEnabled {
+		p.view.ShowToast("All webhooks disabled; server will only serve /health.")
+		return
+	}
+	p.view.ShowToast("Webhook settings saved.")
 }
 
 // --- Status Handlers ---

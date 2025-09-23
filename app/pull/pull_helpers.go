@@ -139,6 +139,36 @@ func PullCheckin(a *app.App, checkinID int) (err error) {
 	return nil
 }
 
+// PullCheckinsForAccount pulls all check-ins for a specific account ID.
+func PullCheckinsForAccount(a *app.App, accountID int) (err error) {
+	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "checkins", Payload: events.PullStartPayload{ResourceID: accountID}})
+	a.Events.Dispatch(events.Infof("pull", "Pulling check-ins for account ID: %d", accountID))
+
+	count := 0
+	defer func() {
+		if err != nil {
+			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "checkins", Payload: events.ErrorPayload{Error: err}})
+		} else {
+			a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "checkins", Payload: events.CompletionPayload{Success: true, Count: count}})
+		}
+	}()
+
+	checkins, err := a.API.GetCheckinsForAccount(accountID)
+	if err != nil {
+		return fmt.Errorf("error getting check-ins for account %d: %w", accountID, err)
+	}
+
+	count = len(checkins)
+	for _, checkin := range checkins {
+		if err := StoreCheckin(a, checkin); err != nil {
+			return fmt.Errorf("error storing check-in %d for account %d: %w", checkin.CheckinId.Int64, accountID, err)
+		}
+	}
+
+	a.Events.Dispatch(events.Infof("pull", "Successfully pulled %d check-ins for account %d", count, accountID))
+	return nil
+}
+
 func PullGroupCheckins(a *app.App, progressCallback func(current, total int)) (err error) {
 	a.Events.Dispatch(events.Event{Type: "pull.group.start", Source: "checkins"})
 
