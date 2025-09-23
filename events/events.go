@@ -95,16 +95,18 @@ func (p StoreSuccessPayload) EventType() EventType { return "pull.store.success"
 
 // CompletionPayload is used for events that signify the end of a process.
 type CompletionPayload struct {
-	Success bool
-	Error   error
-	Count   int
+	Success    bool
+	Error      error
+	Count      int
+	ResourceID interface{} `json:"resource_id,omitempty"`
 }
 
 func (p CompletionPayload) EventType() EventType { return "process.complete" }
 
 // ErrorPayload is for when an error occurs.
 type ErrorPayload struct {
-	Error error
+	Error      error
+	ResourceID interface{} `json:"resource_id,omitempty"`
 }
 
 func (p ErrorPayload) EventType() EventType { return "error" }

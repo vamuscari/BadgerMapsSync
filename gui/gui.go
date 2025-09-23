@@ -1215,18 +1215,35 @@ func (ui *Gui) createActionPopup(eventAction *action.EventAction, actionIndex in
 		sourceEntry.SetText(source)
 	}
 
-	tokenOptions := eventTokenOptions()
-	tokenLabels := make([]string, 0, len(tokenOptions))
-	optionLookup := make(map[string]eventTokenOption, len(tokenOptions))
-	for _, opt := range tokenOptions {
-		tokenLabels = append(tokenLabels, opt.Label)
-		optionLookup[opt.Label] = opt
-	}
-
-	tokenSelect := widget.NewSelect(tokenLabels, nil)
+	optionLookup := make(map[string]events.EventTokenOption)
+	tokenSelect := widget.NewSelect([]string{}, nil)
 	tokenSelect.PlaceHolder = "Insert event token"
 
 	var currentTarget *tokenInsertionTarget
+
+	refreshTokenOptions := func() {
+		eventValue := strings.TrimSpace(eventEntry.Text)
+		sourceValue := strings.TrimSpace(sourceEntry.Text)
+		tokenOptions := events.EventTokenOptions(eventValue, sourceValue)
+		tokenLabels := make([]string, 0, len(tokenOptions))
+		optionLookup = make(map[string]events.EventTokenOption, len(tokenOptions))
+		for _, opt := range tokenOptions {
+			tokenLabels = append(tokenLabels, opt.Label)
+			optionLookup[opt.Label] = opt
+		}
+		tokenSelect.Options = tokenLabels
+		tokenSelect.ClearSelected()
+		tokenSelect.Refresh()
+	}
+
+	eventEntry.OnChanged = func(string) {
+		refreshTokenOptions()
+	}
+	sourceEntry.OnChanged = func(string) {
+		refreshTokenOptions()
+	}
+
+	refreshTokenOptions()
 	registerTarget := func(entry *widget.Entry) *tokenInsertionTarget {
 		target := &tokenInsertionTarget{entry: entry}
 		entry.OnCursorChanged = func() {
@@ -1567,25 +1584,6 @@ func (ui *Gui) createActionPopup(eventAction *action.EventAction, actionIndex in
 
 	d.Resize(fyne.NewSize(500, 400))
 	d.Show()
-}
-
-type eventTokenOption struct {
-	Label        string
-	Token        string
-	Format       string
-	RequiresPath bool
-	Placeholder  string
-}
-
-func eventTokenOptions() []eventTokenOption {
-	return []eventTokenOption{
-		{Label: "Event Type ($EVENT_TYPE)", Token: "$EVENT_TYPE"},
-		{Label: "Event Source ($EVENT_SOURCE)", Token: "$EVENT_SOURCE"},
-		{Label: "Event JSON ($EVENT_JSON)", Token: "$EVENT_JSON"},
-		{Label: "Event Payload JSON ($EVENT_PAYLOAD_JSON)", Token: "$EVENT_PAYLOAD_JSON"},
-		{Label: "Event Payload Text ($EVENT_PAYLOAD)", Token: "$EVENT_PAYLOAD"},
-		{Label: "Payload Field… ($EVENT_PAYLOAD[path])", Format: "$EVENT_PAYLOAD[%s]", RequiresPath: true, Placeholder: "e.g. ResourceID"},
-	}
 }
 
 type tokenInsertionTarget struct {
