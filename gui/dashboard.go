@@ -91,9 +91,7 @@ func (d *SmartDashboard) createHeader() fyne.CanvasObject {
 	greetingLabel := widget.NewLabelWithStyle(greeting+"! Here's your sync overview:",
 		fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 
-	subtitle := widget.NewLabel("Track connections and recent sync activity below.")
-
-	return container.NewVBox(greetingLabel, subtitle)
+	return container.NewVBox(greetingLabel)
 }
 
 func (d *SmartDashboard) createStatusCards() fyne.CanvasObject {
@@ -339,20 +337,17 @@ func (d *SmartDashboard) createInsights() fyne.CanvasObject {
 		statWidgets = append(statWidgets, d.createSystemStatCard(stat))
 	}
 
+	if len(statWidgets) > 4 {
+		statWidgets = statWidgets[:4]
+	}
+
 	var grid fyne.CanvasObject
 	if len(statWidgets) == 0 {
 		empty := widget.NewLabel("No statistics available")
 		empty.Alignment = fyne.TextAlignCenter
 		grid = container.NewCenter(empty)
 	} else {
-		columns := 3
-		if len(statWidgets) < columns {
-			columns = len(statWidgets)
-		}
-		if columns == 0 {
-			columns = 1
-		}
-		grid = container.NewGridWithColumns(columns, statWidgets...)
+		grid = container.NewGridWithColumns(2, statWidgets...)
 	}
 
 	return container.NewVBox(

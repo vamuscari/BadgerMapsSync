@@ -2675,6 +2675,10 @@ func formatEventName(value string) string {
 }
 
 func (ui *Gui) buildSyncAutomationCard() fyne.CanvasObject {
+	summary := widget.NewLabel("Timed automatic sync keeps data aligned without manual runs.")
+	summary.Alignment = fyne.TextAlignLeading
+	summary.Wrapping = fyne.TextWrapWord
+
 	autoSyncCheck := widget.NewCheck("Enable automatic sync", nil)
 	autoSyncCheck.SetChecked(false)
 
@@ -2687,19 +2691,41 @@ func (ui *Gui) buildSyncAutomationCard() fyne.CanvasObject {
 		"Daily",
 	}, nil)
 	scheduleSelect.SetSelected("Every 30 minutes")
+	scheduleSelect.Disable()
+
+	autoSyncCheck.OnChanged = func(enabled bool) {
+		if enabled {
+			scheduleSelect.Enable()
+		} else {
+			scheduleSelect.Disable()
+		}
+	}
+
+	controls := container.NewGridWithColumns(2,
+		widget.NewLabel("Interval"),
+		scheduleSelect,
+	)
+
+	syncedHeading := widget.NewLabelWithStyle("Automatically synced items:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	syncedList := container.NewVBox(
+		widget.NewLabel("• Accounts"),
+		widget.NewLabel("• Check-ins"),
+		widget.NewLabel("• Health endpoint availability"),
+	)
 
 	saveBtn := widget.NewButtonWithIcon("Save Automation Settings", theme.DocumentSaveIcon(), func() {
 		ui.ShowToast("Sync automation settings saved (coming soon)")
 	})
 
-	return widget.NewCard(
-		"Sync Automation",
-		"Manage how the embedded server schedules sync runs.",
-		container.NewVBox(
-			autoSyncCheck,
-			container.NewGridWithColumns(2, widget.NewLabel("Interval"), scheduleSelect),
-			container.NewCenter(saveBtn),
-		),
+	return ui.newSectionCard(
+		"Automatic Sync",
+		"Manage the embedded scheduler settings.",
+		summary,
+		autoSyncCheck,
+		controls,
+		syncedHeading,
+		syncedList,
+		container.NewCenter(saveBtn),
 	)
 }
 
@@ -2773,16 +2799,19 @@ func (ui *Gui) createServerTab() fyne.CanvasObject {
 
 	refreshServerStatus()
 
-	serverStatusCard := widget.NewCard("Server Status", "", container.NewVBox(
+	serverHeader := container.NewVBox(
+		widget.NewLabelWithStyle("Server Status", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		serverStatusLabel,
 		widget.NewLabel("Use the controls below to start or stop the embedded server."),
-	))
+	)
 
-	webhookCard := widget.NewCard("Webhook Routing", "", container.NewVBox(
+	webhookCard := ui.newSectionCard(
+		"Webhook Routing",
+		"Select which webhooks the embedded server should handle.",
 		accountWebhookCheck,
 		checkinWebhookCheck,
 		webhookStatusLabel,
-	))
+	)
 
 	// Server configuration form
 	serverHostEntry := widget.NewEntry()
@@ -2833,15 +2862,20 @@ func (ui *Gui) createServerTab() fyne.CanvasObject {
 		)
 	})
 
-	serverSettingsCard := widget.NewCard("Server Configuration", "", container.NewVBox(
+	serverSettingsCard := ui.newSectionCard(
+		"Server Configuration",
+		"Configure host, TLS, and request logging for the embedded server.",
 		tlsEnabledCheck,
 		serverForm,
 		logRequestsCheck,
-	))
+	)
+
+	autoSyncCard := ui.buildSyncAutomationCard()
 
 	scrollContent := container.NewVScroll(container.NewVBox(
-		serverStatusCard,
+		serverHeader,
 		webhookCard,
+		autoSyncCard,
 		serverSettingsCard,
 	))
 
@@ -2863,7 +2897,7 @@ func (ui *Gui) createDebugTab() fyne.CanvasObject {
 
 // createConfigTab returns the config tab content
 func (ui *Gui) createConfigTab() fyne.CanvasObject {
-	return container.NewVScroll(ui.configTab)
+	return ui.configTab
 }
 
 // buildConfigTab builds the configuration tab UI
@@ -3120,22 +3154,22 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 		schemaButton,
 	)
 
-	actionsCard := ui.newSectionCard(
-		"Configuration Actions",
-		"View or persist the current settings.",
+	actionsFooter := container.NewVBox(
+		widget.NewSeparator(),
 		container.NewGridWithColumns(2, viewButton, saveButton),
 	)
 
-	return container.NewVBox(
+	scrollContent := container.NewVScroll(container.NewVBox(
 		NewSpacer(fyne.NewSize(0, 10)),
-		actionsCard,
 		apiCard,
 		dbCard,
 		syncPreferencesCard,
 		appearanceCard,
 		otherCard,
 		schemaCard,
-	)
+	))
+
+	return container.NewBorder(nil, actionsFooter, nil, nil, scrollContent)
 }
 
 // --- GuiView Implementation ---
@@ -3211,10 +3245,11 @@ func (ui *Gui) GetMainWindow() fyne.Window {
 // refreshConfigTab rebuilds and refreshes the configuration tab
 func (ui *Gui) RefreshConfigTab() {
 	newConfigTab := ui.buildConfigTab()
+	ui.configTab = newConfigTab
 	if ui.tabs != nil {
 		for _, tab := range ui.tabs.Items {
 			if tab.Text == "Configuration" {
-				tab.Content = container.NewVScroll(newConfigTab)
+				tab.Content = newConfigTab
 				break
 			}
 		}
