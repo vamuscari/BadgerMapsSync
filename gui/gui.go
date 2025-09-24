@@ -1174,7 +1174,12 @@ func (ui *Gui) createActionsTab() fyne.CanvasObject {
 	})
 
 	if len(eventActions) == 0 {
-		actionsContent.Add(widget.NewLabel("No actions configured."))
+		empty := ui.newSectionCard(
+			"Actions",
+			"No event actions configured yet.",
+			widget.NewLabel("Use the button below to add automation."),
+		)
+		actionsContent.Add(empty)
 	}
 
 	for _, eventAction := range eventActions {
@@ -1249,6 +1254,10 @@ func (ui *Gui) createActionsTab() fyne.CanvasObject {
 			actionsContainer.Add(container.NewBorder(nil, nil, icon, toolbar, label))
 		}
 
+		if len(actionsContainer.Objects) == 0 {
+			actionsContainer.Add(widget.NewLabel("No steps configured for this action."))
+		}
+
 		friendlyEvent := formatEventName(ea.Event)
 		friendlySource := "Any"
 		if strings.TrimSpace(ea.Source) != "" {
@@ -1262,7 +1271,11 @@ func (ui *Gui) createActionsTab() fyne.CanvasObject {
 
 		subtitle := fmt.Sprintf("Event: %s | Source: %s", friendlyEvent, friendlySource)
 
-		card := widget.NewCard(cardTitle, subtitle, actionsContainer)
+		card := ui.newSectionCard(
+			cardTitle,
+			subtitle,
+			actionsContainer,
+		)
 		actionsContent.Add(card)
 	}
 
