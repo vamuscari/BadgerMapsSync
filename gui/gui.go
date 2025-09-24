@@ -1264,12 +1264,8 @@ func (ui *Gui) createActionsTab() fyne.CanvasObject {
 			friendlySource = formatEventName(ea.Source)
 		}
 
-		cardTitle := strings.TrimSpace(ea.Name)
-		if cardTitle == "" {
-			cardTitle = friendlyEvent
-		}
-
-		subtitle := fmt.Sprintf("Event: %s | Source: %s", friendlyEvent, friendlySource)
+		cardTitle := friendlyEvent
+		subtitle := fmt.Sprintf("Source: %s", friendlySource)
 
 		card := ui.newSectionCard(
 			cardTitle,
