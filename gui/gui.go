@@ -2400,8 +2400,17 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 
 	// Layout - simplified top section
 	controlsLeft := container.NewHBox(widget.NewLabel("Table:"), tableSelect, refreshButton)
-	searchControls := container.NewBorder(nil, nil, widget.NewLabel("Search:"), nil, searchEntry)
-	topRow := container.NewBorder(nil, nil, controlsLeft, nil, searchControls)
+	var filterSidebar *fyne.Container
+	filterToggleBtn := widget.NewButtonWithIcon("Filters", theme.MenuDropDownIcon(), func() {
+		// Show filters in the slide-over (right pane)
+		if filterSidebar != nil {
+			ui.ShowDetails(filterSidebar)
+		}
+	})
+	// Make search entry take up available middle space
+	searchControls := container.NewBorder(nil, nil, widget.NewLabel("Search:"), nil, container.NewMax(searchEntry))
+	// Place filters button all the way to the right
+	topRow := container.NewBorder(nil, nil, controlsLeft, filterToggleBtn, searchControls)
 
 	filtersCard := widget.NewCard(
 		"Filters & Sorting",
@@ -2417,7 +2426,7 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 		),
 	)
 
-	filterSidebar := container.NewVBox(filtersCard)
+	filterSidebar = container.NewVBox(filtersCard)
 
 	topContent := container.NewVBox(
 		widget.NewLabelWithStyle("Database Explorer", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
@@ -2509,10 +2518,8 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 	)
 
 	centerContent := container.NewBorder(nil, nil, nil, nil, container.NewVScroll(tableContainer))
-	filterScroll := container.NewVScroll(filterSidebar)
-	filterScroll.SetMinSize(fyne.NewSize(260, 0))
-
-	return container.NewBorder(topContent, paginationBarStyled, nil, filterScroll, centerContent)
+	// Remove persistent sidebar; show filters via slide-over using right pane
+	return container.NewBorder(topContent, paginationBarStyled, nil, nil, centerContent)
 }
 
 // OpenExplorerPendingChanges switches to the explorer tab and selects a pending changes table.

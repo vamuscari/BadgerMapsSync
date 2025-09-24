@@ -5,6 +5,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"image/color"
@@ -34,7 +35,9 @@ type TableConfig struct {
 
 // TableFactory creates standardized tables across the application
 type TableFactory struct {
-	ui *Gui
+	ui                *Gui
+	activeTable       *widget.Table
+	activeColumnWidth map[int]float32
 }
 
 // NewTableFactory creates a new table factory
@@ -50,6 +53,119 @@ func (tf *TableFactory) newTableLabel() fyne.CanvasObject {
 	return container.NewMax(background, container.NewPadded(label))
 }
 
+// --- Clickable header (full-width button-like area with truncation)
+type headerClickable struct {
+	widget.BaseWidget
+	text   string
+	tapped func()
+	label  *widget.Label
+}
+
+func newHeaderClickable(text string, tapped func()) *headerClickable {
+	h := &headerClickable{text: text, tapped: tapped}
+	h.ExtendBaseWidget(h)
+	return h
+}
+
+func (h *headerClickable) Tapped(_ *fyne.PointEvent) {
+	if h.tapped != nil {
+		h.tapped()
+	}
+}
+
+func (h *headerClickable) CreateRenderer() fyne.WidgetRenderer {
+	lbl := widget.NewLabel(h.text)
+	lbl.Alignment = fyne.TextAlignLeading
+	lbl.TextStyle = fyne.TextStyle{Bold: true}
+	lbl.Wrapping = fyne.TextTruncate
+	h.label = lbl
+	return &headerClickableRenderer{h: h, objs: []fyne.CanvasObject{lbl}, content: lbl, label: lbl}
+}
+
+type headerClickableRenderer struct {
+	h       *headerClickable
+	objs    []fyne.CanvasObject
+	content fyne.CanvasObject
+	label   *widget.Label
+}
+
+func (r *headerClickableRenderer) Layout(size fyne.Size) {
+	if r.label != nil {
+		// inset to avoid visual clash with resize handle
+		r.label.Move(fyne.NewPos(4, 0))
+		r.label.Resize(fyne.NewSize(size.Width, size.Height))
+		return
+	}
+	r.content.Resize(size)
+}
+func (r *headerClickableRenderer) MinSize() fyne.Size           { return r.content.MinSize() }
+func (r *headerClickableRenderer) Refresh()                     { r.content.Refresh() }
+func (r *headerClickableRenderer) Objects() []fyne.CanvasObject { return r.objs }
+func (r *headerClickableRenderer) Destroy()                     {}
+
+// --- Column resize handle ---
+type columnResizeHandle struct {
+	widget.BaseWidget
+	tf   *TableFactory
+	col  int
+	drag float32
+}
+
+func newColumnResizeHandle(tf *TableFactory, col int) *columnResizeHandle {
+	h := &columnResizeHandle{tf: tf, col: col}
+	h.ExtendBaseWidget(h)
+	return h
+}
+
+func (h *columnResizeHandle) Dragged(e *fyne.DragEvent) {
+	if h.tf == nil || h.tf.activeTable == nil {
+		return
+	}
+	cur := h.tf.activeColumnWidth[h.col]
+	if cur <= 0 {
+		cur = 80
+	}
+	newW := cur + e.Dragged.DX
+	if newW < 40 {
+		newW = 40
+	}
+	if newW > 600 {
+		newW = 600
+	}
+	h.tf.activeTable.SetColumnWidth(h.col, newW)
+	h.tf.activeColumnWidth[h.col] = newW
+	h.tf.activeTable.Refresh()
+}
+
+func (h *columnResizeHandle) DragEnd() {}
+
+func (h *columnResizeHandle) CreateRenderer() fyne.WidgetRenderer {
+	// Visual thin handle
+	bar := canvas.NewRectangle(theme.SeparatorColor())
+	bar.SetMinSize(fyne.NewSize(6, 1))
+	objs := []fyne.CanvasObject{bar}
+	return &columnResizeHandleRenderer{h: h, bar: bar, objects: objs}
+}
+
+type columnResizeHandleRenderer struct {
+	h       *columnResizeHandle
+	bar     *canvas.Rectangle
+	objects []fyne.CanvasObject
+}
+
+func (r *columnResizeHandleRenderer) Layout(size fyne.Size) {
+	// Slimmer handle bar; nudge 1px beyond the right edge for continuity
+	r.bar.Resize(fyne.NewSize(3, size.Height))
+	r.bar.Move(fyne.NewPos(size.Width-1, 0))
+}
+
+func (r *columnResizeHandleRenderer) MinSize() fyne.Size { return fyne.NewSize(4, 1) }
+func (r *columnResizeHandleRenderer) Refresh()           { r.bar.Refresh() }
+func (r *columnResizeHandleRenderer) Objects() []fyne.CanvasObject {
+	return r.objects
+}
+func (r *columnResizeHandleRenderer) Destroy() {}
+
 // CreateTable creates a standardized table with consistent functionality
 func (tf *TableFactory) CreateTable(config TableConfig) fyne.CanvasObject {
 	if len(config.Data) == 0 {
@@ -58,6 +174,9 @@ func (tf *TableFactory) CreateTable(config TableConfig) fyne.CanvasObject {
 
 	// Track selection state for checkboxes
 	selectedRows := make(map[int]bool)
+
+	// reset active widths for this table rendering
+	tf.activeColumnWidth = make(map[int]float32)
 
 	table := widget.NewTable(
 		func() (int, int) {
@@ -81,10 +200,14 @@ func (tf *TableFactory) CreateTable(config TableConfig) fyne.CanvasObject {
 		},
 	)
 
+	// Store active table for interactive column resize
+	tf.activeTable = table
+
 	// Set column widths if specified
 	if config.ColumnWidths != nil {
 		for col, width := range config.ColumnWidths {
 			table.SetColumnWidth(col, width)
+			tf.activeColumnWidth[col] = width
 		}
 	} else {
 		// Set default column widths
@@ -202,29 +325,102 @@ func (tf *TableFactory) extractLabelAndBackground(obj fyne.CanvasObject) (*widge
 
 // renderSimpleRow renders a row without checkboxes
 func (tf *TableFactory) renderSimpleRow(i widget.TableCellID, o fyne.CanvasObject, config TableConfig) {
-	label, background := tf.extractLabelAndBackground(o)
+	cont := o.(*fyne.Container)
+	_, background := tf.extractLabelAndBackground(o)
 
 	if i.Row == 0 {
 		// Header row
-		label.SetText(config.Headers[i.Col])
-		label.TextStyle = fyne.TextStyle{Bold: true}
-		label.Show()
+		header := config.Headers[i.Col]
+		// Build a full-width clickable header (no icon) with truncation
+		headerButton := newHeaderClickable(header, nil)
+		headerButton.tapped = func() { tf.showHeaderMenu(header, headerButton) }
 		background.FillColor = theme.Color(theme.ColorNameInputBackground)
+
+		// Add resize handle at the far right edge
+		handle := newColumnResizeHandle(tf, i.Col)
+
+		// Compose content with the full-width clickable header
+		contentArea := headerButton
+
+		// Outer border places the thin handle flush right
+		border := container.NewBorder(nil, nil, nil, handle, contentArea)
+		cont.Objects = []fyne.CanvasObject{background, border}
 	} else {
 		// Data row
+		dataLabel := widget.NewLabel("")
+		dataLabel.Alignment = fyne.TextAlignLeading
+		dataLabel.Wrapping = fyne.TextTruncate
 		if i.Col < len(config.Data[i.Row-1]) {
 			originalText := config.Data[i.Row-1][i.Col]
 			displayText := tf.formatCellText(originalText, i.Col, config)
-			label.SetText(displayText)
+			dataLabel.SetText(displayText)
 		}
-		label.TextStyle = fyne.TextStyle{}
-		label.Show()
+		dataLabel.TextStyle = fyne.TextStyle{}
 		background.FillColor = color.Transparent
 
+		// Base foreground shape for data rows (no header controls)
+		cont.Objects = []fyne.CanvasObject{background, container.NewPadded(dataLabel)}
+
 		// Apply status color coding if this is the status column
-		tf.applyStatusColor(label, i, config)
+		tf.applyStatusColor(dataLabel, i, config)
 	}
 	background.Refresh()
+}
+
+// showHeaderMenu presents sorting and quick filter actions for the given column.
+func (tf *TableFactory) showHeaderMenu(column string, anchor fyne.CanvasObject) {
+	if tf.ui == nil || tf.ui.window == nil {
+		return
+	}
+	// Quick filter dialog helper
+	showFilterForm := func(mode ExplorerFilterMode, label string) {
+		entry := widget.NewEntry()
+		form := dialog.NewForm(
+			"Filter: "+column,
+			"Apply",
+			"Cancel",
+			[]*widget.FormItem{widget.NewFormItem(label, entry)},
+			func(ok bool) {
+				if !ok {
+					return
+				}
+				val := strings.TrimSpace(entry.Text)
+				opts := tf.ui.explorerCurrentQuery
+				opts.Filters = append(opts.Filters, ExplorerFilterClause{Column: column, Mode: mode, Value: val})
+				tf.ui.explorerApplyQuery(opts, true)
+			},
+			tf.ui.window,
+		)
+		form.Show()
+	}
+
+	// Build popup menu
+	menu := fyne.NewMenu("",
+		fyne.NewMenuItem("Sort Ascending", func() {
+			opts := tf.ui.explorerCurrentQuery
+			opts.OrderColumn = column
+			opts.OrderDescending = false
+			tf.ui.explorerApplyQuery(opts, true)
+		}),
+		fyne.NewMenuItem("Sort Descending", func() {
+			opts := tf.ui.explorerCurrentQuery
+			opts.OrderColumn = column
+			opts.OrderDescending = true
+			tf.ui.explorerApplyQuery(opts, true)
+		}),
+		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem("Filter Contains...", func() { showFilterForm(FilterModeContains, "Contains") }),
+		fyne.NewMenuItem("Filter Equals...", func() { showFilterForm(FilterModeEquals, "Equals") }),
+		fyne.NewMenuItem("Filter Not Equals...", func() { showFilterForm(FilterModeNotEquals, "Not Equals") }),
+		fyne.NewMenuItem("Filter Starts With...", func() { showFilterForm(FilterModeStartsWith, "Starts With") }),
+		fyne.NewMenuItem("Filter Ends With...", func() { showFilterForm(FilterModeEndsWith, "Ends With") }),
+	)
+
+	c := fyne.CurrentApp().Driver().CanvasForObject(anchor)
+	pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(anchor)
+	// Show the popup just below the button
+	pos = fyne.NewPos(pos.X, pos.Y+anchor.MinSize().Height)
+	widget.ShowPopUpMenuAtPosition(menu, c, pos)
 }
 
 // applyStatusColor applies color coding for status columns
@@ -253,11 +449,20 @@ func (tf *TableFactory) createEmptyTable(config TableConfig) fyne.CanvasObject {
 		message = "No information found."
 	}
 
-	placeholder := widget.NewLabel(message)
-	placeholder.Alignment = fyne.TextAlignCenter
-	placeholder.Wrapping = fyne.TextWrapWord
+	// Build a themed card centered in the available space
+	msg := widget.NewLabel(message)
+	msg.Alignment = fyne.TextAlignCenter
+	msg.Wrapping = fyne.TextWrapWord
 
-	return container.NewCenter(placeholder)
+	var card fyne.CanvasObject
+	if tf.ui != nil {
+		card = tf.ui.newSectionCard("No Results", "", container.NewMax(msg))
+	} else {
+		// Fallback if UI is not available
+		card = widget.NewCard("No Results", "", container.NewMax(msg))
+	}
+	// Fill the table area; parent uses NewMax so this will expand correctly
+	return card
 }
 
 // setDefaultColumnWidths sets reasonable default column widths with overflow prevention
@@ -285,7 +490,21 @@ func (tf *TableFactory) setDefaultColumnWidths(table *widget.Table, config Table
 			width = tf.calculateOptimalWidth(header, i, config)
 		}
 
+		// Ensure header text fully visible by default: account for header label min width
+		// Build a bold label to measure
+		measure := widget.NewLabel(header)
+		measure.TextStyle = fyne.TextStyle{Bold: true}
+		headerMin := measure.MinSize().Width
+		// Our header layout insets the label by ~4px on left/right, so add 8px
+		if width < headerMin+8 {
+			width = headerMin + 8
+		}
+
 		table.SetColumnWidth(i, width)
+		if tf.activeColumnWidth == nil {
+			tf.activeColumnWidth = make(map[int]float32)
+		}
+		tf.activeColumnWidth[i] = width
 	}
 }
 
@@ -516,16 +735,7 @@ func (tf *TableFactory) CreatePaginatedTable(config TableConfig, pageSize int) f
 // CreateAutoTruncatedTable creates a table with automatic text truncation based on column widths
 func (tf *TableFactory) CreateAutoTruncatedTable(config TableConfig) fyne.CanvasObject {
 	if len(config.Data) == 0 {
-		message := strings.TrimSpace(config.EmptyMessage)
-		if message == "" {
-			message = "No information found."
-		}
-
-		placeholder := widget.NewLabel(message)
-		placeholder.Alignment = fyne.TextAlignCenter
-		placeholder.Wrapping = fyne.TextWrapWord
-
-		return container.NewCenter(placeholder)
+		return tf.createEmptyTable(config)
 	}
 
 	// Set up automatic truncation based on column widths

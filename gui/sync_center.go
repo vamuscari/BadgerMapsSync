@@ -264,7 +264,7 @@ func (sc *SyncCenter) updateActionLabel() {
 	text := "Run"
 	switch sc.currentType {
 	case syncKindAll:
-		text = "Pull Everything"
+		text = "Sync Everything"
 	case syncKindUser:
 		text = "Pull User Profile"
 	case syncKindAccounts:
