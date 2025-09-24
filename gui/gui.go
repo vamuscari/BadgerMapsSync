@@ -281,8 +281,10 @@ type Gui struct {
 
 	// Explorer references for cross-navigation
 	explorerTableSelect     *widget.Select
-	explorerLoadPage        func(tableName string, page, pageSize int)
+	explorerLoadPage        func(tableName string, page, pageSize int, opts ExplorerQueryOptions)
 	explorerCurrentPageSize int
+	explorerCurrentQuery    ExplorerQueryOptions
+	explorerApplyQuery      func(opts ExplorerQueryOptions, reload bool)
 
 	// New components
 	syncCenter     *SyncCenter
@@ -1681,22 +1683,67 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 	var pageInfoLabel *widget.Label
 	var prevBtn, nextBtn, firstPageBtn, lastPageBtn *widget.Button
 	var pageSizeSelect *widget.Select
+	var filterColumnSelect, filterModeSelect, orderColumnSelect, orderDirectionSelect *widget.Select
+	var filterValueEntry *widget.Entry
+	var applyFilterBtn, clearFilterBtn *widget.Button
+	var availableColumns []string
+
+	queryOptions := ui.explorerCurrentQuery
+	if queryOptions.FilterMode == FilterModeNone {
+		queryOptions.FilterMode = FilterModeContains
+	}
+	pendingFilterColumn := queryOptions.FilterColumn
+	var pendingFilterMode = queryOptions.FilterMode
+	pendingFilterValue := queryOptions.FilterValue
+	pendingOrderColumn := queryOptions.OrderColumn
+	pendingOrderDescending := queryOptions.OrderDescending
 
 	// Page size options with descriptions for better UX
 	pageSizeOptions := []string{"10", "25", "50", "100", "250", "500", "1000"}
 	currentPageSize := 50
 	ui.explorerCurrentPageSize = currentPageSize
 
+	// Prepare filter mode metadata for control updates
+	filterModeOptions := []struct {
+		Label string
+		Mode  ExplorerFilterMode
+	}{
+		{"Contains", FilterModeContains},
+		{"Equals", FilterModeEquals},
+		{"Not Equals", FilterModeNotEquals},
+		{"Starts With", FilterModeStartsWith},
+		{"Ends With", FilterModeEndsWith},
+	}
+	modeLabels := make([]string, len(filterModeOptions))
+	modeLabelByMode := make(map[ExplorerFilterMode]string, len(filterModeOptions))
+	modeByLabel := make(map[string]ExplorerFilterMode, len(filterModeOptions))
+	for i, opt := range filterModeOptions {
+		modeLabels[i] = opt.Label
+		modeLabelByMode[opt.Mode] = opt.Label
+		modeByLabel[opt.Label] = opt.Mode
+	}
+
 	// Function to load a specific page
-	loadPage := func(tableName string, page int, pageSize int) {
+	loadPage := func(tableName string, page int, pageSize int, opts ExplorerQueryOptions) {
 		if tableName == "" {
 			return
 		}
 
+		queryOptions = opts
+		if queryOptions.FilterMode == FilterModeNone {
+			queryOptions.FilterMode = FilterModeContains
+		}
+		pendingFilterColumn = queryOptions.FilterColumn
+		pendingFilterMode = queryOptions.FilterMode
+		pendingFilterValue = queryOptions.FilterValue
+		pendingOrderColumn = queryOptions.OrderColumn
+		pendingOrderDescending = queryOptions.OrderDescending
+		ui.explorerCurrentQuery = queryOptions
+
 		ui.app.Events.Dispatch(events.Infof("gui", "Explorer: Loading page %d of table '%s'", page+1, tableName))
 
 		// Load paginated data
-		paginatedData := ui.loadPaginatedTableData(tableName, page, pageSize)
+		paginatedData := ui.loadPaginatedTableData(tableName, page, pageSize, queryOptions)
 		if paginatedData == nil {
 			tableContainer.Objects = []fyne.CanvasObject{widget.NewLabel("Error loading table data")}
 			tableContainer.Refresh()
@@ -1705,6 +1752,57 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 
 		currentPaginatedData = paginatedData
 		currentTableName = tableName
+
+		availableColumns = paginatedData.Headers
+		if len(availableColumns) == 0 {
+			availableColumns = ui.getTableColumns(tableName)
+		}
+
+		if filterColumnSelect != nil {
+			columnOptions := append([]string{""}, availableColumns...)
+			filterColumnSelect.Options = columnOptions
+			filterColumnSelect.Refresh()
+			if pendingFilterColumn == "" {
+				filterColumnSelect.ClearSelected()
+			} else if !strings.EqualFold(filterColumnSelect.Selected, pendingFilterColumn) {
+				filterColumnSelect.SetSelected(pendingFilterColumn)
+			}
+		}
+
+		if filterModeSelect != nil {
+			desiredLabel := modeLabelByMode[pendingFilterMode]
+			if desiredLabel == "" {
+				desiredLabel = modeLabelByMode[FilterModeContains]
+			}
+			if filterModeSelect.Selected != desiredLabel {
+				filterModeSelect.SetSelected(desiredLabel)
+			}
+		}
+
+		if filterValueEntry != nil && filterValueEntry.Text != pendingFilterValue {
+			filterValueEntry.SetText(pendingFilterValue)
+		}
+
+		if orderColumnSelect != nil {
+			orderOptions := append([]string{""}, availableColumns...)
+			orderColumnSelect.Options = orderOptions
+			orderColumnSelect.Refresh()
+			if pendingOrderColumn == "" {
+				orderColumnSelect.ClearSelected()
+			} else if !strings.EqualFold(orderColumnSelect.Selected, pendingOrderColumn) {
+				orderColumnSelect.SetSelected(pendingOrderColumn)
+			}
+		}
+
+		if orderDirectionSelect != nil {
+			directionLabel := "Ascending"
+			if pendingOrderDescending {
+				directionLabel = "Descending"
+			}
+			if orderDirectionSelect.Selected != directionLabel {
+				orderDirectionSelect.SetSelected(directionLabel)
+			}
+		}
 
 		// Create table using the table factory
 		factory := NewTableFactory(ui)
@@ -1754,6 +1852,8 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 		tableContainer.Refresh()
 	}
 
+	var applyQuery func(resetPage bool)
+
 	ui.explorerLoadPage = loadPage
 
 	// Table selection
@@ -1763,9 +1863,37 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 			tableContainer.Refresh()
 			return
 		}
-		loadPage(tableName, 0, currentPageSize)
+		queryOptions = ui.explorerCurrentQuery
+		loadPage(tableName, 0, currentPageSize, queryOptions)
 	})
 	ui.explorerTableSelect = tableSelect
+
+	applyQuery = func(resetPage bool) {
+		queryOptions.FilterColumn = pendingFilterColumn
+		queryOptions.FilterMode = pendingFilterMode
+		queryOptions.FilterValue = pendingFilterValue
+		queryOptions.OrderColumn = pendingOrderColumn
+		queryOptions.OrderDescending = pendingOrderDescending
+
+		if strings.TrimSpace(queryOptions.FilterColumn) == "" ||
+			(strings.TrimSpace(queryOptions.FilterValue) == "" && queryOptions.FilterMode != FilterModeNotEquals) {
+			queryOptions.FilterColumn = ""
+			queryOptions.FilterMode = FilterModeNone
+			queryOptions.FilterValue = ""
+		} else if queryOptions.FilterMode == FilterModeNone {
+			queryOptions.FilterMode = FilterModeContains
+		}
+
+		ui.explorerCurrentQuery = queryOptions
+
+		if currentTableName != "" {
+			targetPage := 0
+			if !resetPage && currentPaginatedData != nil {
+				targetPage = currentPaginatedData.CurrentPage
+			}
+			loadPage(currentTableName, targetPage, currentPageSize, queryOptions)
+		}
+	}
 
 	// Search functionality (searches within current page results)
 	searchEntry = widget.NewEntry()
@@ -1805,6 +1933,48 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 		tableContainer.Refresh()
 	}
 
+	filterColumnSelect = widget.NewSelect([]string{}, func(value string) {
+		pendingFilterColumn = strings.TrimSpace(value)
+	})
+	filterColumnSelect.PlaceHolder = "Column"
+
+	filterModeSelect = widget.NewSelect(modeLabels, func(label string) {
+		mode := modeByLabel[label]
+		if mode == "" {
+			mode = FilterModeContains
+		}
+		pendingFilterMode = mode
+	})
+	filterModeSelect.PlaceHolder = "Mode"
+
+	filterValueEntry = widget.NewEntry()
+	filterValueEntry.SetPlaceHolder("Value")
+	filterValueEntry.OnChanged = func(value string) {
+		pendingFilterValue = value
+	}
+
+	orderColumnSelect = widget.NewSelect([]string{}, func(value string) {
+		pendingOrderColumn = strings.TrimSpace(value)
+	})
+	orderColumnSelect.PlaceHolder = "Column"
+
+	orderDirectionOptions := []string{"Ascending", "Descending"}
+	orderDirectionSelect = widget.NewSelect(orderDirectionOptions, func(label string) {
+		pendingOrderDescending = (label == "Descending")
+	})
+	orderDirectionSelect.PlaceHolder = "Direction"
+
+	applyFilterBtn = widget.NewButtonWithIcon("Apply", theme.ConfirmIcon(), func() {
+		applyQuery(true)
+	})
+
+	clearFilterBtn = widget.NewButtonWithIcon("Clear", theme.ContentClearIcon(), func() {
+		pendingFilterColumn = ""
+		pendingFilterValue = ""
+		pendingFilterMode = FilterModeContains
+		applyQuery(true)
+	})
+
 	// Page size selection
 	pageSizeSelect = widget.NewSelect(pageSizeOptions, func(selected string) {
 		if selected == "" {
@@ -1833,7 +2003,7 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 			currentPageSize = newPageSize
 			ui.explorerCurrentPageSize = currentPageSize
 			if currentTableName != "" {
-				loadPage(currentTableName, 0, currentPageSize) // Reset to first page
+				loadPage(currentTableName, 0, currentPageSize, queryOptions) // Reset to first page
 			}
 		}
 	})
@@ -1844,27 +2014,27 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 
 	prevBtn = widget.NewButtonWithIcon("", theme.NavigateBackIcon(), func() {
 		if currentPaginatedData != nil && currentPaginatedData.CurrentPage > 0 {
-			loadPage(currentTableName, currentPaginatedData.CurrentPage-1, currentPageSize)
+			loadPage(currentTableName, currentPaginatedData.CurrentPage-1, currentPageSize, queryOptions)
 		}
 	})
 	prevBtn.Disable()
 
 	nextBtn = widget.NewButtonWithIcon("", theme.NavigateNextIcon(), func() {
 		if currentPaginatedData != nil && currentPaginatedData.CurrentPage < currentPaginatedData.TotalPages-1 {
-			loadPage(currentTableName, currentPaginatedData.CurrentPage+1, currentPageSize)
+			loadPage(currentTableName, currentPaginatedData.CurrentPage+1, currentPageSize, queryOptions)
 		}
 	})
 	nextBtn.Disable()
 
 	firstPageBtn = widget.NewButtonWithIcon("", theme.MediaSkipPreviousIcon(), func() {
 		if currentPaginatedData != nil && currentPaginatedData.CurrentPage > 0 {
-			loadPage(currentTableName, 0, currentPageSize)
+			loadPage(currentTableName, 0, currentPageSize, queryOptions)
 		}
 	})
 
 	lastPageBtn = widget.NewButtonWithIcon("", theme.MediaSkipNextIcon(), func() {
 		if currentPaginatedData != nil && currentPaginatedData.CurrentPage < currentPaginatedData.TotalPages-1 {
-			loadPage(currentTableName, currentPaginatedData.TotalPages-1, currentPageSize)
+			loadPage(currentTableName, currentPaginatedData.TotalPages-1, currentPageSize, queryOptions)
 		}
 	})
 	firstPageBtn.Disable()
@@ -1901,7 +2071,7 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 		}
 
 		if targetPage != currentPaginatedData.CurrentPage {
-			loadPage(currentTableName, targetPage, currentPageSize)
+			loadPage(currentTableName, targetPage, currentPageSize, queryOptions)
 		}
 
 		gotoPageEntry.SetText("")
@@ -1991,17 +2161,96 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 	// Layout - simplified top section
 	controlsLeft := container.NewHBox(widget.NewLabel("Table:"), tableSelect, refreshButton)
 	searchControls := container.NewBorder(nil, nil, widget.NewLabel("Search:"), nil, searchEntry)
+	filterControls := container.NewHBox(
+		widget.NewLabel("Filter:"),
+		filterColumnSelect,
+		filterModeSelect,
+		filterValueEntry,
+		applyFilterBtn,
+		clearFilterBtn,
+		NewSpacer(fyne.NewSize(12, 0)),
+		widget.NewLabel("Order By:"),
+		orderColumnSelect,
+		orderDirectionSelect,
+	)
 	topRow := container.NewBorder(nil, nil, controlsLeft, nil, searchControls)
 
 	topContent := container.NewVBox(
 		widget.NewLabelWithStyle("Database Explorer", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		topRow,
+		filterControls,
 	)
+
+	ui.explorerApplyQuery = func(opts ExplorerQueryOptions, reload bool) {
+		if strings.TrimSpace(opts.FilterColumn) != "" && strings.TrimSpace(opts.FilterValue) != "" && opts.FilterMode == FilterModeNone {
+			opts.FilterMode = FilterModeContains
+		}
+
+		pendingFilterColumn = opts.FilterColumn
+		pendingFilterMode = opts.FilterMode
+		if pendingFilterMode == FilterModeNone {
+			pendingFilterMode = FilterModeContains
+		}
+		pendingFilterValue = opts.FilterValue
+		pendingOrderColumn = opts.OrderColumn
+		pendingOrderDescending = opts.OrderDescending
+
+		if reload {
+			applyQuery(true)
+			return
+		}
+
+		queryOptions = opts
+		if queryOptions.FilterMode == FilterModeNone && strings.TrimSpace(queryOptions.FilterColumn) != "" && strings.TrimSpace(queryOptions.FilterValue) != "" {
+			queryOptions.FilterMode = FilterModeContains
+		}
+		ui.explorerCurrentQuery = queryOptions
+
+		if filterColumnSelect != nil {
+			if pendingFilterColumn == "" || !containsString(availableColumns, pendingFilterColumn) {
+				filterColumnSelect.ClearSelected()
+			} else if !strings.EqualFold(filterColumnSelect.Selected, pendingFilterColumn) {
+				filterColumnSelect.SetSelected(pendingFilterColumn)
+			}
+		}
+
+		if filterModeSelect != nil {
+			desiredLabel := modeLabelByMode[pendingFilterMode]
+			if desiredLabel == "" {
+				desiredLabel = modeLabelByMode[FilterModeContains]
+			}
+			if filterModeSelect.Selected != desiredLabel {
+				filterModeSelect.SetSelected(desiredLabel)
+			}
+		}
+
+		if filterValueEntry != nil && filterValueEntry.Text != pendingFilterValue {
+			filterValueEntry.SetText(pendingFilterValue)
+		}
+
+		if orderColumnSelect != nil {
+			if pendingOrderColumn == "" || !containsString(availableColumns, pendingOrderColumn) {
+				orderColumnSelect.ClearSelected()
+			} else if !strings.EqualFold(orderColumnSelect.Selected, pendingOrderColumn) {
+				orderColumnSelect.SetSelected(pendingOrderColumn)
+			}
+		}
+
+		if orderDirectionSelect != nil {
+			directionLabel := "Ascending"
+			if pendingOrderDescending {
+				directionLabel = "Descending"
+			}
+			if orderDirectionSelect.Selected != directionLabel {
+				orderDirectionSelect.SetSelected(directionLabel)
+			}
+		}
+	}
 
 	// Create a refresh data button for the pagination bar
 	refreshDataBtn := widget.NewButtonWithIcon("Refresh Data", theme.ViewRefreshIcon(), func() {
 		if currentTableName != "" && currentPaginatedData != nil {
-			loadPage(currentTableName, currentPaginatedData.CurrentPage, currentPageSize)
+			loadPage(currentTableName, currentPaginatedData.CurrentPage, currentPageSize, queryOptions)
 		}
 	})
 
@@ -2098,6 +2347,13 @@ func (ui *Gui) OpenExplorerTable(tableName string) bool {
 		return false
 	}
 
+	if defaults, ok := defaultExplorerQuery(tableName); ok {
+		ui.explorerCurrentQuery = defaults
+		if ui.explorerApplyQuery != nil {
+			ui.explorerApplyQuery(defaults, false)
+		}
+	}
+
 	if ui.explorerTableSelect.Selected != tableName {
 		ui.explorerTableSelect.SetSelected(tableName)
 	} else if ui.explorerLoadPage != nil {
@@ -2105,7 +2361,7 @@ func (ui *Gui) OpenExplorerTable(tableName string) bool {
 		if pageSize <= 0 {
 			pageSize = 50
 		}
-		ui.explorerLoadPage(tableName, 0, pageSize)
+		ui.explorerLoadPage(tableName, 0, pageSize, ui.explorerCurrentQuery)
 	}
 
 	return true
@@ -2139,6 +2395,21 @@ func (ui *Gui) OpenServerTab() bool {
 	}
 
 	return false
+}
+
+func defaultExplorerQuery(tableName string) (ExplorerQueryOptions, bool) {
+	switch tableName {
+	case "AccountsPendingChanges", "AccountCheckinsPendingChanges":
+		return ExplorerQueryOptions{
+			FilterColumn:    "Status",
+			FilterMode:      FilterModeNotEquals,
+			FilterValue:     "completed",
+			OrderColumn:     "CreatedAt",
+			OrderDescending: true,
+		}, true
+	default:
+		return ExplorerQueryOptions{}, false
+	}
 }
 
 func (ui *Gui) ensureExplorerTableOption(tableName string) bool {
@@ -2701,87 +2972,175 @@ type PaginatedTableData struct {
 	TotalPages  int
 }
 
+type ExplorerFilterMode string
+
+const (
+	FilterModeNone       ExplorerFilterMode = ""
+	FilterModeContains   ExplorerFilterMode = "contains"
+	FilterModeEquals     ExplorerFilterMode = "equals"
+	FilterModeNotEquals  ExplorerFilterMode = "not_equals"
+	FilterModeStartsWith ExplorerFilterMode = "starts_with"
+	FilterModeEndsWith   ExplorerFilterMode = "ends_with"
+)
+
+type ExplorerQueryOptions struct {
+	FilterColumn    string
+	FilterMode      ExplorerFilterMode
+	FilterValue     string
+	OrderColumn     string
+	OrderDescending bool
+}
+
 // loadTableData loads data from a database table using unified approach
 func (ui *Gui) loadTableData(tableName string) *TableData {
-	paginatedData := ui.loadPaginatedTableData(tableName, 0, 100)
+	paginatedData := ui.loadPaginatedTableData(tableName, 0, 100, ExplorerQueryOptions{})
 	return &paginatedData.TableData
 }
 
 // loadPaginatedTableData loads a specific page of data from a database table
-func (ui *Gui) loadPaginatedTableData(tableName string, page, pageSize int) *PaginatedTableData {
+
+func (ui *Gui) loadPaginatedTableData(tableName string, page, pageSize int, opts ExplorerQueryOptions) *PaginatedTableData {
+	if ui.app == nil || ui.app.DB == nil || !ui.app.DB.IsConnected() {
+		return &PaginatedTableData{
+			TableData:   TableData{Headers: []string{}, Data: [][]string{}},
+			TotalRows:   0,
+			CurrentPage: 0,
+			PageSize:    pageSize,
+			TotalPages:  0,
+		}
+	}
+
 	if pageSize <= 0 {
-		pageSize = 50 // Default page size
+		pageSize = 50
 	}
 	if page < 0 {
 		page = 0
 	}
 
-	// First, get the total count
-	totalRows := ui.getTableRowCount(tableName)
-	totalPages := (totalRows + pageSize - 1) / pageSize
-	if totalPages == 0 {
-		totalPages = 1
+	normalized := normalizeExplorerOptions(opts)
+	columns := ui.getTableColumns(tableName)
+
+	filterColumn := matchColumn(columns, normalized.FilterColumn)
+	orderColumn := matchColumn(columns, normalized.OrderColumn)
+
+	whereClause := ""
+	if filterColumn != "" && normalized.FilterMode != FilterModeNone {
+		if condition := buildFilterCondition(filterColumn, normalized.FilterMode, normalized.FilterValue); condition != "" {
+			whereClause = condition
+		}
 	}
 
-	// Ensure page is within bounds
+	orderClause := ""
+	if orderColumn != "" {
+		direction := "ASC"
+		if normalized.OrderDescending {
+			direction = "DESC"
+		}
+		orderClause = fmt.Sprintf("ORDER BY %s %s", orderColumn, direction)
+	}
+
+	if orderClause == "" {
+		fallback := fallbackOrderColumn(columns)
+		if fallback != "" {
+			direction := "ASC"
+			if normalized.OrderDescending {
+				direction = "DESC"
+			}
+			orderClause = fmt.Sprintf("ORDER BY %s %s", fallback, direction)
+		} else if strings.EqualFold(ui.app.DB.GetType(), "mssql") {
+			direction := "ASC"
+			if normalized.OrderDescending {
+				direction = "DESC"
+			}
+			orderClause = fmt.Sprintf("ORDER BY 1 %s", direction)
+		}
+	}
+
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)
+	if whereClause != "" {
+		countQuery = fmt.Sprintf("%s WHERE %s", countQuery, whereClause)
+	}
+
+	countRows, err := ui.app.DB.ExecuteQuery(countQuery)
+	if err != nil {
+		ui.app.Events.Dispatch(events.Errorf("gui", "Error counting rows for %s: %v", tableName, err))
+		return &PaginatedTableData{
+			TableData:   TableData{Headers: []string{}, Data: [][]string{}},
+			TotalRows:   0,
+			CurrentPage: 0,
+			PageSize:    pageSize,
+			TotalPages:  0,
+		}
+	}
+	defer countRows.Close()
+
+	totalRows := 0
+	if countRows.Next() {
+		if err := countRows.Scan(&totalRows); err != nil {
+			ui.app.Events.Dispatch(events.Errorf("gui", "Error reading row count for %s: %v", tableName, err))
+			totalRows = 0
+		}
+	}
+
+	totalPages := 1
+	if totalRows > 0 {
+		totalPages = (totalRows + pageSize - 1) / pageSize
+	}
 	if page >= totalPages {
 		page = totalPages - 1
 	}
-
+	if page < 0 {
+		page = 0
+	}
 	offset := page * pageSize
 
-	// Build paginated query
-	var query string
-	dbType := ui.app.DB.GetType()
+	dbType := strings.ToLower(ui.app.DB.GetType())
+	var queryBuilder strings.Builder
+	queryBuilder.WriteString(fmt.Sprintf("SELECT * FROM %s", tableName))
+	if whereClause != "" {
+		queryBuilder.WriteString(" WHERE ")
+		queryBuilder.WriteString(whereClause)
+	}
+	if orderClause != "" {
+		queryBuilder.WriteString(" ")
+		queryBuilder.WriteString(orderClause)
+	}
 	switch dbType {
 	case "mssql":
-		// MSSQL requires ORDER BY for OFFSET/FETCH
-		if offset == 0 {
-			query = fmt.Sprintf("SELECT TOP %d * FROM %s", pageSize, tableName)
-		} else {
-			columns := ui.getTableColumns(tableName)
-			orderBy := "1" // Default ordinal fallback
-			if len(columns) > 0 {
-				orderBy = columns[0]
-				for _, col := range columns {
-					if strings.Contains(strings.ToLower(col), "id") {
-						orderBy = col
-						break
-					}
-				}
-			}
-			query = fmt.Sprintf("SELECT * FROM %s ORDER BY %s OFFSET %d ROWS FETCH NEXT %d ROWS ONLY",
-				tableName, orderBy, offset, pageSize)
-		}
-	case "postgres":
-		query = fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d", tableName, pageSize, offset)
-	default: // sqlite3
-		query = fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d", tableName, pageSize, offset)
+		queryBuilder.WriteString(fmt.Sprintf(" OFFSET %d ROWS FETCH NEXT %d ROWS ONLY", offset, pageSize))
+	default:
+		queryBuilder.WriteString(fmt.Sprintf(" LIMIT %d OFFSET %d", pageSize, offset))
 	}
 
-	rows, err := ui.app.DB.ExecuteQuery(query)
+	rows, err := ui.app.DB.ExecuteQuery(queryBuilder.String())
 	if err != nil {
 		ui.app.Events.Dispatch(events.Errorf("gui", "Error executing paginated query: %v", err))
 		return &PaginatedTableData{
-			TableData: TableData{Headers: []string{}, Data: [][]string{}},
-			TotalRows: 0, CurrentPage: 0, PageSize: pageSize, TotalPages: 0,
+			TableData:   TableData{Headers: []string{}, Data: [][]string{}},
+			TotalRows:   totalRows,
+			CurrentPage: page,
+			PageSize:    pageSize,
+			TotalPages:  totalPages,
 		}
 	}
 	defer rows.Close()
 
-	columns, err := rows.Columns()
+	resultColumns, err := rows.Columns()
 	if err != nil {
 		ui.app.Events.Dispatch(events.Errorf("gui", "Error getting columns: %v", err))
 		return &PaginatedTableData{
-			TableData: TableData{Headers: []string{}, Data: [][]string{}},
-			TotalRows: 0, CurrentPage: 0, PageSize: pageSize, TotalPages: 0,
+			TableData:   TableData{Headers: []string{}, Data: [][]string{}},
+			TotalRows:   totalRows,
+			CurrentPage: page,
+			PageSize:    pageSize,
+			TotalPages:  totalPages,
 		}
 	}
 
 	var data [][]string
 	for rows.Next() {
-		row := make([]interface{}, len(columns))
-		rowData := make([]string, len(columns))
+		row := make([]interface{}, len(resultColumns))
+		rowData := make([]string, len(resultColumns))
 		for i := range row {
 			row[i] = new(interface{})
 		}
@@ -2808,15 +3167,100 @@ func (ui *Gui) loadPaginatedTableData(tableName string, page, pageSize int) *Pag
 		data = append(data, rowData)
 	}
 
-	ui.app.Events.Dispatch(events.Infof("gui", "Explorer: Loaded page %d of %d (%d rows) from '%s'",
-		page+1, totalPages, len(data), tableName))
+	ui.app.Events.Dispatch(events.Infof("gui", "Explorer: Loaded page %d of %d (%d rows) from '%s'", page+1, totalPages, len(data), tableName))
 
 	return &PaginatedTableData{
-		TableData:   TableData{Headers: columns, Data: data},
+		TableData:   TableData{Headers: resultColumns, Data: data},
 		TotalRows:   totalRows,
 		CurrentPage: page,
 		PageSize:    pageSize,
 		TotalPages:  totalPages,
+	}
+}
+
+func normalizeExplorerOptions(opts ExplorerQueryOptions) ExplorerQueryOptions {
+	opts.FilterColumn = strings.TrimSpace(opts.FilterColumn)
+	opts.FilterValue = strings.TrimSpace(opts.FilterValue)
+	opts.OrderColumn = strings.TrimSpace(opts.OrderColumn)
+
+	if opts.FilterMode == FilterModeNotEquals {
+		if opts.FilterColumn == "" || opts.FilterValue == "" {
+			opts.FilterMode = FilterModeNone
+			opts.FilterColumn = ""
+			opts.FilterValue = ""
+		}
+		return opts
+	}
+
+	if opts.FilterColumn == "" || opts.FilterValue == "" {
+		opts.FilterMode = FilterModeNone
+		opts.FilterColumn = ""
+		opts.FilterValue = ""
+		return opts
+	}
+
+	if opts.FilterMode == FilterModeNone {
+		opts.FilterMode = FilterModeContains
+	}
+
+	return opts
+}
+
+func matchColumn(columns []string, name string) string {
+	if name == "" {
+		return ""
+	}
+	for _, col := range columns {
+		if strings.EqualFold(col, name) {
+			return col
+		}
+	}
+	return ""
+}
+
+func fallbackOrderColumn(columns []string) string {
+	if len(columns) == 0 {
+		return ""
+	}
+	for _, col := range columns {
+		lower := strings.ToLower(col)
+		if lower == "createdat" || lower == "created_at" {
+			return col
+		}
+	}
+	for _, col := range columns {
+		if strings.Contains(strings.ToLower(col), "created") {
+			return col
+		}
+	}
+	for _, col := range columns {
+		if strings.Contains(strings.ToLower(col), "id") {
+			return col
+		}
+	}
+	return columns[0]
+}
+
+func escapeSQLLiteral(value string) string {
+	return strings.ReplaceAll(value, "'", "''")
+}
+
+func buildFilterCondition(column string, mode ExplorerFilterMode, value string) string {
+	lowerColumn := fmt.Sprintf("LOWER(%s)", column)
+	lowerValue := strings.ToLower(value)
+	escaped := escapeSQLLiteral(lowerValue)
+
+	switch mode {
+	case FilterModeEquals:
+		return fmt.Sprintf("%s = '%s'", lowerColumn, escaped)
+	case FilterModeNotEquals:
+		return fmt.Sprintf("%s <> '%s'", lowerColumn, escaped)
+	case FilterModeStartsWith:
+		return fmt.Sprintf("%s LIKE '%s%%'", lowerColumn, escaped)
+	case FilterModeEndsWith:
+		return fmt.Sprintf("%s LIKE '%%%s'", lowerColumn, escaped)
+	default:
+		return fmt.Sprintf("%s LIKE '%%%s%%'", lowerColumn, escaped)
 	}
 }
 

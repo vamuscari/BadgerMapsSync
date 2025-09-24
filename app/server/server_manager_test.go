@@ -3,7 +3,6 @@ package server
 import (
 	"badgermaps/app/action"
 	"badgermaps/app/state"
-	"sync"
 	"testing"
 	"time"
 )
@@ -26,14 +25,11 @@ func TestServerManager_Start(t *testing.T) {
 		},
 	}
 	sm := NewServerManager(state.NewState())
-	executor := &mockActionExecutor{executed: make(chan bool)}
+	executor := &mockActionExecutor{executed: make(chan bool, 1)}
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		sm.Start(cronJobs, executor)
-		wg.Done()
-	}()
+	if err := sm.Start(cronJobs, executor); err != nil {
+		t.Fatalf("unexpected error starting server manager: %v", err)
+	}
 
 	select {
 	case <-executor.executed:
@@ -43,5 +39,4 @@ func TestServerManager_Start(t *testing.T) {
 	}
 
 	sm.StopServer()
-	wg.Wait()
 }

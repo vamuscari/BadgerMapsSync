@@ -33,14 +33,18 @@ func NewServerManager(state *state.State) *ServerManager {
 	}
 }
 
-func (sm *ServerManager) Start(cronJobs []CronJob, actionExecutor ActionExecutor) {
+func (sm *ServerManager) Start(cronJobs []CronJob, actionExecutor ActionExecutor) error {
 	sm.cron = cron.New()
 	for _, job := range cronJobs {
-		sm.cron.AddFunc(job.Schedule, func() {
+		job := job // capture loop variable for closures
+		if _, err := sm.cron.AddFunc(job.Schedule, func() {
 			actionExecutor.ExecuteAction(job.Action)
-		})
+		}); err != nil {
+			return fmt.Errorf("failed to schedule cron job '%s': %w", job.Name, err)
+		}
 	}
 	sm.cron.Start()
+	return nil
 }
 
 // GetServerStatus checks if the server process is running.

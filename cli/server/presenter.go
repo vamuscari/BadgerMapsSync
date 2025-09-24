@@ -59,7 +59,10 @@ func (p *CliPresenter) HandleServerStatus() {
 
 // RunServer runs the server in the foreground.
 func (p *CliPresenter) RunServer(config *ServerConfig) {
-	p.App.Server.Start(p.App.Config.CronJobs, p.App)
+	if err := p.App.Server.Start(p.App.Config.CronJobs, p.App); err != nil {
+		p.App.Events.Dispatch(events.Errorf("server", "Failed to schedule cron jobs: %v", err))
+		os.Exit(1)
+	}
 	mux := http.NewServeMux()
 
 	accountCreateHandler := http.HandlerFunc(p.HandleAccountCreateWebhook)

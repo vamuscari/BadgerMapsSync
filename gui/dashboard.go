@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"badgermaps/database"
 	"badgermaps/events"
 	"fmt"
 	"fyne.io/fyne/v2"
@@ -10,6 +11,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"image/color"
+	"strings"
 	"time"
 )
 
@@ -89,16 +91,9 @@ func (d *SmartDashboard) createHeader() fyne.CanvasObject {
 	greetingLabel := widget.NewLabelWithStyle(greeting+"! Here's your sync overview:",
 		fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 
-	// Last sync timestamp
-	lastSync := "Never"
-	// In production, this would fetch from actual sync history
-	if d.ui.app.DB != nil && d.ui.app.DB.IsConnected() {
-		lastSync = "2 hours ago"
-	}
+	subtitle := widget.NewLabel("Track connections and recent sync activity below.")
 
-	lastSyncLabel := widget.NewLabel(fmt.Sprintf("Last sync: %s", lastSync))
-
-	return container.NewVBox(greetingLabel, lastSyncLabel)
+	return container.NewVBox(greetingLabel, subtitle)
 }
 
 func (d *SmartDashboard) createStatusCards() fyne.CanvasObject {
@@ -462,11 +457,58 @@ type LastSyncInfo struct {
 
 // getLastSyncInfo gets information about the last sync
 func (d *SmartDashboard) getLastSyncInfo() LastSyncInfo {
-	// In a real implementation, this would query a sync log table
-	// For now, return placeholder data
+	if d.ui.app.DB == nil || !d.ui.app.DB.IsConnected() {
+		return LastSyncInfo{
+			Time:   "Unavailable",
+			Status: "Connect the database to track sync runs",
+		}
+	}
+
+	entries, err := database.GetRecentSyncHistory(d.ui.app.DB, 10)
+	if err != nil {
+		d.ui.app.Events.Dispatch(events.Errorf("dashboard", "Failed to load sync history: %v", err))
+		return LastSyncInfo{
+			Time:   "Unknown",
+			Status: "Unable to load sync history",
+		}
+	}
+
+	var inProgress *database.SyncHistoryEntry
+	for i := range entries {
+		entry := entries[i]
+		switch strings.ToLower(entry.Status) {
+		case "running":
+			if inProgress == nil {
+				inProgress = &entry
+			}
+			continue
+		case "completed", "completed_with_errors", "failed":
+			return d.syncInfoFromEntry(entry)
+		default:
+			if entry.CompletedAt != nil {
+				return d.syncInfoFromEntry(entry)
+			}
+			if inProgress == nil {
+				inProgress = &entry
+			}
+		}
+	}
+
+	if inProgress != nil {
+		status := d.describeSyncStatus(*inProgress)
+		when := inProgress.StartedAt
+		if inProgress.CompletedAt != nil {
+			when = *inProgress.CompletedAt
+		}
+		return LastSyncInfo{
+			Time:   fmt.Sprintf("Started %s", formatRelativeTime(when)),
+			Status: status,
+		}
+	}
+
 	return LastSyncInfo{
 		Time:   "Never",
-		Status: "No sync performed yet",
+		Status: "No sync history recorded yet",
 	}
 }
 
@@ -478,6 +520,97 @@ func (d *SmartDashboard) getAPIStatus() string {
 		return "Configured"
 	}
 	return "Not Configured"
+}
+
+func (d *SmartDashboard) syncInfoFromEntry(entry database.SyncHistoryEntry) LastSyncInfo {
+	when := entry.StartedAt
+	if entry.CompletedAt != nil {
+		when = *entry.CompletedAt
+	}
+
+	return LastSyncInfo{
+		Time:   formatRelativeTime(when),
+		Status: d.describeSyncStatus(entry),
+	}
+}
+
+func (d *SmartDashboard) describeSyncStatus(entry database.SyncHistoryEntry) string {
+	if entry.Summary != "" {
+		return entry.Summary
+	}
+
+	status := humanizeToken(entry.Status)
+	source := humanizeToken(entry.Source)
+	if source != "" && strings.ToLower(source) != "general" {
+		status = fmt.Sprintf("%s (%s)", status, strings.ToLower(source))
+	}
+	if entry.ErrorCount > 0 && !strings.Contains(strings.ToLower(status), "error") {
+		status = fmt.Sprintf("%s with %d error(s)", status, entry.ErrorCount)
+	}
+	return status
+}
+
+func humanizeToken(token string) string {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return ""
+	}
+	parts := strings.Split(token, "_")
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		rl := strings.ToLower(part)
+		parts[i] = strings.ToUpper(rl[:1]) + rl[1:]
+	}
+	return strings.Join(parts, " ")
+}
+
+func formatRelativeTime(ts time.Time) string {
+	if ts.IsZero() {
+		return "Unknown"
+	}
+
+	whenUTC := ts.UTC()
+	now := time.Now().UTC()
+	if whenUTC.After(now) {
+		delta := whenUTC.Sub(now)
+		return fmt.Sprintf("in %s", coarseDuration(delta))
+	}
+
+	return fmt.Sprintf("%s ago", coarseDuration(now.Sub(whenUTC)))
+}
+
+func coarseDuration(d time.Duration) string {
+	if d < time.Minute {
+		return "moments"
+	}
+	if d < time.Hour {
+		minutes := int(d.Minutes())
+		if minutes == 1 {
+			return "1 minute"
+		}
+		return fmt.Sprintf("%d minutes", minutes)
+	}
+	if d < 24*time.Hour {
+		hours := int(d.Hours())
+		if hours == 1 {
+			return "1 hour"
+		}
+		return fmt.Sprintf("%d hours", hours)
+	}
+	if d < 7*24*time.Hour {
+		days := int(d.Hours() / 24)
+		if days == 1 {
+			return "1 day"
+		}
+		return fmt.Sprintf("%d days", days)
+	}
+	weeks := int(d.Hours() / (24 * 7))
+	if weeks == 1 {
+		return "1 week"
+	}
+	return fmt.Sprintf("%d weeks", weeks)
 }
 
 // RefreshDashboard updates all dashboard components with latest data
