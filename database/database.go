@@ -414,7 +414,7 @@ func (db *SQLiteConfig) RunAction(action ActionConfig) error {
 }
 
 func (db *SQLiteConfig) GetTables() ([]string, error) {
-	rows, err := db.db.Query("SELECT name FROM sqlite_master WHERE type='table'")
+	rows, err := db.db.Query("SELECT name FROM sqlite_master WHERE type IN ('table','view') ORDER BY name")
 	if err != nil {
 		return nil, err
 	}
@@ -925,7 +925,16 @@ func (db *PostgreSQLConfig) RunAction(action ActionConfig) error {
 }
 
 func (db *PostgreSQLConfig) GetTables() ([]string, error) {
-	rows, err := db.db.Query("SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname != 'pg_catalog' AND schemaname != 'information_schema'")
+	query := `
+		SELECT tablename AS name
+		FROM pg_catalog.pg_tables
+		WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+		UNION
+		SELECT viewname AS name
+		FROM pg_catalog.pg_views
+		WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+		ORDER BY name`
+	rows, err := db.db.Query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -1456,7 +1465,7 @@ func (db *MSSQLConfig) RunAction(action ActionConfig) error {
 }
 
 func (db *MSSQLConfig) GetTables() ([]string, error) {
-	rows, err := db.db.Query("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'")
+	rows, err := db.db.Query("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE IN ('BASE TABLE','VIEW')")
 	if err != nil {
 		return nil, err
 	}
