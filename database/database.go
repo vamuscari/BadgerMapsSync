@@ -53,6 +53,7 @@ type DB interface {
 	GetTableColumns(tableName string) ([]string, error)
 	ValidateSchema(s *state.State) error
 	EnforceSchema(s *state.State) error
+	ResetSchema(s *state.State) error
 	TestConnection() error
 	DropAllTables() error
 	Connect() error
@@ -139,10 +140,6 @@ func (db *SQLiteConfig) GetTableColumns(tableName string) ([]string, error) {
 }
 
 func (db *SQLiteConfig) EnforceSchema(s *state.State) error {
-	if err := db.DropAllTables(); err != nil {
-		return err
-	}
-
 	sqlDB := db.GetDB()
 
 	for _, tableName := range RequiredTables() {
@@ -361,13 +358,35 @@ func (db *SQLiteConfig) PromptDatabaseSettings() {
 
 func (db *SQLiteConfig) DropAllTables() error {
 	sqlDB := db.GetDB()
-	for _, tableName := range RequiredTables() {
+	for _, viewName := range requiredViews() {
+		query := fmt.Sprintf("DROP VIEW IF EXISTS %s", viewName)
+		if _, err := sqlDB.Exec(query); err != nil {
+			return fmt.Errorf("failed to drop view %s: %w", viewName, err)
+		}
+	}
+
+	for _, tableName := range dropTableOrder() {
 		query := fmt.Sprintf("DROP TABLE IF EXISTS %s", tableName)
 		if _, err := sqlDB.Exec(query); err != nil {
 			return fmt.Errorf("failed to drop table %s: %w", tableName, err)
 		}
 	}
 	return nil
+}
+
+func (db *SQLiteConfig) ResetSchema(s *state.State) error {
+	if s == nil {
+		s = &state.State{}
+	}
+	if !s.Quiet {
+		fmt.Println(color.YellowString("Warning: Re-initializing the database schema will delete all existing data."))
+	}
+
+	if err := db.DropAllTables(); err != nil {
+		return err
+	}
+
+	return db.EnforceSchema(s)
 }
 
 func (db *SQLiteConfig) RunAction(action ActionConfig) error {
@@ -844,13 +863,35 @@ func (db *PostgreSQLConfig) PromptDatabaseSettings() {
 
 func (db *PostgreSQLConfig) DropAllTables() error {
 	sqlDB := db.GetDB()
-	for _, tableName := range RequiredTables() {
+	for _, viewName := range requiredViews() {
+		query := fmt.Sprintf("DROP VIEW IF EXISTS \"%s\" CASCADE", viewName)
+		if _, err := sqlDB.Exec(query); err != nil {
+			return fmt.Errorf("failed to drop view %s: %w", viewName, err)
+		}
+	}
+
+	for _, tableName := range dropTableOrder() {
 		query := fmt.Sprintf("DROP TABLE IF EXISTS %s CASCADE", tableName)
 		if _, err := sqlDB.Exec(query); err != nil {
 			return fmt.Errorf("failed to drop table %s: %w", tableName, err)
 		}
 	}
 	return nil
+}
+
+func (db *PostgreSQLConfig) ResetSchema(s *state.State) error {
+	if s == nil {
+		s = &state.State{}
+	}
+	if !s.Quiet {
+		fmt.Println(color.YellowString("Warning: Re-initializing the database schema will delete all existing data."))
+	}
+
+	if err := db.DropAllTables(); err != nil {
+		return err
+	}
+
+	return db.EnforceSchema(s)
 }
 
 func (db *PostgreSQLConfig) RunAction(action ActionConfig) error {
@@ -1357,13 +1398,35 @@ func (db *MSSQLConfig) DropAllTables() error {
 		}
 	}
 
-	for _, tableName := range RequiredTables() {
+	for _, viewName := range requiredViews() {
+		query := fmt.Sprintf("IF OBJECT_ID('%s', 'V') IS NOT NULL DROP VIEW %s", viewName, viewName)
+		if _, err := sqlDB.Exec(query); err != nil {
+			return fmt.Errorf("failed to drop view %s: %w", viewName, err)
+		}
+	}
+
+	for _, tableName := range dropTableOrder() {
 		query := fmt.Sprintf("IF OBJECT_ID('%s', 'U') IS NOT NULL DROP TABLE %s", tableName, tableName)
 		if _, err := sqlDB.Exec(query); err != nil {
 			return fmt.Errorf("failed to drop table %s: %w", tableName, err)
 		}
 	}
 	return nil
+}
+
+func (db *MSSQLConfig) ResetSchema(s *state.State) error {
+	if s == nil {
+		s = &state.State{}
+	}
+	if !s.Quiet {
+		fmt.Println(color.YellowString("Warning: Re-initializing the database schema will delete all existing data."))
+	}
+
+	if err := db.DropAllTables(); err != nil {
+		return err
+	}
+
+	return db.EnforceSchema(s)
 }
 
 func (db *MSSQLConfig) RunAction(action ActionConfig) error {
@@ -1485,6 +1548,21 @@ func RequiredTables() []string {
 		"SyncHistory",
 		"CommandLog",
 		"WebhookLog",
+	}
+}
+
+func dropTableOrder() []string {
+	tables := RequiredTables()
+	reversed := make([]string, len(tables))
+	for i := range tables {
+		reversed[i] = tables[len(tables)-1-i]
+	}
+	return reversed
+}
+
+func requiredViews() []string {
+	return []string{
+		"AccountsWithLabels",
 	}
 }
 

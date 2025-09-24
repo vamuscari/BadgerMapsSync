@@ -21,6 +21,7 @@ The `database.DB` interface includes methods for:
 - Validating and enforcing the database schema (`ValidateSchema`, `EnforceSchema`)
 - Testing the database connection (`TestConnection`)
 - Dropping all tables (`DropAllTables`)
+- Resetting the database schema (`ResetSchema`)
 - Connecting to and closing the database (`Connect`, `Close`)
 - Getting the underlying `sql.DB` object (`GetDB`)
 
@@ -44,10 +45,11 @@ All SQL commands use `?` as the parameter placeholder, which is compatible with 
 
 ## Schema Management
 
-The database schema is managed through the `EnforceSchema` and `ValidateSchema` methods of the `DB` interface.
+The database schema is managed through the `EnforceSchema`, `ValidateSchema`, and `ResetSchema` methods of the `DB` interface.
 
 - **`EnforceSchema`**: This method creates all the necessary tables, views, and other database objects. It is typically called during the initial setup of the application.
 - **`ValidateSchema`**: This method checks if the existing database schema matches the expected schema. It is used to ensure that the database is in a consistent state before the application starts.
+- **`ResetSchema`**: This method drops all schema objects in a safe order and then recreates them, effectively reinitializing the database.
 
 ## Adding a New Database Backend
 

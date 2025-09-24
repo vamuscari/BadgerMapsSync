@@ -21,15 +21,20 @@ import (
 const (
 	WebhookAccountCreate = "account_create"
 	WebhookCheckin       = "checkin"
+
+	ThemePreferenceAuto  = "auto"
+	ThemePreferenceLight = "light"
+	ThemePreferenceDark  = "dark"
 )
 
 type ServerConfig struct {
-	Host       string          `yaml:"host"`
-	Port       int             `yaml:"port"`
-	TLSEnabled bool            `yaml:"tls_enabled"`
-	TLSCert    string          `yaml:"tls_cert"`
-	TLSKey     string          `yaml:"tls_key"`
-	Webhooks   map[string]bool `yaml:"webhooks"`
+	Host        string          `yaml:"host"`
+	Port        int             `yaml:"port"`
+	TLSEnabled  bool            `yaml:"tls_enabled"`
+	TLSCert     string          `yaml:"tls_cert"`
+	TLSKey      string          `yaml:"tls_key"`
+	LogRequests bool            `yaml:"log_requests"`
+	Webhooks    map[string]bool `yaml:"webhooks"`
 }
 
 func defaultWebhookConfig() map[string]bool {
@@ -43,6 +48,7 @@ type Config struct {
 	API                   api.APIConfig        `yaml:"api"`
 	DB                    database.DBConfig    `yaml:"db"`
 	Server                ServerConfig         `yaml:"server"`
+	ThemePreference       string               `yaml:"theme_preference"`
 	MaxConcurrentRequests int                  `yaml:"max_concurrent_requests"`
 	EventActions          []action.EventAction `yaml:"event_actions"`
 	CronJobs              []server.CronJob     `yaml:"cron_jobs"`
@@ -119,10 +125,12 @@ func NewApp() *App {
 				Path: utils.GetConfigDirFile("badgermaps.db"),
 			},
 			Server: ServerConfig{
-				Host:     "localhost",
-				Port:     8080,
-				Webhooks: defaultWebhookConfig(),
+				Host:        "localhost",
+				Port:        8080,
+				LogRequests: true,
+				Webhooks:    defaultWebhookConfig(),
 			},
+			ThemePreference:       ThemePreferenceAuto,
 			MaxConcurrentRequests: 5,
 		},
 	}
@@ -172,6 +180,7 @@ func (a *App) LoadConfig() error {
 		a.ensureExecActionShellDefaults()
 	}
 	a.ensureServerWebhookDefaults()
+	a.ensureThemePreference()
 
 	// Transfer server config to state
 	a.State.ServerHost = a.Config.Server.Host
@@ -179,6 +188,7 @@ func (a *App) LoadConfig() error {
 	a.State.TLSEnabled = a.Config.Server.TLSEnabled
 	a.State.TLSCert = a.Config.Server.TLSCert
 	a.State.TLSKey = a.Config.Server.TLSKey
+	a.State.ServerLogRequests = a.Config.Server.LogRequests
 
 	a.API = api.NewAPIClient(&a.Config.API)
 
@@ -307,6 +317,23 @@ func (a *App) ensureServerWebhookDefaults() {
 		if _, ok := a.Config.Server.Webhooks[key]; !ok {
 			a.Config.Server.Webhooks[key] = defaultValue
 		}
+	}
+}
+
+func (a *App) ensureThemePreference() {
+	a.Config.ThemePreference = NormalizeThemePreference(a.Config.ThemePreference)
+}
+
+func NormalizeThemePreference(pref string) string {
+	switch strings.ToLower(strings.TrimSpace(pref)) {
+	case ThemePreferenceLight:
+		return ThemePreferenceLight
+	case ThemePreferenceDark:
+		return ThemePreferenceDark
+	case ThemePreferenceAuto:
+		return ThemePreferenceAuto
+	default:
+		return ThemePreferenceAuto
 	}
 }
 
@@ -696,13 +723,9 @@ func (a *App) InteractiveSetup() bool {
 		a.Events.Dispatch(events.Warningf("setup", "Database schema already exists and is valid."))
 		reinitialize := utils.PromptBool(reader, "Do you want to reinitialize the database? (This will delete all existing data)", false)
 		if reinitialize {
-			a.Events.Dispatch(events.Warningf("setup", "Reinitializing database..."))
-			if err := a.DB.DropAllTables(); err != nil {
-				a.Events.Dispatch(events.Errorf("setup", "Error dropping tables: %v", err))
-				return false
-			}
-			if err := a.DB.EnforceSchema(a.State); err != nil {
-				a.Events.Dispatch(events.Errorf("setup", "Error enforcing schema: %v", err))
+			a.Events.Dispatch(events.Warningf("setup", "Re-initializing database schema and deleting all existing data..."))
+			if err := a.DB.ResetSchema(a.State); err != nil {
+				a.Events.Dispatch(events.Errorf("setup", "Error resetting schema: %v", err))
 				return false
 			}
 			a.Events.Dispatch(events.Infof("setup", "Database reinitialized successfully."))

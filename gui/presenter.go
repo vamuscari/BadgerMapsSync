@@ -465,8 +465,8 @@ func (p *GuiPresenter) HandlePushAll() {
 
 // HandleSaveConfig saves the application configuration.
 func (p *GuiPresenter) HandleSaveConfig(
-	apiKey, baseURL, dbType, dbPath, dbHost, dbPortStr, dbUser, dbPass, dbName,
-	serverHost, serverPortStr string, tlsEnabled bool, tlsCert, tlsKey string,
+	apiKey, baseURL, dbType, dbPath, dbHost, dbPortStr, dbUser, dbPass, dbName string,
+	themePreference string,
 	verbose, debug bool,
 	maxConcurrentStr string,
 	parallelProcessing bool,
@@ -477,15 +477,8 @@ func (p *GuiPresenter) HandleSaveConfig(
 	// Update API config in memory
 	p.app.Config.API.APIKey = apiKey
 	p.app.Config.API.BaseURL = baseURL
-
-	// Update Server config in memory
-	p.app.Config.Server.Host = serverHost
-	serverPort, _ := strconv.Atoi(serverPortStr)
-	p.app.Config.Server.Port = serverPort
-	p.app.Config.Server.TLSEnabled = tlsEnabled
-	p.app.Config.Server.TLSCert = tlsCert
-	p.app.Config.Server.TLSKey = tlsKey
 	p.app.State.Debug = debug
+	p.app.Config.ThemePreference = app.NormalizeThemePreference(themePreference)
 
 	trimmedMax := strings.TrimSpace(maxConcurrentStr)
 	maxConcurrent := 1
@@ -547,6 +540,8 @@ func (p *GuiPresenter) HandleSaveConfig(
 		p.app.Events.Dispatch(events.Errorf("presenter", "ERROR reloading database: %v", err))
 		p.view.ShowToast("Error: Failed to reload database.")
 	}
+
+	p.view.ApplyThemePreference(p.app.Config.ThemePreference)
 
 	p.view.ShowToast("Success: Configuration saved successfully.")
 	p.app.Events.Dispatch(events.Event{Type: "connection.status.changed"})
@@ -636,9 +631,9 @@ func (p *GuiPresenter) HandleSchemaEnforcement() {
 			if !ok {
 				return
 			}
-			p.app.Events.Dispatch(events.Infof("presenter", "Re-initializing database schema..."))
+			p.app.Events.Dispatch(events.Warningf("presenter", "Re-initializing database schema and deleting all existing data..."))
 			go func() {
-				if err := p.app.DB.EnforceSchema(p.app.State); err != nil {
+				if err := p.app.DB.ResetSchema(p.app.State); err != nil {
 					p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
 					p.view.ShowToast("Error: Failed to re-initialize schema.")
 					return
@@ -681,6 +676,46 @@ func (p *GuiPresenter) HandleViewConfig() {
 }
 
 // --- Server Handlers ---
+
+// HandleSaveServerConfig persists server host, TLS, and logging settings.
+func (p *GuiPresenter) HandleSaveServerConfig(host, portStr string, tlsEnabled bool, tlsCert, tlsKey string, logRequests bool) {
+	p.app.Events.Dispatch(events.Debugf("presenter", "HandleSaveServerConfig called"))
+	p.app.Events.Dispatch(events.Infof("presenter", "Saving server configuration..."))
+
+	trimmedHost := strings.TrimSpace(host)
+	trimmedPort := strings.TrimSpace(portStr)
+	serverPort, err := strconv.Atoi(trimmedPort)
+	if err != nil || serverPort <= 0 {
+		p.app.Events.Dispatch(events.Warningf("presenter", "Invalid server port '%s'; keeping previous value %d", trimmedPort, p.app.Config.Server.Port))
+		serverPort = p.app.Config.Server.Port
+	}
+
+	trimmedCert := strings.TrimSpace(tlsCert)
+	trimmedKey := strings.TrimSpace(tlsKey)
+
+	p.app.Config.Server.Host = trimmedHost
+	p.app.Config.Server.Port = serverPort
+	p.app.Config.Server.TLSEnabled = tlsEnabled
+	p.app.Config.Server.TLSCert = trimmedCert
+	p.app.Config.Server.TLSKey = trimmedKey
+	p.app.Config.Server.LogRequests = logRequests
+
+	p.app.State.ServerHost = trimmedHost
+	p.app.State.ServerPort = serverPort
+	p.app.State.TLSEnabled = tlsEnabled
+	p.app.State.TLSCert = trimmedCert
+	p.app.State.TLSKey = trimmedKey
+	p.app.State.ServerLogRequests = logRequests
+
+	if err := p.app.SaveConfig(); err != nil {
+		errWrapped := fmt.Errorf("failed to save server configuration: %w", err)
+		p.app.Events.Dispatch(events.Errorf("presenter", errWrapped.Error()))
+		p.view.ShowToast("Error: Failed to save server settings.")
+		return
+	}
+
+	p.view.ShowToast("Success: Server settings saved.")
+}
 
 // HandleStartServer starts the webhook server.
 func (p *GuiPresenter) HandleStartServer() {

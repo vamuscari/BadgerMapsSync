@@ -98,88 +98,104 @@ func (d *SmartDashboard) createHeader() fyne.CanvasObject {
 
 func (d *SmartDashboard) createStatusCards() fyne.CanvasObject {
 	// API Status Card
+	apiConnected := d.ui.app.API != nil && d.ui.app.API.IsConnected()
+	apiHeadline := "Not Connected"
+	if apiConnected {
+		apiHeadline = "Connected"
+	}
 	apiCard := d.createConnectionCard(
 		"API Connection",
-		d.ui.app.API != nil && d.ui.app.API.IsConnected(),
-		nil, // No actions
+		apiHeadline,
+		apiConnected,
+		nil, // No additional details
 	)
 
 	// Database Status Card - show schema status in the card
 	dbConnected := d.ui.app.DB != nil && d.ui.app.DB.IsConnected()
-	var dbStatusText string
+	var dbStatusDetail string
 	if dbConnected {
 		// Check schema status
 		if err := d.ui.app.DB.ValidateSchema(d.ui.app.State); err == nil {
-			dbStatusText = "Connected (Schema Valid)"
+			dbStatusDetail = "Connected (Schema Valid)"
 		} else {
-			dbStatusText = "Connected (Schema Invalid)"
+			dbStatusDetail = "Connected (Schema Invalid)"
 			d.ui.app.Events.Dispatch(events.Debugf("dashboard", "Schema validation failed: %v", err))
 		}
 	} else {
-		dbStatusText = "Not Connected"
+		dbStatusDetail = "Not Connected"
+	}
+	dbHeadline := "Not Connected"
+	if dbConnected {
+		dbHeadline = "Connected"
 	}
 
 	dbCard := d.createConnectionCard(
 		"Database",
+		dbHeadline,
 		dbConnected,
-		[]fyne.CanvasObject{widget.NewLabel(dbStatusText)},
+		[]fyne.CanvasObject{widget.NewLabel(dbStatusDetail)},
 	)
 
 	// Server Status Card
 	pid, serverRunning := d.ui.app.Server.GetServerStatus()
-	var serverStatusText string
+	serverHeadline := "Stopped"
+	var serverStatusDetail string
 	if serverRunning {
-		serverStatusText = fmt.Sprintf("Running (PID: %d)", pid)
+		serverHeadline = "Running"
+		serverStatusDetail = fmt.Sprintf("Running (PID: %d)", pid)
 	} else {
-		serverStatusText = "Stopped"
+		serverStatusDetail = "Stopped"
 	}
 
 	serverCard := d.createConnectionCard(
 		"Webhook Server",
+		serverHeadline,
 		serverRunning,
-		[]fyne.CanvasObject{widget.NewLabel(serverStatusText)},
+		[]fyne.CanvasObject{widget.NewLabel(serverStatusDetail)},
 	)
 
 	return container.NewGridWithColumns(3, apiCard, dbCard, serverCard)
 }
 
-func (d *SmartDashboard) createConnectionCard(title string, isConnected bool, actions []fyne.CanvasObject) fyne.CanvasObject {
-	var statusText string
-	var statusColor color.Color
-
-	if isConnected {
-		statusText = "Connected"
-		statusColor = color.NRGBA{R: 0, G: 200, B: 0, A: 255}
-	} else {
-		statusText = "Not Connected"
-		statusColor = color.NRGBA{R: 200, G: 0, B: 0, A: 255}
+func (d *SmartDashboard) createConnectionCard(title, statusText string, isHealthy bool, details []fyne.CanvasObject) fyne.CanvasObject {
+	statusColorName := StatusNegativeColorName
+	if isHealthy {
+		statusColorName = StatusPositiveColorName
 	}
+	statusColor := d.themeColor(statusColorName)
 
-	// Status indicator
-	indicator := canvas.NewCircle(statusColor)
-	indicator.StrokeWidth = 2
-	indicator.StrokeColor = statusColor
-	indicator.Resize(fyne.NewSize(12, 12))
+	statusLabel := canvas.NewText(statusText, statusColor)
+	statusLabel.Alignment = fyne.TextAlignTrailing
+	statusLabel.TextStyle = fyne.TextStyle{Bold: true}
+	statusLabel.TextSize = theme.TextSize()
 
 	titleLabel := widget.NewLabelWithStyle(title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	statusLabel := widget.NewLabel(statusText)
 
 	header := container.NewHBox(
-		indicator,
 		titleLabel,
+		layout.NewSpacer(),
+		statusLabel,
 	)
 
-	content := container.NewVBox(header, statusLabel)
+	content := container.NewVBox(header)
 
-	// Add actions if provided
-	if actions != nil && len(actions) > 0 {
+	// Add additional details if provided
+	if len(details) > 0 {
 		content.Add(widget.NewSeparator())
-		for _, action := range actions {
-			content.Add(action)
+		for _, detail := range details {
+			content.Add(detail)
 		}
 	}
 
-	return widget.NewCard("", "", content)
+	background := canvas.NewRectangle(d.themeColor(StatusCardBackgroundColorName))
+	background.CornerRadius = theme.Padding()
+	background.StrokeWidth = 1
+	background.StrokeColor = d.themeColor(StatusCardBorderColorName)
+
+	// Slight vertical spacing inside the card for visual balance
+	padded := container.NewPadded(content)
+
+	return container.NewStack(background, padded)
 }
 
 // showRecentActivityInDetails displays recent activity in the details panel
@@ -225,6 +241,10 @@ func (d *SmartDashboard) showRecentActivityInDetails() {
 	if d.ui.rightPaneContent != nil {
 		d.ui.ShowDetails(detailsContainer)
 	}
+}
+
+func (d *SmartDashboard) themeColor(name fyne.ThemeColorName) color.Color {
+	return d.ui.themeColor(name)
 }
 
 // ActivityItem represents a system activity
@@ -316,19 +336,62 @@ func (d *SmartDashboard) createInsights() fyne.CanvasObject {
 
 	var statWidgets []fyne.CanvasObject
 	for _, stat := range stats {
-		// Create a compact card for each statistic
-		statCard := widget.NewCard("", "", container.NewVBox(
-			widget.NewLabelWithStyle(stat.Label, fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-			widget.NewLabelWithStyle(stat.Value, fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-		))
-		statWidgets = append(statWidgets, statCard)
+		statWidgets = append(statWidgets, d.createSystemStatCard(stat))
 	}
 
-	grid := container.NewGridWithColumns(4, statWidgets...) // More columns = more compact
+	var grid fyne.CanvasObject
+	if len(statWidgets) == 0 {
+		empty := widget.NewLabel("No statistics available")
+		empty.Alignment = fyne.TextAlignCenter
+		grid = container.NewCenter(empty)
+	} else {
+		columns := 3
+		if len(statWidgets) < columns {
+			columns = len(statWidgets)
+		}
+		if columns == 0 {
+			columns = 1
+		}
+		grid = container.NewGridWithColumns(columns, statWidgets...)
+	}
 
 	return container.NewVBox(
 		title,
 		grid,
+	)
+}
+
+func (d *SmartDashboard) createSystemStatCard(stat SystemStat) fyne.CanvasObject {
+	title := widget.NewLabelWithStyle(stat.Label, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	value := canvas.NewText(stat.Value, theme.ForegroundColor())
+	value.Alignment = fyne.TextAlignTrailing
+	value.TextStyle = fyne.TextStyle{Bold: true}
+	value.TextSize = theme.TextSize() + 2
+
+	description := widget.NewLabel(stat.Description)
+	description.Alignment = fyne.TextAlignLeading
+	description.Wrapping = fyne.TextWrapWord
+
+	header := container.NewHBox(
+		title,
+		layout.NewSpacer(),
+		value,
+	)
+
+	content := container.NewVBox(header)
+	if stat.Description != "" {
+		content.Add(widget.NewSeparator())
+		content.Add(description)
+	}
+
+	background := canvas.NewRectangle(d.themeColor(StatusCardBackgroundColorName))
+	background.CornerRadius = theme.Padding()
+	background.StrokeColor = d.themeColor(StatusCardBorderColorName)
+	background.StrokeWidth = 1
+
+	return container.NewStack(
+		background,
+		container.NewPadded(content),
 	)
 }
 

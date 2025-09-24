@@ -403,16 +403,8 @@ func TestDatabase(App *app.App) {
 
 		reader := bufio.NewReader(os.Stdin)
 		if utils.PromptBool(reader, "Would you like to drop all tables and re-initialize the schema?", false) {
-			App.Events.Dispatch(events.Warningf("test", "Dropping all tables..."))
-			if err := db.DropAllTables(); err != nil {
-				App.Events.Dispatch(events.Errorf("test", "FAILED: Could not drop tables"))
-				App.Events.Dispatch(events.Errorf("test", "Error: %v", err))
-				os.Exit(1)
-			}
-			App.Events.Dispatch(events.Infof("test", "Tables dropped successfully."))
-
-			App.Events.Dispatch(events.Infof("test", "Re-initializing schema..."))
-			if err := db.EnforceSchema(App.State); err != nil {
+			App.Events.Dispatch(events.Warningf("test", "Resetting schema and deleting all existing data..."))
+			if err := db.ResetSchema(App.State); err != nil {
 				App.Events.Dispatch(events.Errorf("test", "FAILED: Could not enforce schema"))
 				if App.State.Debug {
 					App.Events.Dispatch(events.Debugf("test", "Error: %v", err))

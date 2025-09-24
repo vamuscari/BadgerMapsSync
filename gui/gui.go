@@ -43,11 +43,13 @@ func NewSecondaryButton(label string, icon fyne.Resource, tapped func()) *Second
 
 // CreateRenderer implements the Widget interface
 func (b *SecondaryButton) CreateRenderer() fyne.WidgetRenderer {
+	background := canvas.NewRectangle(theme.ButtonColor())
+	background.CornerRadius = theme.InputRadiusSize()
 	r := &secondaryButtonRenderer{
 		button:     b,
 		label:      widget.NewLabel(b.Text),
 		icon:       widget.NewIcon(b.Icon),
-		background: canvas.NewRectangle(theme.ButtonColor()),
+		background: background,
 	}
 	r.objects = []fyne.CanvasObject{r.background, r.icon, r.label}
 	return r
@@ -64,13 +66,20 @@ type secondaryButtonRenderer struct {
 func (r *secondaryButtonRenderer) Layout(size fyne.Size) {
 	r.background.Resize(size)
 	padding := theme.Padding()
+	labelSize := r.label.MinSize()
 	if r.button.Icon != nil {
 		iconSize := theme.IconInlineSize()
+		totalWidth := iconSize + padding + labelSize.Width
+		if totalWidth > size.Width {
+			totalWidth = size.Width
+		}
+		startX := (size.Width - totalWidth) / 2
+		iconY := (size.Height - iconSize) / 2
 		r.icon.Resize(fyne.NewSize(iconSize, iconSize))
-		r.icon.Move(fyne.NewPos(padding, (size.Height-iconSize)/2))
-		r.label.Move(fyne.NewPos(padding*2+iconSize, (size.Height-r.label.MinSize().Height)/2))
+		r.icon.Move(fyne.NewPos(startX, iconY))
+		r.label.Move(fyne.NewPos(startX+iconSize+padding, (size.Height-labelSize.Height)/2))
 	} else {
-		r.label.Move(fyne.NewPos(padding, (size.Height-r.label.MinSize().Height)/2))
+		r.label.Move(fyne.NewPos((size.Width-labelSize.Width)/2, (size.Height-labelSize.Height)/2))
 	}
 }
 
@@ -88,11 +97,17 @@ func (r *secondaryButtonRenderer) MinSize() fyne.Size {
 
 func (r *secondaryButtonRenderer) Refresh() {
 	r.label.SetText(r.button.Text)
-	r.icon.SetResource(r.button.Icon)
+	if r.button.Icon != nil {
+		r.icon.SetResource(r.button.Icon)
+		r.icon.Show()
+	} else {
+		r.icon.Hide()
+	}
 	r.background.FillColor = theme.ButtonColor()
 	if r.button.Disabled() {
 		r.background.FillColor = theme.DisabledButtonColor()
 	}
+	r.background.CornerRadius = theme.InputRadiusSize()
 	r.background.Refresh()
 	r.label.Refresh()
 	r.icon.Refresh()
@@ -294,6 +309,45 @@ type Gui struct {
 	showWelcome    bool
 }
 
+func (ui *Gui) themeColor(name fyne.ThemeColorName) color.Color {
+	if ui == nil {
+		return newModernTheme().Color(name, theme.VariantDark)
+	}
+	if ui.fyneApp == nil {
+		return newModernTheme().Color(name, theme.VariantDark)
+	}
+	settings := ui.fyneApp.Settings()
+	return settings.Theme().Color(name, settings.ThemeVariant())
+}
+
+func (ui *Gui) newSectionCard(title, subtitle string, content ...fyne.CanvasObject) fyne.CanvasObject {
+	titleLabel := widget.NewLabelWithStyle(title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	body := container.NewVBox(titleLabel)
+	if subtitle != "" {
+		subtitleLabel := widget.NewLabel(subtitle)
+		subtitleLabel.Alignment = fyne.TextAlignLeading
+		subtitleLabel.Wrapping = fyne.TextWrapWord
+		body.Add(subtitleLabel)
+	}
+	if len(content) > 0 {
+		body.Add(widget.NewSeparator())
+		for _, c := range content {
+			if c != nil {
+				body.Add(c)
+			}
+		}
+	}
+	background := canvas.NewRectangle(ui.themeColor(StatusCardBackgroundColorName))
+	background.CornerRadius = theme.Padding()
+	background.StrokeColor = ui.themeColor(StatusCardBorderColorName)
+	background.StrokeWidth = 1
+
+	return container.NewStack(
+		background,
+		container.NewPadded(body),
+	)
+}
+
 // Launch initializes and runs the GUI
 func Launch(a *app.App, icon fyne.Resource) {
 	a.Events.Dispatch(events.Debugf("gui", "GUI initiated"))
@@ -301,7 +355,6 @@ func Launch(a *app.App, icon fyne.Resource) {
 
 	fyneApp := fapp.New()
 	fyneApp.SetIcon(icon)
-	fyneApp.Settings().SetTheme(newModernTheme())
 	window := fyneApp.NewWindow("BadgerMaps CLI")
 
 	ui := &Gui{
@@ -311,6 +364,8 @@ func Launch(a *app.App, icon fyne.Resource) {
 		logBinding:      binding.NewStringList(),
 		terminalVisible: false, // Default to details view
 	}
+
+	ui.applyThemePreference()
 
 	// Create and link the presenter
 	presenter := NewGuiPresenter(a, ui)
@@ -422,6 +477,30 @@ func Launch(a *app.App, icon fyne.Resource) {
 	window.SetFixedSize(false) // Allow resizing
 	window.CenterOnScreen()
 	window.ShowAndRun()
+}
+
+func (ui *Gui) applyThemePreference() {
+	if ui.fyneApp == nil {
+		return
+	}
+
+	preference := app.NormalizeThemePreference(ui.app.Config.ThemePreference)
+	var selectedTheme fyne.Theme
+	switch preference {
+	case app.ThemePreferenceLight:
+		selectedTheme = newModernThemeForVariant(theme.VariantLight)
+	case app.ThemePreferenceDark:
+		selectedTheme = newModernThemeForVariant(theme.VariantDark)
+	default:
+		selectedTheme = newModernTheme()
+	}
+
+	ui.fyneApp.Settings().SetTheme(selectedTheme)
+}
+
+func (ui *Gui) ApplyThemePreference(pref string) {
+	ui.app.Config.ThemePreference = app.NormalizeThemePreference(pref)
+	ui.applyThemePreference()
 }
 
 // createContent builds the main content of the window
@@ -1677,25 +1756,27 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 	tableContainer := container.NewMax() // Use NewMax to fill available space
 
 	// Pagination state
-	var currentTableName string
-	var currentPaginatedData *PaginatedTableData
-	var searchEntry *widget.Entry
-	var pageInfoLabel *widget.Label
-	var prevBtn, nextBtn, firstPageBtn, lastPageBtn *widget.Button
-	var pageSizeSelect *widget.Select
-	var filterColumnSelect, filterModeSelect, orderColumnSelect, orderDirectionSelect *widget.Select
-	var filterValueEntry *widget.Entry
-	var applyFilterBtn, clearFilterBtn *widget.Button
+	var (
+		currentTableName     string
+		currentPaginatedData *PaginatedTableData
+		searchEntry          *widget.Entry
+		pageInfoLabel        *widget.Label
+		prevBtn, nextBtn     *widget.Button
+		firstPageBtn         *widget.Button
+		lastPageBtn          *widget.Button
+		pageSizeSelect       *widget.Select
+		orderColumnSelect    *widget.Select
+		orderDirectionSelect *widget.Select
+		quickPresetSelect    *widget.Select
+		filtersPanel         = container.NewVBox()
+		filterRows           []*explorerFilterRow
+		suppressPresetChange bool
+	)
 	var availableColumns []string
 
 	queryOptions := ui.explorerCurrentQuery
-	if queryOptions.FilterMode == FilterModeNone {
-		queryOptions.FilterMode = FilterModeContains
-	}
-	pendingFilterColumn := queryOptions.FilterColumn
-	var pendingFilterMode = queryOptions.FilterMode
-	pendingFilterValue := queryOptions.FilterValue
-	pendingOrderColumn := queryOptions.OrderColumn
+	pendingFilters := cloneExplorerFilters(queryOptions.Filters)
+	pendingOrderColumn := strings.TrimSpace(queryOptions.OrderColumn)
 	pendingOrderDescending := queryOptions.OrderDescending
 
 	// Page size options with descriptions for better UX
@@ -1723,6 +1804,123 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 		modeByLabel[opt.Label] = opt.Mode
 	}
 
+	var (
+		updateFilterRowOptions func()
+		rebuildFilterRows      func()
+		presetLabelForFilters  func() string
+	)
+
+	createFilterRow := func(clause *ExplorerFilterClause) *explorerFilterRow {
+		if clause.Mode == FilterModeNone {
+			clause.Mode = FilterModeContains
+		}
+
+		row := &explorerFilterRow{clause: clause}
+
+		columnSelect := widget.NewSelect(append([]string{}, availableColumns...), func(value string) {
+			clause.Column = strings.TrimSpace(value)
+		})
+		columnSelect.PlaceHolder = "Column"
+		if clause.Column != "" {
+			columnSelect.SetSelected(clause.Column)
+		}
+
+		modeSelect := widget.NewSelect(modeLabels, func(label string) {
+			mode := modeByLabel[label]
+			if mode == "" {
+				mode = FilterModeContains
+			}
+			clause.Mode = mode
+		})
+		initialModeLabel := modeLabelByMode[clause.Mode]
+		if initialModeLabel == "" {
+			clause.Mode = FilterModeContains
+			initialModeLabel = modeLabelByMode[FilterModeContains]
+		}
+		modeSelect.SetSelected(initialModeLabel)
+
+		valueEntry := widget.NewEntry()
+		valueEntry.SetPlaceHolder("Value")
+		valueEntry.SetText(clause.Value)
+		valueEntry.OnChanged = func(val string) {
+			clause.Value = val
+		}
+
+		removeButton := widget.NewButtonWithIcon("", theme.ContentRemoveIcon(), func() {
+			for idx := range pendingFilters {
+				if &pendingFilters[idx] == clause {
+					pendingFilters = append(pendingFilters[:idx], pendingFilters[idx+1:]...)
+					break
+				}
+			}
+			rebuildFilterRows()
+		})
+		removeButton.Importance = widget.LowImportance
+
+		row.column = columnSelect
+		row.mode = modeSelect
+		row.value = valueEntry
+		row.remove = removeButton
+		row.container = container.NewGridWithColumns(4, columnSelect, modeSelect, valueEntry, removeButton)
+
+		return row
+	}
+
+	rebuildFilterRows = func() {
+		filtersPanel.Objects = nil
+		filterRows = filterRows[:0]
+
+		if len(pendingFilters) == 0 {
+			empty := widget.NewLabel("No filters applied")
+			empty.Alignment = fyne.TextAlignCenter
+			empty.Wrapping = fyne.TextWrapWord
+			filtersPanel.Add(container.NewPadded(empty))
+		} else {
+			for i := range pendingFilters {
+				clause := &pendingFilters[i]
+				row := createFilterRow(clause)
+				filterRows = append(filterRows, row)
+				filtersPanel.Add(row.container)
+			}
+		}
+
+		filtersPanel.Refresh()
+
+		if updateFilterRowOptions != nil {
+			updateFilterRowOptions()
+		}
+	}
+
+	updateFilterRowOptions = func() {
+		options := append([]string{}, availableColumns...)
+		for _, row := range filterRows {
+			row.column.Options = options
+			if row.clause.Column != "" && !containsString(options, row.clause.Column) {
+				row.clause.Column = ""
+				row.column.ClearSelected()
+			} else if row.clause.Column != "" {
+				row.column.SetSelected(row.clause.Column)
+			}
+			row.column.Refresh()
+		}
+
+		if orderColumnSelect != nil {
+			orderOptions := append([]string{""}, availableColumns...)
+			orderColumnSelect.Options = orderOptions
+			if pendingOrderColumn == "" {
+				orderColumnSelect.ClearSelected()
+			} else if containsString(availableColumns, pendingOrderColumn) {
+				orderColumnSelect.SetSelected(pendingOrderColumn)
+			} else {
+				pendingOrderColumn = ""
+				orderColumnSelect.ClearSelected()
+			}
+			orderColumnSelect.Refresh()
+		}
+	}
+
+	rebuildFilterRows()
+
 	// Function to load a specific page
 	loadPage := func(tableName string, page int, pageSize int, opts ExplorerQueryOptions) {
 		if tableName == "" {
@@ -1730,13 +1928,8 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 		}
 
 		queryOptions = opts
-		if queryOptions.FilterMode == FilterModeNone {
-			queryOptions.FilterMode = FilterModeContains
-		}
-		pendingFilterColumn = queryOptions.FilterColumn
-		pendingFilterMode = queryOptions.FilterMode
-		pendingFilterValue = queryOptions.FilterValue
-		pendingOrderColumn = queryOptions.OrderColumn
+		pendingFilters = cloneExplorerFilters(queryOptions.Filters)
+		pendingOrderColumn = strings.TrimSpace(queryOptions.OrderColumn)
 		pendingOrderDescending = queryOptions.OrderDescending
 		ui.explorerCurrentQuery = queryOptions
 
@@ -1758,40 +1951,18 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 			availableColumns = ui.getTableColumns(tableName)
 		}
 
-		if filterColumnSelect != nil {
-			columnOptions := append([]string{""}, availableColumns...)
-			filterColumnSelect.Options = columnOptions
-			filterColumnSelect.Refresh()
-			if pendingFilterColumn == "" {
-				filterColumnSelect.ClearSelected()
-			} else if !strings.EqualFold(filterColumnSelect.Selected, pendingFilterColumn) {
-				filterColumnSelect.SetSelected(pendingFilterColumn)
-			}
-		}
+		rebuildFilterRows()
+		updateFilterRowOptions()
 
-		if filterModeSelect != nil {
-			desiredLabel := modeLabelByMode[pendingFilterMode]
-			if desiredLabel == "" {
-				desiredLabel = modeLabelByMode[FilterModeContains]
+		if quickPresetSelect != nil {
+			preset := presetLabelForFilters()
+			suppressPresetChange = true
+			if preset == "" {
+				quickPresetSelect.ClearSelected()
+			} else {
+				quickPresetSelect.SetSelected(preset)
 			}
-			if filterModeSelect.Selected != desiredLabel {
-				filterModeSelect.SetSelected(desiredLabel)
-			}
-		}
-
-		if filterValueEntry != nil && filterValueEntry.Text != pendingFilterValue {
-			filterValueEntry.SetText(pendingFilterValue)
-		}
-
-		if orderColumnSelect != nil {
-			orderOptions := append([]string{""}, availableColumns...)
-			orderColumnSelect.Options = orderOptions
-			orderColumnSelect.Refresh()
-			if pendingOrderColumn == "" {
-				orderColumnSelect.ClearSelected()
-			} else if !strings.EqualFold(orderColumnSelect.Selected, pendingOrderColumn) {
-				orderColumnSelect.SetSelected(pendingOrderColumn)
-			}
+			suppressPresetChange = false
 		}
 
 		if orderDirectionSelect != nil {
@@ -1810,6 +1981,7 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 			Headers:       paginatedData.Headers,
 			Data:          paginatedData.Data,
 			HasCheckboxes: false, // Explorer doesn't need checkboxes
+			EmptyMessage:  fmt.Sprintf("No rows found in %s.", tableName),
 		}
 
 		// Create auto-truncated table for better display
@@ -1869,20 +2041,9 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 	ui.explorerTableSelect = tableSelect
 
 	applyQuery = func(resetPage bool) {
-		queryOptions.FilterColumn = pendingFilterColumn
-		queryOptions.FilterMode = pendingFilterMode
-		queryOptions.FilterValue = pendingFilterValue
-		queryOptions.OrderColumn = pendingOrderColumn
+		queryOptions.Filters = cloneExplorerFilters(pendingFilters)
+		queryOptions.OrderColumn = strings.TrimSpace(pendingOrderColumn)
 		queryOptions.OrderDescending = pendingOrderDescending
-
-		if strings.TrimSpace(queryOptions.FilterColumn) == "" ||
-			(strings.TrimSpace(queryOptions.FilterValue) == "" && queryOptions.FilterMode != FilterModeNotEquals) {
-			queryOptions.FilterColumn = ""
-			queryOptions.FilterMode = FilterModeNone
-			queryOptions.FilterValue = ""
-		} else if queryOptions.FilterMode == FilterModeNone {
-			queryOptions.FilterMode = FilterModeContains
-		}
 
 		ui.explorerCurrentQuery = queryOptions
 
@@ -1926,6 +2087,7 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 			Headers:       currentPaginatedData.Headers,
 			Data:          filteredData,
 			HasCheckboxes: false,
+			EmptyMessage:  fmt.Sprintf("No rows found in %s.", currentTableName),
 		}
 
 		table := factory.CreateAutoTruncatedTable(config)
@@ -1933,45 +2095,114 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 		tableContainer.Refresh()
 	}
 
-	filterColumnSelect = widget.NewSelect([]string{}, func(value string) {
-		pendingFilterColumn = strings.TrimSpace(value)
-	})
-	filterColumnSelect.PlaceHolder = "Column"
-
-	filterModeSelect = widget.NewSelect(modeLabels, func(label string) {
-		mode := modeByLabel[label]
-		if mode == "" {
-			mode = FilterModeContains
+	applyStatusPreset := func(status string) {
+		if status == "" {
+			filtered := pendingFilters[:0]
+			for _, clause := range pendingFilters {
+				if !strings.EqualFold(clause.Column, "Status") {
+					filtered = append(filtered, clause)
+				}
+			}
+			pendingFilters = filtered
+			rebuildFilterRows()
+			updateFilterRowOptions()
+			return
 		}
-		pendingFilterMode = mode
-	})
-	filterModeSelect.PlaceHolder = "Mode"
 
-	filterValueEntry = widget.NewEntry()
-	filterValueEntry.SetPlaceHolder("Value")
-	filterValueEntry.OnChanged = func(value string) {
-		pendingFilterValue = value
+		if !containsString(availableColumns, "Status") {
+			ui.ShowToast("Selected table does not have a Status column.")
+			return
+		}
+
+		updated := false
+		for idx := range pendingFilters {
+			if strings.EqualFold(pendingFilters[idx].Column, "Status") {
+				pendingFilters[idx].Column = "Status"
+				pendingFilters[idx].Mode = FilterModeEquals
+				pendingFilters[idx].Value = status
+				updated = true
+				break
+			}
+		}
+
+		if !updated {
+			pendingFilters = append(pendingFilters, ExplorerFilterClause{Column: "Status", Mode: FilterModeEquals, Value: status})
+		}
+
+		rebuildFilterRows()
+		updateFilterRowOptions()
 	}
+
+	presetLabelForFilters = func() string {
+		for _, clause := range pendingFilters {
+			if strings.EqualFold(clause.Column, "Status") {
+				switch strings.ToLower(clause.Value) {
+				case "pending":
+					return "Status: Pending"
+				case "processing", "in_progress":
+					return "Status: Processing"
+				case "completed", "success":
+					return "Status: Completed"
+				case "failed", "error":
+					return "Status: Failed"
+				}
+			}
+		}
+		return ""
+	}
+
+	quickPresetLabels := []string{"No Preset", "Status: Pending", "Status: Processing", "Status: Completed", "Status: Failed"}
+	quickPresetSelect = widget.NewSelect(quickPresetLabels, func(label string) {
+		if suppressPresetChange {
+			return
+		}
+		switch label {
+		case "", "No Preset":
+			applyStatusPreset("")
+		case "Status: Pending":
+			applyStatusPreset("pending")
+		case "Status: Processing":
+			applyStatusPreset("processing")
+		case "Status: Completed":
+			applyStatusPreset("completed")
+		case "Status: Failed":
+			applyStatusPreset("failed")
+		}
+	})
+	quickPresetSelect.PlaceHolder = "Quick preset"
 
 	orderColumnSelect = widget.NewSelect([]string{}, func(value string) {
 		pendingOrderColumn = strings.TrimSpace(value)
 	})
-	orderColumnSelect.PlaceHolder = "Column"
+	orderColumnSelect.PlaceHolder = "Order column"
 
 	orderDirectionOptions := []string{"Ascending", "Descending"}
 	orderDirectionSelect = widget.NewSelect(orderDirectionOptions, func(label string) {
 		pendingOrderDescending = (label == "Descending")
 	})
 	orderDirectionSelect.PlaceHolder = "Direction"
+	if pendingOrderDescending {
+		orderDirectionSelect.SetSelected("Descending")
+	} else {
+		orderDirectionSelect.SetSelected("Ascending")
+	}
 
-	applyFilterBtn = widget.NewButtonWithIcon("Apply", theme.ConfirmIcon(), func() {
-		applyQuery(true)
+	addFilterButton := widget.NewButtonWithIcon("Add Filter", theme.ContentAddIcon(), func() {
+		pendingFilters = append(pendingFilters, ExplorerFilterClause{Mode: FilterModeContains})
+		rebuildFilterRows()
+		updateFilterRowOptions()
 	})
 
-	clearFilterBtn = widget.NewButtonWithIcon("Clear", theme.ContentClearIcon(), func() {
-		pendingFilterColumn = ""
-		pendingFilterValue = ""
-		pendingFilterMode = FilterModeContains
+	clearFiltersButton := widget.NewButtonWithIcon("Clear Filters", theme.ContentClearIcon(), func() {
+		pendingFilters = nil
+		rebuildFilterRows()
+		updateFilterRowOptions()
+		if quickPresetSelect != nil {
+			quickPresetSelect.ClearSelected()
+		}
+	})
+
+	applyFiltersButton := widget.NewButtonWithIcon("Apply", theme.ConfirmIcon(), func() {
 		applyQuery(true)
 	})
 
@@ -2161,89 +2392,60 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 	// Layout - simplified top section
 	controlsLeft := container.NewHBox(widget.NewLabel("Table:"), tableSelect, refreshButton)
 	searchControls := container.NewBorder(nil, nil, widget.NewLabel("Search:"), nil, searchEntry)
-	filterControls := container.NewHBox(
-		widget.NewLabel("Filter:"),
-		filterColumnSelect,
-		filterModeSelect,
-		filterValueEntry,
-		applyFilterBtn,
-		clearFilterBtn,
-		NewSpacer(fyne.NewSize(12, 0)),
-		widget.NewLabel("Order By:"),
-		orderColumnSelect,
-		orderDirectionSelect,
-	)
 	topRow := container.NewBorder(nil, nil, controlsLeft, nil, searchControls)
+
+	filtersCard := widget.NewCard(
+		"Filters & Sorting",
+		"",
+		container.NewVBox(
+			quickPresetSelect,
+			container.NewGridWithColumns(2, addFilterButton, clearFiltersButton),
+			widget.NewSeparator(),
+			container.NewMax(filtersPanel),
+			widget.NewSeparator(),
+			container.NewGridWithColumns(2, orderColumnSelect, orderDirectionSelect),
+			applyFiltersButton,
+		),
+	)
+
+	filterSidebar := container.NewVBox(filtersCard)
 
 	topContent := container.NewVBox(
 		widget.NewLabelWithStyle("Database Explorer", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		topRow,
-		filterControls,
 	)
 
 	ui.explorerApplyQuery = func(opts ExplorerQueryOptions, reload bool) {
-		if strings.TrimSpace(opts.FilterColumn) != "" && strings.TrimSpace(opts.FilterValue) != "" && opts.FilterMode == FilterModeNone {
-			opts.FilterMode = FilterModeContains
-		}
-
-		pendingFilterColumn = opts.FilterColumn
-		pendingFilterMode = opts.FilterMode
-		if pendingFilterMode == FilterModeNone {
-			pendingFilterMode = FilterModeContains
-		}
-		pendingFilterValue = opts.FilterValue
-		pendingOrderColumn = opts.OrderColumn
-		pendingOrderDescending = opts.OrderDescending
-
-		if reload {
-			applyQuery(true)
-			return
-		}
-
 		queryOptions = opts
-		if queryOptions.FilterMode == FilterModeNone && strings.TrimSpace(queryOptions.FilterColumn) != "" && strings.TrimSpace(queryOptions.FilterValue) != "" {
-			queryOptions.FilterMode = FilterModeContains
-		}
+		pendingFilters = cloneExplorerFilters(opts.Filters)
+		pendingOrderColumn = strings.TrimSpace(opts.OrderColumn)
+		pendingOrderDescending = opts.OrderDescending
 		ui.explorerCurrentQuery = queryOptions
 
-		if filterColumnSelect != nil {
-			if pendingFilterColumn == "" || !containsString(availableColumns, pendingFilterColumn) {
-				filterColumnSelect.ClearSelected()
-			} else if !strings.EqualFold(filterColumnSelect.Selected, pendingFilterColumn) {
-				filterColumnSelect.SetSelected(pendingFilterColumn)
-			}
-		}
+		rebuildFilterRows()
+		updateFilterRowOptions()
 
-		if filterModeSelect != nil {
-			desiredLabel := modeLabelByMode[pendingFilterMode]
-			if desiredLabel == "" {
-				desiredLabel = modeLabelByMode[FilterModeContains]
+		if quickPresetSelect != nil {
+			preset := presetLabelForFilters()
+			suppressPresetChange = true
+			if preset == "" {
+				quickPresetSelect.ClearSelected()
+			} else {
+				quickPresetSelect.SetSelected(preset)
 			}
-			if filterModeSelect.Selected != desiredLabel {
-				filterModeSelect.SetSelected(desiredLabel)
-			}
-		}
-
-		if filterValueEntry != nil && filterValueEntry.Text != pendingFilterValue {
-			filterValueEntry.SetText(pendingFilterValue)
-		}
-
-		if orderColumnSelect != nil {
-			if pendingOrderColumn == "" || !containsString(availableColumns, pendingOrderColumn) {
-				orderColumnSelect.ClearSelected()
-			} else if !strings.EqualFold(orderColumnSelect.Selected, pendingOrderColumn) {
-				orderColumnSelect.SetSelected(pendingOrderColumn)
-			}
+			suppressPresetChange = false
 		}
 
 		if orderDirectionSelect != nil {
-			directionLabel := "Ascending"
 			if pendingOrderDescending {
-				directionLabel = "Descending"
+				orderDirectionSelect.SetSelected("Descending")
+			} else {
+				orderDirectionSelect.SetSelected("Ascending")
 			}
-			if orderDirectionSelect.Selected != directionLabel {
-				orderDirectionSelect.SetSelected(directionLabel)
-			}
+		}
+
+		if reload {
+			applyQuery(true)
 		}
 	}
 
@@ -2297,7 +2499,11 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 		),
 	)
 
-	return container.NewVScroll(container.NewBorder(topContent, paginationBarStyled, nil, nil, tableContainer))
+	centerContent := container.NewBorder(nil, nil, nil, nil, container.NewVScroll(tableContainer))
+	filterScroll := container.NewVScroll(filterSidebar)
+	filterScroll.SetMinSize(fyne.NewSize(260, 0))
+
+	return container.NewBorder(topContent, paginationBarStyled, nil, filterScroll, centerContent)
 }
 
 // OpenExplorerPendingChanges switches to the explorer tab and selects a pending changes table.
@@ -2401,9 +2607,9 @@ func defaultExplorerQuery(tableName string) (ExplorerQueryOptions, bool) {
 	switch tableName {
 	case "AccountsPendingChanges", "AccountCheckinsPendingChanges":
 		return ExplorerQueryOptions{
-			FilterColumn:    "Status",
-			FilterMode:      FilterModeNotEquals,
-			FilterValue:     "completed",
+			Filters: []ExplorerFilterClause{
+				{Column: "Status", Mode: FilterModeNotEquals, Value: "completed"},
+			},
 			OrderColumn:     "CreatedAt",
 			OrderDescending: true,
 		}, true
@@ -2500,8 +2706,8 @@ func (ui *Gui) buildSyncAutomationCard() fyne.CanvasObject {
 // createServerTab creates the content for the "Server" tab
 func (ui *Gui) createServerTab() fyne.CanvasObject {
 	serverStatusLabel := widget.NewLabel("Status: Unknown")
-	startButton := widget.NewButtonWithIcon("Start Server", theme.MediaPlayIcon(), nil)
-	stopButton := widget.NewButtonWithIcon("Stop Server", theme.MediaStopIcon(), nil)
+	toggleServerButton := widget.NewButtonWithIcon("", nil, nil)
+	toggleServerButton.Importance = widget.HighImportance
 
 	webhooks := ui.app.Config.Server.Webhooks
 	if webhooks == nil {
@@ -2537,43 +2743,112 @@ func (ui *Gui) createServerTab() fyne.CanvasObject {
 	}
 
 	var refreshServerStatus func()
-	refreshServerStatus = func() {
-		if pid, running := ui.app.Server.GetServerStatus(); running {
-			serverStatusLabel.SetText(fmt.Sprintf("Status: Running (PID: %d)", pid))
-			startButton.Disable()
-			stopButton.Enable()
+	setToggleButton := func(running bool) {
+		if running {
+			toggleServerButton.SetText("Stop Server")
+			toggleServerButton.SetIcon(theme.MediaStopIcon())
+			toggleServerButton.OnTapped = func() {
+				ui.presenter.HandleStopServer()
+				refreshServerStatus()
+			}
 		} else {
-			serverStatusLabel.SetText("Status: Stopped")
-			startButton.Enable()
-			stopButton.Disable()
+			toggleServerButton.SetText("Start Server")
+			toggleServerButton.SetIcon(theme.MediaPlayIcon())
+			toggleServerButton.OnTapped = func() {
+				ui.presenter.HandleStartServer()
+				refreshServerStatus()
+			}
 		}
 	}
 
-	startButton.OnTapped = func() {
-		ui.presenter.HandleStartServer()
-		refreshServerStatus()
-	}
-
-	stopButton.OnTapped = func() {
-		ui.presenter.HandleStopServer()
-		refreshServerStatus()
+	refreshServerStatus = func() {
+		if pid, running := ui.app.Server.GetServerStatus(); running {
+			serverStatusLabel.SetText(fmt.Sprintf("Status: Running (PID: %d)", pid))
+			setToggleButton(true)
+		} else {
+			serverStatusLabel.SetText("Status: Stopped")
+			setToggleButton(false)
+		}
 	}
 
 	refreshServerStatus()
 
-	serverCard := widget.NewCard("Server Management", "", container.NewVBox(
+	serverStatusCard := widget.NewCard("Server Status", "", container.NewVBox(
 		serverStatusLabel,
-		container.NewGridWithColumns(2, startButton, stopButton),
-		widget.NewSeparator(),
-		widget.NewLabelWithStyle("Webhooks", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabel("Use the controls below to start or stop the embedded server."),
+	))
+
+	webhookCard := widget.NewCard("Webhook Routing", "", container.NewVBox(
 		accountWebhookCheck,
 		checkinWebhookCheck,
 		webhookStatusLabel,
 	))
 
-	syncAutomationCard := ui.buildSyncAutomationCard()
+	// Server configuration form
+	serverHostEntry := widget.NewEntry()
+	serverHostEntry.SetText(ui.app.Config.Server.Host)
+	serverPortEntry := widget.NewEntry()
+	serverPortEntry.SetText(fmt.Sprintf("%d", ui.app.Config.Server.Port))
+	tlsCertEntry := widget.NewEntry()
+	tlsCertEntry.SetText(ui.app.Config.Server.TLSCert)
+	tlsKeyEntry := widget.NewEntry()
+	tlsKeyEntry.SetText(ui.app.Config.Server.TLSKey)
+	logRequestsCheck := widget.NewCheck("Log incoming requests", nil)
+	logRequestsCheck.SetChecked(ui.app.Config.Server.LogRequests)
 
-	return container.NewVScroll(container.NewVBox(serverCard, syncAutomationCard))
+	var serverForm *widget.Form
+	tlsCertFormItem := widget.NewFormItem("TLS Cert Path", tlsCertEntry)
+	tlsKeyFormItem := widget.NewFormItem("TLS Key Path", tlsKeyEntry)
+	tlsEnabledCheck := widget.NewCheck("Enable TLS", func(enabled bool) {
+		if enabled {
+			serverForm.AppendItem(tlsCertFormItem)
+			serverForm.AppendItem(tlsKeyFormItem)
+		} else {
+			var newItems []*widget.FormItem
+			for _, item := range serverForm.Items {
+				if item != tlsCertFormItem && item != tlsKeyFormItem {
+					newItems = append(newItems, item)
+				}
+			}
+			serverForm.Items = newItems
+		}
+		serverForm.Refresh()
+	})
+
+	serverForm = widget.NewForm(
+		widget.NewFormItem("Host", serverHostEntry),
+		widget.NewFormItem("Port", serverPortEntry),
+	)
+
+	tlsEnabledCheck.SetChecked(ui.app.Config.Server.TLSEnabled)
+
+	saveServerButton := NewSecondaryButton("Save Server Settings", theme.DocumentSaveIcon(), func() {
+		ui.presenter.HandleSaveServerConfig(
+			serverHostEntry.Text,
+			serverPortEntry.Text,
+			tlsEnabledCheck.Checked,
+			tlsCertEntry.Text,
+			tlsKeyEntry.Text,
+			logRequestsCheck.Checked,
+		)
+	})
+
+	serverSettingsCard := widget.NewCard("Server Configuration", "", container.NewVBox(
+		tlsEnabledCheck,
+		serverForm,
+		logRequestsCheck,
+	))
+
+	scrollContent := container.NewVScroll(container.NewVBox(
+		serverStatusCard,
+		webhookCard,
+		serverSettingsCard,
+	))
+
+	buttonGrid := container.NewGridWithColumns(2, saveServerButton, toggleServerButton)
+	footer := container.NewVBox(widget.NewSeparator(), buttonGrid)
+
+	return container.NewBorder(nil, footer, nil, nil, scrollContent)
 }
 
 // createDebugTab creates the content for the "Debug" tab
@@ -2609,13 +2884,15 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 	testApiButton := widget.NewButtonWithIcon("Test Connection", apiIcon, func() {
 		ui.presenter.HandleTestAPIConnection(apiKeyEntry.Text, baseURLEntry.Text)
 	})
-	apiCard := widget.NewCard("API Configuration", "", container.NewVBox(
+	apiCard := ui.newSectionCard(
+		"API Configuration",
+		"Provide the API credentials used for syncing.",
 		widget.NewForm(
 			widget.NewFormItem("API Key", apiKeyEntry),
 			widget.NewFormItem("Base URL", baseURLEntry),
 		),
-		testApiButton,
-	))
+		container.NewCenter(testApiButton),
+	)
 
 	// Database Settings
 	dbPathEntry := widget.NewEntry()
@@ -2681,57 +2958,13 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 		)
 	}
 
-	dbCard := widget.NewCard("Database Configuration", "", container.NewVBox(
+	dbCard := ui.newSectionCard(
+		"Database Configuration",
+		"Select your database type and connection information.",
 		container.NewGridWithColumns(2, widget.NewLabel("Database Type"), dbTypeSelect),
 		dbForm,
-		testDbButton,
-	))
-
-	// Server Settings
-	serverHostEntry := widget.NewEntry()
-	serverHostEntry.SetText(ui.app.Config.Server.Host)
-	serverPortEntry := widget.NewEntry()
-	serverPortEntry.SetText(fmt.Sprintf("%d", ui.app.Config.Server.Port))
-	tlsCertEntry := widget.NewEntry()
-	tlsCertEntry.SetText(ui.app.Config.Server.TLSCert)
-	tlsKeyEntry := widget.NewEntry()
-	tlsKeyEntry.SetText(ui.app.Config.Server.TLSKey)
-
-	var serverForm *widget.Form
-	tlsCertFormItem := widget.NewFormItem("TLS Cert Path", tlsCertEntry)
-	tlsKeyFormItem := widget.NewFormItem("TLS Key Path", tlsKeyEntry)
-	tlsEnabledCheck := widget.NewCheck("Enable TLS", func(enabled bool) {
-		if enabled {
-			serverForm.AppendItem(tlsCertFormItem)
-			serverForm.AppendItem(tlsKeyFormItem)
-		} else {
-			// This logic might need adjustment if more items are added dynamically
-			var newItems []*widget.FormItem
-			for _, item := range serverForm.Items {
-				if item != tlsCertFormItem && item != tlsKeyFormItem {
-					newItems = append(newItems, item)
-				}
-			}
-			serverForm.Items = newItems
-		}
-		serverForm.Refresh()
-	})
-	tlsEnabledCheck.SetChecked(ui.app.Config.Server.TLSEnabled)
-
-	serverForm = widget.NewForm(
-		widget.NewFormItem("Host", serverHostEntry),
-		widget.NewFormItem("Port", serverPortEntry),
+		container.NewCenter(testDbButton),
 	)
-
-	if ui.app.State.TLSEnabled {
-		serverForm.AppendItem(tlsCertFormItem)
-		serverForm.AppendItem(tlsKeyFormItem)
-	}
-
-	serverCard := widget.NewCard("Server Configuration", "", container.NewVBox(
-		tlsEnabledCheck,
-		serverForm,
-	))
 
 	// Sync Preferences
 	conflictStrategyRadio := widget.NewRadioGroup([]string{
@@ -2805,7 +3038,9 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 		ui.ShowToast("Sync preferences saved (coming soon)")
 	})
 
-	syncPreferencesCard := widget.NewCard("Sync Preferences", "Control conflict handling and logging for manual sync runs.", container.NewVBox(
+	syncPreferencesCard := ui.newSectionCard(
+		"Sync Preferences",
+		"Control conflict handling and logging for manual sync runs.",
 		widget.NewForm(
 			widget.NewFormItem("Conflict Resolution", conflictStrategyRadio),
 			widget.NewFormItem("Batch Size", batchSizeEntry),
@@ -2815,19 +3050,52 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 			widget.NewFormItem("Max Concurrent", maxConcurrentEntry),
 		),
 		container.NewCenter(saveSyncPrefsBtn),
-	))
+	)
+
+	themeLabels := []string{"Auto (Follow System)", "Light", "Dark"}
+	themeLabelToValue := map[string]string{
+		themeLabels[0]: app.ThemePreferenceAuto,
+		themeLabels[1]: app.ThemePreferenceLight,
+		themeLabels[2]: app.ThemePreferenceDark,
+	}
+	themeValueToLabel := map[string]string{}
+	for label, value := range themeLabelToValue {
+		themeValueToLabel[value] = label
+	}
+
+	themeRadio := widget.NewRadioGroup(themeLabels, nil)
+	themeRadio.Required = true
+	currentThemeLabel := themeValueToLabel[app.NormalizeThemePreference(ui.app.Config.ThemePreference)]
+	if currentThemeLabel == "" {
+		currentThemeLabel = themeLabels[0]
+	}
+	themeRadio.SetSelected(currentThemeLabel)
+
+	appearanceCard := ui.newSectionCard(
+		"Appearance",
+		"Choose how BadgerMaps Sync looks.",
+		widget.NewForm(
+			widget.NewFormItem("Theme", themeRadio),
+		),
+	)
 
 	// Other Settings
 	verboseCheck := widget.NewCheck("Debug", nil)
 	verboseCheck.SetChecked(ui.app.State.Debug)
-	otherCard := widget.NewCard("Other Settings", "", verboseCheck)
+	otherCard := ui.newSectionCard("Other Settings", "", verboseCheck)
 
 	// Buttons
 	saveButton := NewSecondaryButton("Save Configuration", theme.ConfirmIcon(), func() {
+		selectedThemePreference := app.ThemePreferenceAuto
+		if label := themeRadio.Selected; label != "" {
+			if value, ok := themeLabelToValue[label]; ok {
+				selectedThemePreference = value
+			}
+		}
 		ui.presenter.HandleSaveConfig(
 			apiKeyEntry.Text, baseURLEntry.Text, dbTypeSelect.Selected, dbPathEntry.Text,
 			dbHostEntry.Text, dbPortEntry.Text, dbUserEntry.Text, dbPassEntry.Text, dbNameEntry.Text,
-			serverHostEntry.Text, serverPortEntry.Text, tlsEnabledCheck.Checked, tlsCertEntry.Text, tlsKeyEntry.Text,
+			selectedThemePreference,
 			false, // verbose is deprecated in gui
 			verboseCheck.Checked,
 			maxConcurrentEntry.Text,
@@ -2846,17 +3114,25 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 	}
 	schemaButton := widget.NewButtonWithIcon(schemaLabel, theme.StorageIcon(), ui.presenter.HandleSchemaEnforcement)
 
-	schemaCard := widget.NewCard("Schema Management", "", schemaButton)
+	schemaCard := ui.newSectionCard(
+		"Schema Management",
+		"Initialize or rebuild the target database schema.",
+		schemaButton,
+	)
 
-	topButtons := container.NewGridWithColumns(2, viewButton, saveButton)
+	actionsCard := ui.newSectionCard(
+		"Configuration Actions",
+		"View or persist the current settings.",
+		container.NewGridWithColumns(2, viewButton, saveButton),
+	)
 
 	return container.NewVBox(
 		NewSpacer(fyne.NewSize(0, 10)),
-		topButtons,
+		actionsCard,
 		apiCard,
 		dbCard,
-		serverCard,
 		syncPreferencesCard,
+		appearanceCard,
 		otherCard,
 		schemaCard,
 	)
@@ -2897,25 +3173,35 @@ func (ui *Gui) ShowToast(content string) {
 }
 
 func (ui *Gui) ShowProgressBar(title string) {
-	ui.progressTitle.SetText(title)
-	ui.progressContainer.Show()
+	fyne.Do(func() {
+		ui.progressTitle.SetText(title)
+		ui.progressContainer.Show()
+	})
 }
 
 func (ui *Gui) HideProgressBar() {
-	ui.progressContainer.Hide()
-	ui.progressTitle.SetText("")
+	fyne.Do(func() {
+		ui.progressContainer.Hide()
+		ui.progressTitle.SetText("")
+	})
 }
 
 func (ui *Gui) SetProgress(value float64) {
-	ui.progressBar.SetValue(value)
+	fyne.Do(func() {
+		ui.progressBar.SetValue(value)
+	})
 }
 
 func (ui *Gui) ShowErrorDialog(err error) {
-	dialog.ShowError(err, ui.window)
+	fyne.Do(func() {
+		dialog.ShowError(err, ui.window)
+	})
 }
 
 func (ui *Gui) ShowConfirmDialog(title, message string, callback func(bool)) {
-	dialog.ShowConfirm(title, message, callback, ui.window)
+	fyne.Do(func() {
+		dialog.ShowConfirm(title, message, callback, ui.window)
+	})
 }
 
 func (ui *Gui) GetMainWindow() fyne.Window {
@@ -2984,11 +3270,24 @@ const (
 )
 
 type ExplorerQueryOptions struct {
-	FilterColumn    string
-	FilterMode      ExplorerFilterMode
-	FilterValue     string
+	Filters         []ExplorerFilterClause
 	OrderColumn     string
 	OrderDescending bool
+}
+
+type ExplorerFilterClause struct {
+	Column string
+	Mode   ExplorerFilterMode
+	Value  string
+}
+
+type explorerFilterRow struct {
+	clause    *ExplorerFilterClause
+	container *fyne.Container
+	column    *widget.Select
+	mode      *widget.Select
+	value     *widget.Entry
+	remove    *widget.Button
 }
 
 // loadTableData loads data from a database table using unified approach
@@ -3020,46 +3319,14 @@ func (ui *Gui) loadPaginatedTableData(tableName string, page, pageSize int, opts
 	normalized := normalizeExplorerOptions(opts)
 	columns := ui.getTableColumns(tableName)
 
-	filterColumn := matchColumn(columns, normalized.FilterColumn)
+	resolvedFilters := resolveExplorerFilters(normalized.Filters, columns)
 	orderColumn := matchColumn(columns, normalized.OrderColumn)
 
-	whereClause := ""
-	if filterColumn != "" && normalized.FilterMode != FilterModeNone {
-		if condition := buildFilterCondition(filterColumn, normalized.FilterMode, normalized.FilterValue); condition != "" {
-			whereClause = condition
-		}
-	}
+	whereClause := buildExplorerWhereClause(resolvedFilters)
+	dbType := ui.app.DB.GetType()
+	orderClause := buildExplorerOrderClause(columns, orderColumn, normalized.OrderDescending, dbType)
 
-	orderClause := ""
-	if orderColumn != "" {
-		direction := "ASC"
-		if normalized.OrderDescending {
-			direction = "DESC"
-		}
-		orderClause = fmt.Sprintf("ORDER BY %s %s", orderColumn, direction)
-	}
-
-	if orderClause == "" {
-		fallback := fallbackOrderColumn(columns)
-		if fallback != "" {
-			direction := "ASC"
-			if normalized.OrderDescending {
-				direction = "DESC"
-			}
-			orderClause = fmt.Sprintf("ORDER BY %s %s", fallback, direction)
-		} else if strings.EqualFold(ui.app.DB.GetType(), "mssql") {
-			direction := "ASC"
-			if normalized.OrderDescending {
-				direction = "DESC"
-			}
-			orderClause = fmt.Sprintf("ORDER BY 1 %s", direction)
-		}
-	}
-
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)
-	if whereClause != "" {
-		countQuery = fmt.Sprintf("%s WHERE %s", countQuery, whereClause)
-	}
+	countQuery := buildExplorerCountQuery(tableName, whereClause)
 
 	countRows, err := ui.app.DB.ExecuteQuery(countQuery)
 	if err != nil {
@@ -3092,27 +3359,9 @@ func (ui *Gui) loadPaginatedTableData(tableName string, page, pageSize int, opts
 	if page < 0 {
 		page = 0
 	}
-	offset := page * pageSize
+	selectQuery := buildExplorerSelectQuery(tableName, whereClause, orderClause, page, pageSize, dbType)
 
-	dbType := strings.ToLower(ui.app.DB.GetType())
-	var queryBuilder strings.Builder
-	queryBuilder.WriteString(fmt.Sprintf("SELECT * FROM %s", tableName))
-	if whereClause != "" {
-		queryBuilder.WriteString(" WHERE ")
-		queryBuilder.WriteString(whereClause)
-	}
-	if orderClause != "" {
-		queryBuilder.WriteString(" ")
-		queryBuilder.WriteString(orderClause)
-	}
-	switch dbType {
-	case "mssql":
-		queryBuilder.WriteString(fmt.Sprintf(" OFFSET %d ROWS FETCH NEXT %d ROWS ONLY", offset, pageSize))
-	default:
-		queryBuilder.WriteString(fmt.Sprintf(" LIMIT %d OFFSET %d", pageSize, offset))
-	}
-
-	rows, err := ui.app.DB.ExecuteQuery(queryBuilder.String())
+	rows, err := ui.app.DB.ExecuteQuery(selectQuery)
 	if err != nil {
 		ui.app.Events.Dispatch(events.Errorf("gui", "Error executing paginated query: %v", err))
 		return &PaginatedTableData{
@@ -3179,30 +3428,29 @@ func (ui *Gui) loadPaginatedTableData(tableName string, page, pageSize int, opts
 }
 
 func normalizeExplorerOptions(opts ExplorerQueryOptions) ExplorerQueryOptions {
-	opts.FilterColumn = strings.TrimSpace(opts.FilterColumn)
-	opts.FilterValue = strings.TrimSpace(opts.FilterValue)
-	opts.OrderColumn = strings.TrimSpace(opts.OrderColumn)
+	cleaned := make([]ExplorerFilterClause, 0, len(opts.Filters))
+	for _, clause := range opts.Filters {
+		clause.Column = strings.TrimSpace(clause.Column)
+		clause.Value = strings.TrimSpace(clause.Value)
 
-	if opts.FilterMode == FilterModeNotEquals {
-		if opts.FilterColumn == "" || opts.FilterValue == "" {
-			opts.FilterMode = FilterModeNone
-			opts.FilterColumn = ""
-			opts.FilterValue = ""
+		if clause.Column == "" {
+			continue
 		}
-		return opts
+
+		if clause.Mode == FilterModeNone {
+			clause.Mode = FilterModeContains
+		}
+
+		if clause.Value == "" {
+			// NotEquals with empty value is not meaningful
+			continue
+		}
+
+		cleaned = append(cleaned, clause)
 	}
 
-	if opts.FilterColumn == "" || opts.FilterValue == "" {
-		opts.FilterMode = FilterModeNone
-		opts.FilterColumn = ""
-		opts.FilterValue = ""
-		return opts
-	}
-
-	if opts.FilterMode == FilterModeNone {
-		opts.FilterMode = FilterModeContains
-	}
-
+	opts.Filters = cleaned
+	opts.OrderColumn = strings.TrimSpace(opts.OrderColumn)
 	return opts
 }
 
@@ -3262,6 +3510,120 @@ func buildFilterCondition(column string, mode ExplorerFilterMode, value string) 
 	default:
 		return fmt.Sprintf("%s LIKE '%%%s%%'", lowerColumn, escaped)
 	}
+}
+
+func cloneExplorerFilters(filters []ExplorerFilterClause) []ExplorerFilterClause {
+	if len(filters) == 0 {
+		return nil
+	}
+	out := make([]ExplorerFilterClause, len(filters))
+	copy(out, filters)
+	return out
+}
+
+func resolveExplorerFilters(filters []ExplorerFilterClause, columns []string) []ExplorerFilterClause {
+	if len(filters) == 0 {
+		return nil
+	}
+
+	resolved := make([]ExplorerFilterClause, 0, len(filters))
+	for _, clause := range filters {
+		matched := matchColumn(columns, clause.Column)
+		if matched == "" {
+			continue
+		}
+		resolved = append(resolved, ExplorerFilterClause{
+			Column: matched,
+			Mode:   clause.Mode,
+			Value:  clause.Value,
+		})
+	}
+	return resolved
+}
+
+func buildExplorerWhereClause(filters []ExplorerFilterClause) string {
+	if len(filters) == 0 {
+		return ""
+	}
+
+	clauses := make([]string, 0, len(filters))
+	for _, clause := range filters {
+		if clause.Column == "" || clause.Mode == FilterModeNone {
+			continue
+		}
+		condition := buildFilterCondition(clause.Column, clause.Mode, clause.Value)
+		if condition != "" {
+			clauses = append(clauses, condition)
+		}
+	}
+
+	if len(clauses) == 0 {
+		return ""
+	}
+
+	if len(clauses) == 1 {
+		return clauses[0]
+	}
+
+	return strings.Join(clauses, " AND ")
+}
+
+func buildExplorerOrderClause(columns []string, orderColumn string, descending bool, dbType string) string {
+	direction := "ASC"
+	if descending {
+		direction = "DESC"
+	}
+
+	if orderColumn != "" {
+		return fmt.Sprintf("ORDER BY %s %s", orderColumn, direction)
+	}
+
+	fallback := fallbackOrderColumn(columns)
+	if fallback != "" {
+		return fmt.Sprintf("ORDER BY %s %s", fallback, direction)
+	}
+
+	if strings.EqualFold(dbType, "mssql") {
+		return fmt.Sprintf("ORDER BY 1 %s", direction)
+	}
+
+	return ""
+}
+
+func buildExplorerCountQuery(tableName, whereClause string) string {
+	if whereClause == "" {
+		return fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)
+	}
+	return fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", tableName, whereClause)
+}
+
+func buildExplorerSelectQuery(tableName, whereClause, orderClause string, page, pageSize int, dbType string) string {
+	if page < 0 {
+		page = 0
+	}
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	offset := page * pageSize
+
+	var builder strings.Builder
+	builder.WriteString(fmt.Sprintf("SELECT * FROM %s", tableName))
+	if whereClause != "" {
+		builder.WriteString(" WHERE ")
+		builder.WriteString(whereClause)
+	}
+	if orderClause != "" {
+		builder.WriteString(" ")
+		builder.WriteString(orderClause)
+	}
+
+	if strings.EqualFold(dbType, "mssql") {
+		builder.WriteString(fmt.Sprintf(" OFFSET %d ROWS FETCH NEXT %d ROWS ONLY", offset, pageSize))
+	} else {
+		builder.WriteString(fmt.Sprintf(" LIMIT %d OFFSET %d", pageSize, offset))
+	}
+
+	return builder.String()
 }
 
 // getTableRowCount gets the total number of rows in a table
