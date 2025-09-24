@@ -2731,7 +2731,9 @@ func (ui *Gui) buildSyncAutomationCard() fyne.CanvasObject {
 
 // createServerTab creates the content for the "Server" tab
 func (ui *Gui) createServerTab() fyne.CanvasObject {
-	serverStatusLabel := widget.NewLabel("Status: Unknown")
+	statusValue := canvas.NewText("Unknown", ui.themeColor(StatusNegativeColorName))
+	statusValue.TextStyle = fyne.TextStyle{Bold: true}
+	statusValue.TextSize = theme.TextSize()
 	toggleServerButton := widget.NewButtonWithIcon("", nil, nil)
 	toggleServerButton.Importance = widget.HighImportance
 
@@ -2789,21 +2791,21 @@ func (ui *Gui) createServerTab() fyne.CanvasObject {
 
 	refreshServerStatus = func() {
 		if pid, running := ui.app.Server.GetServerStatus(); running {
-			serverStatusLabel.SetText(fmt.Sprintf("Status: Running (PID: %d)", pid))
+			statusValue.Text = fmt.Sprintf("Running (PID: %d)", pid)
+			statusValue.Color = ui.themeColor(StatusPositiveColorName)
 			setToggleButton(true)
 		} else {
-			serverStatusLabel.SetText("Status: Stopped")
+			statusValue.Text = "Stopped"
+			statusValue.Color = ui.themeColor(StatusNegativeColorName)
 			setToggleButton(false)
 		}
+		canvas.Refresh(statusValue)
 	}
 
 	refreshServerStatus()
 
-	serverHeader := container.NewVBox(
-		widget.NewLabelWithStyle("Server Status", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		serverStatusLabel,
-		widget.NewLabel("Use the controls below to start or stop the embedded server."),
-	)
+	statusLabel := widget.NewLabelWithStyle("Server Status:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	serverHeader := container.NewHBox(statusLabel, statusValue)
 
 	webhookCard := ui.newSectionCard(
 		"Webhook Routing",
