@@ -48,8 +48,17 @@ type SyncCenter struct {
 	scopeGroup     *fyne.Container
 	omniGroup      *fyne.Container
 	actionRow      *fyne.Container
-	controlsBox    *fyne.Container
-	controlsCard   *widget.Card
+	controlsBody   *fyne.Container
+	controlsCard   fyne.CanvasObject
+
+	// Push controls
+	pushTypeSelect   *widget.Select
+	pushScopeSelect  *widget.Select
+	pushActionButton *widget.Button
+	pushTypeGroup    *fyne.Container
+	pushScopeGroup   *fyne.Container
+	pushBody         *fyne.Container
+	pushCard         fyne.CanvasObject
 
 	suggestions   map[string]omniSuggestion
 	suppressOmni  int32
@@ -108,33 +117,69 @@ func NewSyncCenter(ui *Gui, presenter *GuiPresenter) *SyncCenter {
 
 	sc.actionRow = container.NewHBox(sc.actionButton, layout.NewSpacer())
 
-	sc.controlsBox = container.NewVBox()
+	sc.controlsBody = container.NewVBox()
+
+	// --- Push controls ---
+	sc.pushTypeSelect = widget.NewSelect([]string{"All", "Accounts", "Checkins"}, func(string) { sc.updatePushControls() })
+	sc.pushScopeSelect = widget.NewSelect([]string{"All", "Single"}, func(string) { sc.updatePushControls() })
+	sc.pushActionButton = widget.NewButtonWithIcon("Push All Changes", theme.UploadIcon(), func() {
+		sc.handlePushAction()
+	})
+	sc.pushActionButton.Importance = widget.HighImportance
+	sc.pushTypeGroup = container.NewVBox(widget.NewLabel("Push Type"), sc.pushTypeSelect)
+	sc.pushScopeGroup = container.NewVBox(widget.NewLabel("Scope"), sc.pushScopeSelect)
+	sc.pushBody = container.NewVBox()
 
 	sc.scopeGroup.Hide()
 	sc.omniGroup.Hide()
 
 	sc.syncTypeSelect.SetSelected(syncKindAll)
 	sc.scopeSelect.SetSelected(scopeAll)
+	sc.pushTypeSelect.SetSelected("All")
+	sc.pushScopeSelect.SetSelected("All")
 	sc.updateControls()
+	sc.updatePushControls()
 
 	return sc
 }
 
 func (sc *SyncCenter) CreateContent() fyne.CanvasObject {
-	if sc.controlsBox == nil {
-		sc.controlsBox = container.NewVBox()
-	}
+	sc.controlsBody = container.NewVBox()
 
-	sc.controlsCard = widget.NewCard("Sync Controls", "Choose what to sync.", sc.controlsBox)
-	sc.rebuildControlsLayout()
-	sc.applyStoredDetail()
-
-	explorerShortcuts := container.NewHBox(
+	// Push card content: includes Pending Changes shortcut
+	pendingChangesRow := container.NewHBox(
 		widget.NewButtonWithIcon("Pending Changes", theme.NavigateNextIcon(), func() {
 			if !sc.ui.OpenExplorerPendingChanges() {
 				sc.ui.app.Events.Dispatch(events.Debugf("sync_center", "unable to navigate to pending changes"))
 			}
 		}),
+		layout.NewSpacer(),
+	)
+
+	sc.controlsCard = sc.ui.newSectionCard(
+		"Pull",
+		"Pull from BadgerMaps",
+		container.NewVBox(
+			sc.controlsBody,
+		),
+	)
+
+	// Build push card body
+	sc.pushCard = sc.ui.newSectionCard(
+		"Push",
+		"Push pending changes to BadgerMaps",
+		container.NewVBox(
+			sc.pushBody,
+			widget.NewSeparator(),
+			pendingChangesRow,
+		),
+	)
+	sc.rebuildControlsLayout()
+	sc.rebuildPushLayout()
+	sc.applyStoredDetail()
+
+	// Sync history at the very bottom
+	syncHistoryRow := container.NewHBox(
 		widget.NewButtonWithIcon("Sync History", theme.NavigateNextIcon(), func() {
 			if !sc.ui.OpenExplorerTable("SyncHistory") {
 				sc.ui.app.Events.Dispatch(events.Debugf("sync_center", "unable to navigate to sync history"))
@@ -143,13 +188,12 @@ func (sc *SyncCenter) CreateContent() fyne.CanvasObject {
 		layout.NewSpacer(),
 	)
 
-	content := container.NewVBox(
+	return container.NewVScroll(container.NewVBox(
 		sc.controlsCard,
+		sc.pushCard,
 		widget.NewSeparator(),
-		explorerShortcuts,
-	)
-
-	return container.NewVScroll(content)
+		syncHistoryRow,
+	))
 }
 
 func (sc *SyncCenter) onSyncTypeChanged(value string) {
@@ -258,7 +302,7 @@ func (sc *SyncCenter) updateActionState() {
 }
 
 func (sc *SyncCenter) rebuildControlsLayout() {
-	if sc.controlsBox == nil {
+	if sc.controlsBody == nil {
 		return
 	}
 
@@ -274,10 +318,80 @@ func (sc *SyncCenter) rebuildControlsLayout() {
 
 	rows = append(rows, sc.actionRow)
 
-	sc.controlsBox.Objects = rows
-	sc.controlsBox.Refresh()
+	sc.controlsBody.Objects = rows
+	sc.controlsBody.Refresh()
 	if sc.controlsCard != nil {
 		sc.controlsCard.Refresh()
+	}
+}
+
+// --- Push helpers ---
+func (sc *SyncCenter) rebuildPushLayout() {
+	if sc.pushBody == nil {
+		return
+	}
+	rows := []fyne.CanvasObject{sc.pushTypeGroup}
+	if sc.pushScopeGroup != nil {
+		rows = append(rows, sc.pushScopeGroup)
+	}
+	rows = append(rows, container.NewHBox(sc.pushActionButton, layout.NewSpacer()))
+	sc.pushBody.Objects = rows
+	sc.pushBody.Refresh()
+	if sc.pushCard != nil {
+		// if card is a container, refresh via parent owning code; using fyne CanvasObject interface
+	}
+}
+
+func (sc *SyncCenter) updatePushControls() {
+	// Update button label and enablement based on selects
+	if sc.pushActionButton == nil {
+		return
+	}
+	pType := sc.pushTypeSelect.Selected
+	pScope := sc.pushScopeSelect.Selected
+	// Label
+	switch pType {
+	case "Accounts":
+		if pScope == "Single" {
+			sc.pushActionButton.SetText("Push Account (single)")
+		} else {
+			sc.pushActionButton.SetText("Push Account Changes")
+		}
+	case "Checkins":
+		if pScope == "Single" {
+			sc.pushActionButton.SetText("Push Check-in (single)")
+		} else {
+			sc.pushActionButton.SetText("Push Check-in Changes")
+		}
+	default:
+		sc.pushActionButton.SetText("Push All Changes")
+	}
+	// Enable only supported combinations (All scope supported). Single not yet implemented
+	if pScope == "Single" {
+		sc.pushActionButton.Disable()
+	} else {
+		sc.pushActionButton.Enable()
+	}
+	sc.rebuildPushLayout()
+}
+
+func (sc *SyncCenter) handlePushAction() {
+	if !sc.ensureConnections() {
+		return
+	}
+	pType := sc.pushTypeSelect.Selected
+	pScope := sc.pushScopeSelect.Selected
+	if pScope == "Single" {
+		sc.ui.ShowToast("Single-item push not yet supported.")
+		return
+	}
+	switch pType {
+	case "Accounts":
+		sc.presenter.HandlePushAccounts()
+	case "Checkins":
+		sc.presenter.HandlePushCheckins()
+	default:
+		sc.presenter.HandlePushAll()
 	}
 }
 

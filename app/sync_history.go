@@ -53,6 +53,8 @@ func (a *App) recordSyncHistoryEvent(e events.Event) {
 	}
 
 	switch e.Type {
+	case "pull.start":
+		a.startSyncHistoryRun(syncHistoryKey("pull", source), "pull", "pull", source, fmt.Sprintf("Pull started for %s", friendlyResourceLabel(source)))
 	case "pull.group.start":
 		a.startSyncHistoryRun(syncHistoryKey("pull", source), "pull", "pull", source, fmt.Sprintf("Pull started for %s", friendlyResourceLabel(source)))
 	case "pull.ids_fetched":
@@ -84,6 +86,34 @@ func (a *App) recordSyncHistoryEvent(e events.Event) {
 		}
 		summary := fmt.Sprintf("Pull failed for %s", friendlyResourceLabel(source))
 		a.completeSyncHistoryRun(key, "failed", -1, -1, summary, details)
+	case "pull.complete":
+		if payload, ok := e.Payload.(events.CompletionPayload); ok {
+			key := syncHistoryKey("pull", source)
+			count := payload.Count
+			if count <= 0 && payload.Success {
+				count = 1
+			}
+			errorCount := 0
+			status := "completed"
+			details := ""
+			if payload.Error != nil {
+				details = payload.Error.Error()
+			}
+			summary := fmt.Sprintf("Pulled %s", friendlyResourceLabel(source))
+			if count > 0 {
+				summary = fmt.Sprintf("Pulled %d %s", count, friendlyResourceLabel(source))
+			}
+			if !payload.Success {
+				status = "failed"
+				errorCount = 1
+				if details != "" {
+					summary = fmt.Sprintf("Pull failed for %s", friendlyResourceLabel(source))
+				} else {
+					summary = fmt.Sprintf("Pull finished for %s with errors", friendlyResourceLabel(source))
+				}
+			}
+			a.completeSyncHistoryRun(key, status, count, errorCount, summary, details)
+		}
 	case "push.scan.start":
 		a.startSyncHistoryRun(syncHistoryKey("push", source), "push", "push", source, fmt.Sprintf("Scanning %s pending changes", friendlyResourceLabel(source)))
 	case "push.scan.complete":

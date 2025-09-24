@@ -26,6 +26,8 @@ type GuiView interface {
 	RefreshPushTab()
 	// RefreshAllTabs rebuilds and refreshes all main tabs, useful after major state changes like connection status.
 	RefreshAllTabs()
+	// ApplyThemePreference updates the UI theme based on the saved preference.
+	ApplyThemePreference(pref string)
 
 	// ShowDetails displays detailed information in the right-hand pane.
 	ShowDetails(details fyne.CanvasObject)

@@ -652,9 +652,9 @@ func promptForSetup() bool {
 func (a *App) InteractiveSetup() bool {
 	reader := bufio.NewReader(os.Stdin)
 
-	fmt.Println(utils.Colors.Blue("=== BadgerMaps CLI Setup ==="))
-	fmt.Println(utils.Colors.Yellow("This will guide you through setting up the BadgerMaps CLI."))
+	fmt.Println(utils.Colors.Blue("=== Badger Maps Sync Setup ==="))
 	fmt.Println()
+	fmt.Println(utils.Colors.Yellow("This will guide you through setting up the BadgerMapsSync."))
 
 	a.ConfigFile = utils.GetConfigDirFile("config.yaml")
 

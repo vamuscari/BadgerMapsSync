@@ -48,3 +48,6 @@ BadgerMapsSync
 # System Files 
 \.DS_Store
 
+
+# Build cache
+.gocache/

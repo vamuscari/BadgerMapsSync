@@ -146,7 +146,7 @@ func (d *SmartDashboard) createStatusCards() fyne.CanvasObject {
 	}
 
 	serverCard := d.createConnectionCard(
-		"Webhook Server",
+		"Server",
 		serverHeadline,
 		serverRunning,
 		[]fyne.CanvasObject{widget.NewLabel(serverStatusDetail)},

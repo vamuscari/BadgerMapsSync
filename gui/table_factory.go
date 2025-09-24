@@ -3,9 +3,11 @@ package gui
 import (
 	"fmt"
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	"image/color"
 	"strings"
 )
 
@@ -27,6 +29,7 @@ type TableConfig struct {
 	StatusColumn      int         // -1 if no status column
 	TruncateAt        map[int]int // Column index -> max characters before truncation
 	ShowTooltips      bool        // Whether to show full text in tooltips
+	EmptyMessage      string      // Message to display when no data is available
 }
 
 // TableFactory creates standardized tables across the application
@@ -39,18 +42,18 @@ func NewTableFactory(ui *Gui) *TableFactory {
 	return &TableFactory{ui: ui}
 }
 
-func (tf *TableFactory) newTableLabel() *widget.Label {
+func (tf *TableFactory) newTableLabel() fyne.CanvasObject {
 	label := widget.NewLabel("template")
 	label.Alignment = fyne.TextAlignLeading
 	label.Wrapping = fyne.TextTruncate
-	return label
+	background := canvas.NewRectangle(color.Transparent)
+	return container.NewMax(background, container.NewPadded(label))
 }
 
 // CreateTable creates a standardized table with consistent functionality
-func (tf *TableFactory) CreateTable(config TableConfig) *widget.Table {
+func (tf *TableFactory) CreateTable(config TableConfig) fyne.CanvasObject {
 	if len(config.Data) == 0 {
-		// Return empty table with headers
-		return tf.createEmptyTable(config.Headers)
+		return tf.createEmptyTable(config)
 	}
 
 	// Track selection state for checkboxes
@@ -117,12 +120,19 @@ func (tf *TableFactory) renderCheckboxRow(i widget.TableCellID, o fyne.CanvasObj
 		if i.Col == 0 {
 			// Checkbox column header (empty)
 			container.Objects[0].(*widget.Check).Hide()
-			container.Objects[1].(*widget.Label).SetText("")
+			label, background := tf.extractLabelAndBackground(container.Objects[1])
+			label.Show()
+			background.FillColor = theme.Color(theme.ColorNameInputBackground)
+			background.Refresh()
+			label.SetText("")
 		} else {
 			container.Objects[0].(*widget.Check).Hide()
-			label := container.Objects[1].(*widget.Label)
+			label, background := tf.extractLabelAndBackground(container.Objects[1])
+			label.Show()
 			label.SetText(config.Headers[i.Col])
 			label.TextStyle = fyne.TextStyle{Bold: true}
+			background.FillColor = theme.Color(theme.ColorNameInputBackground)
+			background.Refresh()
 		}
 	} else {
 		// Data rows
@@ -130,7 +140,11 @@ func (tf *TableFactory) renderCheckboxRow(i widget.TableCellID, o fyne.CanvasObj
 			// Checkbox column
 			check := container.Objects[0].(*widget.Check)
 			check.Show()
-			container.Objects[1].(*widget.Label).Hide()
+			labelContainer := container.Objects[1]
+			label, background := tf.extractLabelAndBackground(labelContainer)
+			label.Hide()
+			background.FillColor = color.Transparent
+			background.Refresh()
 
 			rowIndex := i.Row - 1
 			check.SetChecked(selectedRows[rowIndex])
@@ -143,8 +157,11 @@ func (tf *TableFactory) renderCheckboxRow(i widget.TableCellID, o fyne.CanvasObj
 			}
 		} else {
 			container.Objects[0].(*widget.Check).Hide()
-			label := container.Objects[1].(*widget.Label)
+			labelContainer := container.Objects[1]
+			label, background := tf.extractLabelAndBackground(labelContainer)
 			label.Show()
+			background.FillColor = color.Transparent
+			background.Refresh()
 
 			if i.Col < len(config.Data[i.Row-1]) {
 				originalText := config.Data[i.Row-1][i.Col]
@@ -159,14 +176,40 @@ func (tf *TableFactory) renderCheckboxRow(i widget.TableCellID, o fyne.CanvasObj
 	}
 }
 
+func (tf *TableFactory) extractLabelAndBackground(obj fyne.CanvasObject) (*widget.Label, *canvas.Rectangle) {
+	cont, ok := obj.(*fyne.Container)
+	if !ok || len(cont.Objects) == 0 {
+		return widget.NewLabel(""), canvas.NewRectangle(color.Transparent)
+	}
+
+	background, _ := cont.Objects[0].(*canvas.Rectangle)
+	var label *widget.Label
+	if len(cont.Objects) > 1 {
+		if inner, ok := cont.Objects[1].(*fyne.Container); ok && len(inner.Objects) > 0 {
+			label, _ = inner.Objects[0].(*widget.Label)
+		}
+	}
+
+	if label == nil {
+		label = widget.NewLabel("")
+	}
+	if background == nil {
+		background = canvas.NewRectangle(color.Transparent)
+	}
+
+	return label, background
+}
+
 // renderSimpleRow renders a row without checkboxes
 func (tf *TableFactory) renderSimpleRow(i widget.TableCellID, o fyne.CanvasObject, config TableConfig) {
-	label := o.(*widget.Label)
+	label, background := tf.extractLabelAndBackground(o)
 
 	if i.Row == 0 {
 		// Header row
 		label.SetText(config.Headers[i.Col])
 		label.TextStyle = fyne.TextStyle{Bold: true}
+		label.Show()
+		background.FillColor = theme.Color(theme.ColorNameInputBackground)
 	} else {
 		// Data row
 		if i.Col < len(config.Data[i.Row-1]) {
@@ -175,10 +218,13 @@ func (tf *TableFactory) renderSimpleRow(i widget.TableCellID, o fyne.CanvasObjec
 			label.SetText(displayText)
 		}
 		label.TextStyle = fyne.TextStyle{}
+		label.Show()
+		background.FillColor = color.Transparent
 
 		// Apply status color coding if this is the status column
 		tf.applyStatusColor(label, i, config)
 	}
+	background.Refresh()
 }
 
 // applyStatusColor applies color coding for status columns
@@ -200,19 +246,18 @@ func (tf *TableFactory) applyStatusColor(label *widget.Label, i widget.TableCell
 	}
 }
 
-// createEmptyTable creates a table with only headers when no data is available
-func (tf *TableFactory) createEmptyTable(headers []string) *widget.Table {
-	return widget.NewTable(
-		func() (int, int) { return 1, len(headers) },
-		func() fyne.CanvasObject { return tf.newTableLabel() },
-		func(i widget.TableCellID, o fyne.CanvasObject) {
-			label := o.(*widget.Label)
-			if i.Row == 0 {
-				label.SetText(headers[i.Col])
-				label.TextStyle = fyne.TextStyle{Bold: true}
-			}
-		},
-	)
+// createEmptyTable returns a placeholder message when no data is available
+func (tf *TableFactory) createEmptyTable(config TableConfig) fyne.CanvasObject {
+	message := strings.TrimSpace(config.EmptyMessage)
+	if message == "" {
+		message = "No information found."
+	}
+
+	placeholder := widget.NewLabel(message)
+	placeholder.Alignment = fyne.TextAlignCenter
+	placeholder.Wrapping = fyne.TextWrapWord
+
+	return container.NewCenter(placeholder)
 }
 
 // setDefaultColumnWidths sets reasonable default column widths with overflow prevention
@@ -469,7 +514,20 @@ func (tf *TableFactory) CreatePaginatedTable(config TableConfig, pageSize int) f
 }
 
 // CreateAutoTruncatedTable creates a table with automatic text truncation based on column widths
-func (tf *TableFactory) CreateAutoTruncatedTable(config TableConfig) *widget.Table {
+func (tf *TableFactory) CreateAutoTruncatedTable(config TableConfig) fyne.CanvasObject {
+	if len(config.Data) == 0 {
+		message := strings.TrimSpace(config.EmptyMessage)
+		if message == "" {
+			message = "No information found."
+		}
+
+		placeholder := widget.NewLabel(message)
+		placeholder.Alignment = fyne.TextAlignCenter
+		placeholder.Wrapping = fyne.TextWrapWord
+
+		return container.NewCenter(placeholder)
+	}
+
 	// Set up automatic truncation based on column widths
 	if config.TruncateAt == nil {
 		config.TruncateAt = make(map[int]int)
@@ -521,7 +579,7 @@ func (tf *TableFactory) CreateAutoTruncatedTable(config TableConfig) *widget.Tab
 }
 
 // CreateResponsiveTable creates a table that adapts to container size
-func (tf *TableFactory) CreateResponsiveTable(config TableConfig, containerWidth float32) *widget.Table {
+func (tf *TableFactory) CreateResponsiveTable(config TableConfig, containerWidth float32) fyne.CanvasObject {
 	// Adjust column widths based on available space
 	totalDefaultWidth := float32(0)
 	for i := range config.Headers {

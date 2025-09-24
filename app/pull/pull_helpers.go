@@ -17,11 +17,15 @@ func PullAccount(a *app.App, accountID int) (err error) {
 	a.Events.Dispatch(events.Infof("pull", "Pulling account with ID: %d", accountID))
 
 	defer func() {
-		if err != nil {
-			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "account", Payload: events.ErrorPayload{Error: err, ResourceID: accountID}})
+		success := err == nil
+		payload := events.CompletionPayload{Success: success, ResourceID: accountID}
+		if success {
+			payload.Count = 1
 		} else {
-			a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "account", Payload: events.CompletionPayload{Success: true, Count: 1, ResourceID: accountID}})
+			payload.Error = err
+			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "account", Payload: events.ErrorPayload{Error: err, ResourceID: accountID}})
 		}
+		a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "account", Payload: payload})
 	}()
 
 	account, err := a.API.GetAccountDetailed(accountID)
@@ -124,11 +128,15 @@ func PullCheckin(a *app.App, checkinID int) (err error) {
 	a.Events.Dispatch(events.Infof("pull", "Pulling checkin with ID: %d", checkinID))
 
 	defer func() {
-		if err != nil {
-			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "check-in", Payload: events.ErrorPayload{Error: err, ResourceID: checkinID}})
+		success := err == nil
+		payload := events.CompletionPayload{Success: success, ResourceID: checkinID}
+		if success {
+			payload.Count = 1
 		} else {
-			a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "check-in", Payload: events.CompletionPayload{Success: true, Count: 1, ResourceID: checkinID}})
+			payload.Error = err
+			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "check-in", Payload: events.ErrorPayload{Error: err, ResourceID: checkinID}})
 		}
+		a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "check-in", Payload: payload})
 	}()
 
 	checkin, err := a.API.GetCheckin(checkinID)
@@ -151,11 +159,15 @@ func PullCheckinsForAccount(a *app.App, accountID int) (err error) {
 
 	count := 0
 	defer func() {
-		if err != nil {
-			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "checkins", Payload: events.ErrorPayload{Error: err, ResourceID: accountID}})
+		success := err == nil
+		payload := events.CompletionPayload{Success: success, ResourceID: accountID}
+		if success {
+			payload.Count = count
 		} else {
-			a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "checkins", Payload: events.CompletionPayload{Success: true, Count: count, ResourceID: accountID}})
+			payload.Error = err
+			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "checkins", Payload: events.ErrorPayload{Error: err, ResourceID: accountID}})
 		}
+		a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "checkins", Payload: payload})
 	}()
 
 	checkins, err := a.API.GetCheckinsForAccount(accountID)
@@ -198,6 +210,7 @@ func PullGroupCheckins(a *app.App, progressCallback func(current, total int)) (e
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, a.MaxConcurrentRequests)
 	errorChan := make(chan error, total)
+	var successCount atomic.Int64
 
 	for i, id := range accountIDs {
 		wg.Add(1)
@@ -274,11 +287,15 @@ func PullRoute(a *app.App, routeID int) (err error) {
 	a.Events.Dispatch(events.Infof("pull", "Pulling route with ID: %d", routeID))
 
 	defer func() {
-		if err != nil {
-			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "route", Payload: events.ErrorPayload{Error: err, ResourceID: routeID}})
+		success := err == nil
+		payload := events.CompletionPayload{Success: success, ResourceID: routeID}
+		if success {
+			payload.Count = 1
 		} else {
-			a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "route", Payload: events.CompletionPayload{Success: true, Count: 1, ResourceID: routeID}})
+			payload.Error = err
+			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "route", Payload: events.ErrorPayload{Error: err, ResourceID: routeID}})
 		}
+		a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "route", Payload: payload})
 	}()
 
 	route, err := a.API.GetRoute(routeID)
@@ -360,11 +377,15 @@ func PullProfile(a *app.App, progressCallback func(current, total int)) (err err
 		if profile != nil && profile.ProfileId.Valid {
 			profileID = profile.ProfileId.Int64
 		}
-		if err != nil {
-			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "user profile", Payload: events.ErrorPayload{Error: err, ResourceID: profileID}})
+		success := err == nil
+		payload := events.CompletionPayload{Success: success, ResourceID: profileID}
+		if success {
+			payload.Count = 1
 		} else {
-			a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "user profile", Payload: events.CompletionPayload{Success: true, Count: 1, ResourceID: profileID}})
+			payload.Error = err
+			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "user profile", Payload: events.ErrorPayload{Error: err, ResourceID: profileID}})
 		}
+		a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "user profile", Payload: payload})
 	}()
 
 	totalSteps := 3 // 1. Get profile, 2. Store profile, 3. Update configs

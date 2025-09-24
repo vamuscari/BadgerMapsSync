@@ -12,6 +12,11 @@ import (
 
 func WebhookLoggingMiddleware(next http.Handler, a *app.App) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !a.Config.Server.LogRequests {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, "can't read body", http.StatusInternalServerError)

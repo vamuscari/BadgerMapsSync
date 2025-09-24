@@ -38,8 +38,8 @@ var guiFlag bool
 func createRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "badgermaps",
-		Short: "BadgerMaps CLI - Command line interface for BadgerMaps",
-		Long: `BadgerMaps CLI is a command line interface for interacting with the BadgerMaps API.
+		Short: "BadgerMapsSync - Syncing interface for BadgerMaps",
+		Long: `BadgerMapsSync is a command line / gui interface for interacting with the BadgerMaps API.
 It allows you to push and pull data, run in server mode, and perform various utility operations.`,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			// Don't load config for version, help, or gui commands

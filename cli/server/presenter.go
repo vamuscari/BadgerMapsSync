@@ -65,8 +65,16 @@ func (p *CliPresenter) RunServer(config *ServerConfig) {
 	}
 	mux := http.NewServeMux()
 
-	accountCreateHandler := http.HandlerFunc(p.HandleAccountCreateWebhook)
-	checkinHandler := http.HandlerFunc(p.HandleCheckinWebhook)
+	logRequests := config.LogRequests
+	wrapWithLogging := func(handler http.Handler) http.Handler {
+		if logRequests {
+			return WebhookLoggingMiddleware(handler, p.App)
+		}
+		return handler
+	}
+
+	accountCreateHandler := wrapWithLogging(http.HandlerFunc(p.HandleAccountCreateWebhook))
+	checkinHandler := wrapWithLogging(http.HandlerFunc(p.HandleCheckinWebhook))
 
 	enabledWebhooks := p.App.Config.Server.Webhooks
 	if len(enabledWebhooks) == 0 {
@@ -77,13 +85,13 @@ func (p *CliPresenter) RunServer(config *ServerConfig) {
 	}
 
 	if enabledWebhooks[app.WebhookAccountCreate] {
-		mux.Handle("/webhook/account/create", WebhookLoggingMiddleware(accountCreateHandler, p.App))
+		mux.Handle("/webhook/account/create", accountCreateHandler)
 	} else {
 		p.App.Events.Dispatch(events.Infof("server", "Account create webhook disabled by configuration"))
 	}
 
 	if enabledWebhooks[app.WebhookCheckin] {
-		mux.Handle("/webhook/checkin", WebhookLoggingMiddleware(checkinHandler, p.App))
+		mux.Handle("/webhook/checkin", checkinHandler)
 	} else {
 		p.App.Events.Dispatch(events.Infof("server", "Checkin webhook disabled by configuration"))
 	}
@@ -93,12 +101,11 @@ func (p *CliPresenter) RunServer(config *ServerConfig) {
 	}
 
 	if p.App.Config.WebhookCatchAll {
-		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			WebhookLoggingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				p.App.Events.Dispatch(events.Warningf("server", "Received request for unhandled path: %s", r.RequestURI))
-				http.NotFound(w, r)
-			}), p.App).ServeHTTP(w, r)
+		catchAllHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			p.App.Events.Dispatch(events.Warningf("server", "Received request for unhandled path: %s", r.RequestURI))
+			http.NotFound(w, r)
 		})
+		mux.Handle("/", wrapWithLogging(catchAllHandler))
 	}
 
 	mux.HandleFunc("/health", p.HandleHealthCheck)
