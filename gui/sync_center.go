@@ -5,6 +5,7 @@ import (
 	"badgermaps/events"
 	"fmt"
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
@@ -76,7 +77,7 @@ func NewSyncCenter(ui *Gui, presenter *GuiPresenter) *SyncCenter {
 		suggestions:  make(map[string]omniSuggestion),
 		currentType:  syncKindAll,
 		currentScope: scopeAll,
-		lastDetail:   "Choose a sync type to get started.",
+		lastDetail:   "Choose a pull type to get started.",
 	}
 
 	sc.syncTypeSelect = widget.NewSelect([]string{
@@ -94,13 +95,13 @@ func NewSyncCenter(ui *Gui, presenter *GuiPresenter) *SyncCenter {
 	sc.omniEntry.OnChanged = sc.onOmniChanged
 	sc.omniEntry.OnSubmitted = sc.onOmniSubmit
 
-	sc.actionButton = widget.NewButtonWithIcon("Sync Everything", theme.ViewRefreshIcon(), func() {
+	sc.actionButton = widget.NewButtonWithIcon("Pull All", theme.DownloadIcon(), func() {
 		sc.handleAction()
 	})
 	sc.actionButton.Importance = widget.HighImportance
 
 	sc.typeGroup = container.NewVBox(
-		widget.NewLabel("Sync Type"),
+		widget.NewLabel("Pull Type"),
 		sc.syncTypeSelect,
 	)
 
@@ -178,22 +179,24 @@ func (sc *SyncCenter) CreateContent() fyne.CanvasObject {
 	sc.rebuildPushLayout()
 	sc.applyStoredDetail()
 
-	// Sync history at the very bottom
-	syncHistoryRow := container.NewHBox(
-		widget.NewButtonWithIcon("Sync History", theme.NavigateNextIcon(), func() {
-			if !sc.ui.OpenExplorerTable("SyncHistory") {
-				sc.ui.app.Events.Dispatch(events.Debugf("sync_center", "unable to navigate to sync history"))
-			}
-		}),
-		layout.NewSpacer(),
-	)
+	syncHistoryButton := widget.NewButtonWithIcon("Sync History", theme.NavigateNextIcon(), func() {
+		if !sc.ui.OpenExplorerTable("SyncHistory") {
+			sc.ui.app.Events.Dispatch(events.Debugf("sync_center", "unable to navigate to sync history"))
+		}
+	})
 
-	return container.NewVScroll(container.NewVBox(
+	title := canvas.NewText("Sync Center", theme.ForegroundColor())
+	title.TextStyle = fyne.TextStyle{Bold: true}
+	title.TextSize = theme.TextSize() + 4
+
+	header := container.NewBorder(nil, nil, nil, syncHistoryButton, container.NewHBox(title))
+
+	content := container.NewVScroll(container.NewVBox(
 		sc.controlsCard,
 		sc.pushCard,
-		widget.NewSeparator(),
-		syncHistoryRow,
 	))
+
+	return container.NewBorder(header, nil, nil, nil, content)
 }
 
 func (sc *SyncCenter) onSyncTypeChanged(value string) {
@@ -261,7 +264,7 @@ func (sc *SyncCenter) updateActionLabel() {
 	text := "Run"
 	switch sc.currentType {
 	case syncKindAll:
-		text = "Sync Everything"
+		text = "Pull Everything"
 	case syncKindUser:
 		text = "Pull User Profile"
 	case syncKindAccounts:
