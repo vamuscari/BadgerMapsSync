@@ -355,7 +355,7 @@ func Launch(a *app.App, icon fyne.Resource) {
 
 	fyneApp := fapp.New()
 	fyneApp.SetIcon(icon)
-	window := fyneApp.NewWindow("BadgerMaps CLI")
+	window := fyneApp.NewWindow("Badger Maps Sync")
 
 	ui := &Gui{
 		app:             a,
@@ -2994,12 +2994,25 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 		)
 	}
 
+	// Schema Management
+	schemaLabel := "Initialize Schema"
+	if ui.app.DB != nil && ui.app.DB.IsConnected() {
+		if err := ui.app.DB.ValidateSchema(ui.app.State); err == nil {
+			schemaLabel = "Re-initialize Schema"
+		}
+	}
+	schemaButton := widget.NewButtonWithIcon(schemaLabel, theme.StorageIcon(), ui.presenter.HandleSchemaEnforcement)
+
 	dbCard := ui.newSectionCard(
 		"Database Configuration",
 		"Select your database type and connection information.",
 		container.NewGridWithColumns(2, widget.NewLabel("Database Type"), dbTypeSelect),
 		dbForm,
 		container.NewCenter(testDbButton),
+		widget.NewSeparator(),
+		widget.NewLabelWithStyle("Schema Management", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabel("Initialize or rebuild the target database schema."),
+		container.NewCenter(schemaButton),
 	)
 
 	// Sync Preferences
@@ -3141,23 +3154,9 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 
 	viewButton := widget.NewButtonWithIcon("View", theme.VisibilityIcon(), ui.presenter.HandleViewConfig)
 
-	// Schema Management
-	schemaLabel := "Initialize Schema"
-	if ui.app.DB != nil && ui.app.DB.IsConnected() {
-		if err := ui.app.DB.ValidateSchema(ui.app.State); err == nil {
-			schemaLabel = "Re-initialize Schema"
-		}
-	}
-	schemaButton := widget.NewButtonWithIcon(schemaLabel, theme.StorageIcon(), ui.presenter.HandleSchemaEnforcement)
-
-	schemaCard := ui.newSectionCard(
-		"Schema Management",
-		"Initialize or rebuild the target database schema.",
-		schemaButton,
-	)
-
-	actionsFooter := container.NewVBox(
-		widget.NewSeparator(),
+	actionsCard := ui.newSectionCard(
+		"Configuration Actions",
+		"Review or persist the current configuration.",
 		container.NewGridWithColumns(2, viewButton, saveButton),
 	)
 
@@ -3168,10 +3167,10 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 		syncPreferencesCard,
 		appearanceCard,
 		otherCard,
-		schemaCard,
+		actionsCard,
 	))
 
-	return container.NewBorder(nil, actionsFooter, nil, nil, scrollContent)
+	return scrollContent
 }
 
 // --- GuiView Implementation ---
