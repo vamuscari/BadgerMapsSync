@@ -2520,12 +2520,14 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 		gotoPageBtn,
 	)
 
+	combinedRight := container.NewHBox(centerSection, widget.NewLabel("  "), rightSection)
+
 	// Create a comprehensive pagination toolbar
 	paginationBar := container.NewBorder(
 		nil, nil,
 		leftSection,
-		rightSection,
-		container.NewCenter(centerSection),
+		combinedRight,
+		nil,
 	)
 
 	// Add visual styling to the pagination bar with minimal padding
