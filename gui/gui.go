@@ -1814,9 +1814,10 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 	}
 
 	var (
-		updateFilterRowOptions func()
-		rebuildFilterRows      func()
-		presetLabelForFilters  func() string
+		updateFilterRowOptions   func()
+		rebuildFilterRows        func()
+		presetLabelForFilters    func() string
+		updateQuickPresetOptions func(tableName string)
 	)
 
 	createFilterRow := func(clause *ExplorerFilterClause) *explorerFilterRow {
@@ -1962,17 +1963,7 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 
 		rebuildFilterRows()
 		updateFilterRowOptions()
-
-		if quickPresetSelect != nil {
-			preset := presetLabelForFilters()
-			suppressPresetChange = true
-			if preset == "" {
-				quickPresetSelect.ClearSelected()
-			} else {
-				quickPresetSelect.SetSelected(preset)
-			}
-			suppressPresetChange = false
-		}
+		updateQuickPresetOptions(currentTableName)
 
 		if orderDirectionSelect != nil {
 			directionLabel := "Ascending"
@@ -2042,6 +2033,8 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 		if tableName == "" {
 			tableContainer.Objects = nil
 			tableContainer.Refresh()
+			currentTableName = ""
+			updateQuickPresetOptions("")
 			return
 		}
 		queryOptions = ui.explorerCurrentQuery
@@ -2104,81 +2097,119 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 		tableContainer.Refresh()
 	}
 
-	applyStatusPreset := func(status string) {
-		if status == "" {
-			filtered := pendingFilters[:0]
-			for _, clause := range pendingFilters {
-				if !strings.EqualFold(clause.Column, "Status") {
-					filtered = append(filtered, clause)
+	type explorerPresetOption struct {
+		Label   string
+		Filters []ExplorerFilterClause
+	}
+
+	tableQuickPresets := map[string][]explorerPresetOption{
+		"AccountsPendingChanges": {
+			{Label: "Pending Accounts", Filters: []ExplorerFilterClause{{Column: "Status", Mode: FilterModeEquals, Value: "pending"}}},
+			{Label: "Failed Accounts", Filters: []ExplorerFilterClause{{Column: "Status", Mode: FilterModeEquals, Value: "failed"}}},
+			{Label: "Completed Accounts", Filters: []ExplorerFilterClause{{Column: "Status", Mode: FilterModeEquals, Value: "completed"}}},
+		},
+		"AccountCheckinsPendingChanges": {
+			{Label: "Pending Check-ins", Filters: []ExplorerFilterClause{{Column: "Status", Mode: FilterModeEquals, Value: "pending"}}},
+			{Label: "Failed Check-ins", Filters: []ExplorerFilterClause{{Column: "Status", Mode: FilterModeEquals, Value: "failed"}}},
+			{Label: "Completed Check-ins", Filters: []ExplorerFilterClause{{Column: "Status", Mode: FilterModeEquals, Value: "completed"}}},
+		},
+		"SyncHistory": {
+			{Label: "Pull Runs", Filters: []ExplorerFilterClause{{Column: "Direction", Mode: FilterModeEquals, Value: "pull"}}},
+			{Label: "Push Runs", Filters: []ExplorerFilterClause{{Column: "Direction", Mode: FilterModeEquals, Value: "push"}}},
+			{Label: "Failed Runs", Filters: []ExplorerFilterClause{{Column: "Status", Mode: FilterModeEquals, Value: "failed"}}},
+		},
+	}
+
+	filtersMatchPreset := func(current []ExplorerFilterClause, preset []ExplorerFilterClause) bool {
+		if len(current) != len(preset) {
+			return false
+		}
+		matched := make([]bool, len(current))
+		for _, target := range preset {
+			found := false
+			for i, clause := range current {
+				if matched[i] {
+					continue
+				}
+				if strings.EqualFold(clause.Column, target.Column) && clause.Mode == target.Mode && strings.EqualFold(clause.Value, target.Value) {
+					matched[i] = true
+					found = true
+					break
 				}
 			}
-			pendingFilters = filtered
-			rebuildFilterRows()
-			updateFilterRowOptions()
-			return
-		}
-
-		if !containsString(availableColumns, "Status") {
-			ui.ShowToast("Selected table does not have a Status column.")
-			return
-		}
-
-		updated := false
-		for idx := range pendingFilters {
-			if strings.EqualFold(pendingFilters[idx].Column, "Status") {
-				pendingFilters[idx].Column = "Status"
-				pendingFilters[idx].Mode = FilterModeEquals
-				pendingFilters[idx].Value = status
-				updated = true
-				break
+			if !found {
+				return false
 			}
 		}
+		return true
+	}
 
-		if !updated {
-			pendingFilters = append(pendingFilters, ExplorerFilterClause{Column: "Status", Mode: FilterModeEquals, Value: status})
-		}
-
+	applyPresetFilters := func(filters []ExplorerFilterClause) {
+		pendingFilters = cloneExplorerFilters(filters)
 		rebuildFilterRows()
 		updateFilterRowOptions()
 	}
 
+	updateQuickPresetOptions = func(tableName string) {
+		if quickPresetSelect == nil {
+			return
+		}
+
+		presets := tableQuickPresets[tableName]
+		if len(presets) == 0 {
+			quickPresetSelect.Options = []string{}
+			quickPresetSelect.ClearSelected()
+			quickPresetSelect.Hide()
+			return
+		}
+
+		options := make([]string, 0, len(presets)+1)
+		options = append(options, "No Preset")
+		for _, preset := range presets {
+			options = append(options, preset.Label)
+		}
+
+		quickPresetSelect.Options = options
+		quickPresetSelect.Show()
+		suppressPresetChange = true
+		if label := presetLabelForFilters(); label == "" {
+			quickPresetSelect.ClearSelected()
+		} else {
+			quickPresetSelect.SetSelected(label)
+		}
+		suppressPresetChange = false
+		quickPresetSelect.Refresh()
+	}
+
 	presetLabelForFilters = func() string {
-		for _, clause := range pendingFilters {
-			if strings.EqualFold(clause.Column, "Status") {
-				switch strings.ToLower(clause.Value) {
-				case "pending":
-					return "Status: Pending"
-				case "processing", "in_progress":
-					return "Status: Processing"
-				case "completed", "success":
-					return "Status: Completed"
-				case "failed", "error":
-					return "Status: Failed"
-				}
+		presets := tableQuickPresets[currentTableName]
+		for _, preset := range presets {
+			if filtersMatchPreset(pendingFilters, preset.Filters) {
+				return preset.Label
 			}
 		}
 		return ""
 	}
 
-	quickPresetLabels := []string{"No Preset", "Status: Pending", "Status: Processing", "Status: Completed", "Status: Failed"}
-	quickPresetSelect = widget.NewSelect(quickPresetLabels, func(label string) {
+	quickPresetSelect = widget.NewSelect([]string{}, func(label string) {
 		if suppressPresetChange {
 			return
 		}
-		switch label {
-		case "", "No Preset":
-			applyStatusPreset("")
-		case "Status: Pending":
-			applyStatusPreset("pending")
-		case "Status: Processing":
-			applyStatusPreset("processing")
-		case "Status: Completed":
-			applyStatusPreset("completed")
-		case "Status: Failed":
-			applyStatusPreset("failed")
+		if label == "" || label == "No Preset" {
+			applyPresetFilters(nil)
+			return
+		}
+
+		presets := tableQuickPresets[currentTableName]
+		for _, preset := range presets {
+			if preset.Label == label {
+				applyPresetFilters(preset.Filters)
+				return
+			}
 		}
 	})
 	quickPresetSelect.PlaceHolder = "Quick preset"
+	quickPresetSelect.Hide()
 
 	orderColumnSelect = widget.NewSelect([]string{}, func(value string) {
 		pendingOrderColumn = strings.TrimSpace(value)
@@ -2442,17 +2473,7 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 
 		rebuildFilterRows()
 		updateFilterRowOptions()
-
-		if quickPresetSelect != nil {
-			preset := presetLabelForFilters()
-			suppressPresetChange = true
-			if preset == "" {
-				quickPresetSelect.ClearSelected()
-			} else {
-				quickPresetSelect.SetSelected(preset)
-			}
-			suppressPresetChange = false
-		}
+		updateQuickPresetOptions(currentTableName)
 
 		if orderDirectionSelect != nil {
 			if pendingOrderDescending {
