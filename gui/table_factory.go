@@ -38,6 +38,7 @@ type TableFactory struct {
 	ui                *Gui
 	activeTable       *widget.Table
 	activeColumnWidth map[int]float32
+	stickyRow         *fyne.Container
 }
 
 // NewTableFactory creates a new table factory
@@ -135,6 +136,9 @@ func (h *columnResizeHandle) Dragged(e *fyne.DragEvent) {
 	h.tf.activeTable.SetColumnWidth(h.col, newW)
 	h.tf.activeColumnWidth[h.col] = newW
 	h.tf.activeTable.Refresh()
+	if h.tf != nil && h.tf.stickyRow != nil {
+		h.tf.stickyRow.Refresh()
+	}
 }
 
 func (h *columnResizeHandle) DragEnd() {}
@@ -231,7 +235,76 @@ func (tf *TableFactory) CreateTable(config TableConfig) fyne.CanvasObject {
 		table.UnselectAll()
 	}
 
+	// Return plain table; sticky header will be handled by the parent view to avoid overlay crashes
 	return table
+}
+
+// buildStickyHeader creates a simple header row grid to overlay above the table
+func (tf *TableFactory) buildStickyHeader(config TableConfig) *fyne.Container {
+	if len(config.Headers) == 0 {
+		return container.NewVBox()
+	}
+	// Build clickable headers that open column menu
+	cells := make([]fyne.CanvasObject, 0, len(config.Headers))
+	for _, h := range config.Headers {
+		hdr := newHeaderClickable(h, nil)
+		title := h
+		hdr.tapped = func() { tf.showHeaderMenu(title, hdr) }
+		cells = append(cells, hdr)
+	}
+	row := container.New(&columnHeaderLayout{tf: tf}, cells...)
+	tf.stickyRow = row
+	return container.NewVBox(row, widget.NewSeparator())
+}
+
+// columnHeaderLayout sizes header cells to match active column widths
+type columnHeaderLayout struct{ tf *TableFactory }
+
+func (l *columnHeaderLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	if l.tf == nil || l.tf.activeColumnWidth == nil || len(objects) == 0 {
+		w := size.Width / float32(maxInt(len(objects), 1))
+		x := float32(0)
+		for _, o := range objects {
+			o.Resize(fyne.NewSize(w, size.Height))
+			o.Move(fyne.NewPos(x, 0))
+			x += w
+		}
+		return
+	}
+	x := float32(0)
+	for i, o := range objects {
+		w := l.tf.activeColumnWidth[i]
+		if w <= 0 {
+			w = 80
+		}
+		o.Resize(fyne.NewSize(w, size.Height))
+		o.Move(fyne.NewPos(x, 0))
+		x += w
+	}
+}
+
+func (l *columnHeaderLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	total := float32(0)
+	if l.tf != nil && l.tf.activeColumnWidth != nil {
+		for i := range objects {
+			w := l.tf.activeColumnWidth[i]
+			if w <= 0 {
+				w = 80
+			}
+			total += w
+		}
+	} else {
+		total = float32(len(objects)) * 80
+	}
+	h := theme.TextSize() + theme.Padding()*2
+	return fyne.NewSize(total, h)
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // renderCheckboxRow renders a row with checkbox functionality
