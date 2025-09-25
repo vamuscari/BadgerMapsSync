@@ -568,7 +568,15 @@ func (p *GuiPresenter) HandleTestAPIConnection(apiKey, baseURL string) {
 		}
 
 		p.app.Events.Dispatch(events.Infof("presenter", "API connection successful!"))
-		p.app.API.SetConnected(true)
+		// Persist the tested values into the running app so validators see them
+		if p.app.API != nil {
+			p.app.API.APIKey = apiKey
+			p.app.API.BaseURL = baseURL
+			p.app.API.SetConnected(true)
+		}
+		// Also mirror into config so follow‑up steps use the same values
+		p.app.Config.API.APIKey = apiKey
+		p.app.Config.API.BaseURL = baseURL
 		p.app.Events.Dispatch(events.Event{Type: "connection.status.changed"})
 	}()
 }

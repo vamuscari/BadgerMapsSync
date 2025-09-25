@@ -144,6 +144,9 @@ func NewSyncCenter(ui *Gui, presenter *GuiPresenter) *SyncCenter {
 	return sc
 }
 
+// PushCard exposes the push card for external rendering (e.g., screenshots)
+func (sc *SyncCenter) PushCard() fyne.CanvasObject { return sc.pushCard }
+
 func (sc *SyncCenter) CreateContent() fyne.CanvasObject {
 	sc.controlsBody = container.NewVBox()
 

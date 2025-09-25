@@ -303,9 +303,11 @@ func (w *WelcomeScreen) createAPIStep() fyne.CanvasObject {
 				baseURL, sanitizeCredentials(apiKey)))
 
 			w.presenter.HandleTestAPIConnection(apiKey, baseURL)
-			// Wait a moment for the test to complete
-			statusLabel.SetText("Connection test complete.")
-			statusLabel.Refresh()
+			// UI updates must occur on the main thread
+			fyne.Do(func() {
+				statusLabel.SetText("Connection test complete.")
+				statusLabel.Refresh()
+			})
 		}()
 	})
 

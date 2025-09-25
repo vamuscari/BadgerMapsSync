@@ -3,6 +3,7 @@ package gui
 import (
 	"fmt"
 	"image/color"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -266,7 +267,15 @@ func (r *logEntryRenderer) Objects() []fyne.CanvasObject {
 
 func (r *logEntryRenderer) Destroy() {}
 
-const rightPaneWidth float32 = 360
+var rightPaneWidth float32 = 360
+
+// SetDefaultRightPaneWidth allows external utilities (e.g., screenshot generator)
+// to adjust the default width of the right details pane.
+func SetDefaultRightPaneWidth(w float32) {
+	if w > 0 {
+		rightPaneWidth = w
+	}
+}
 
 // Gui struct holds all the UI components and application state
 type Gui struct {
@@ -348,6 +357,38 @@ func (ui *Gui) newSectionCard(title, subtitle string, content ...fyne.CanvasObje
 	)
 }
 
+// CreateContent exposes the internal createContent for programmatic consumers (e.g., screenshot generator)
+func (ui *Gui) CreateContent() fyne.CanvasObject { return ui.createContent() }
+
+// Tabs exposes the main AppTabs for external utilities
+func (ui *Gui) Tabs() *container.AppTabs { return ui.tabs }
+
+// ExplorerTableSelect exposes the table selector for the Explorer tab
+func (ui *Gui) ExplorerTableSelect() *widget.Select { return ui.explorerTableSelect }
+
+// SyncCenter returns the SyncCenter instance
+func (ui *Gui) SyncCenter() *SyncCenter { return ui.syncCenter }
+
+// FyneApp returns the underlying fyne.App
+func (ui *Gui) FyneApp() fyne.App { return ui.fyneApp }
+
+// NewGuiForScreenshots builds a minimal GUI instance suitable for headless rendering (tests/screenshots).
+func NewGuiForScreenshots(a *app.App, fyApp fyne.App) *Gui {
+	ui := &Gui{
+		app:        a,
+		fyneApp:    fyApp,
+		logBinding: binding.NewStringList(),
+	}
+	ui.presenter = NewGuiPresenter(a, ui)
+	ui.tableFactory = NewTableFactory(ui)
+	ui.syncCenter = NewSyncCenter(ui, ui.presenter)
+	ui.smartDashboard = NewSmartDashboard(ui, ui.presenter)
+	ui.showWelcome = false
+	// Ensure our custom theme is applied for headless rendering
+	ui.fyneApp.Settings().SetTheme(newModernTheme())
+	return ui
+}
+
 // Launch initializes and runs the GUI
 func Launch(a *app.App, icon fyne.Resource) {
 	a.Events.Dispatch(events.Debugf("gui", "GUI initiated"))
@@ -423,7 +464,9 @@ func Launch(a *app.App, icon fyne.Resource) {
 				for _, line := range lines {
 					ui.logBinding.Append(line)
 				}
+				// Avoid early crash if list is not yet fully initialised
 				if ui.logView != nil {
+					defer func() { _ = recover() }()
 					ui.logView.ScrollToBottom()
 				}
 			})
@@ -471,9 +514,27 @@ func Launch(a *app.App, icon fyne.Resource) {
 	}
 	a.Events.Subscribe("connection.status.changed", connectionListener)
 
+	// Optional launch scaling for screenshots or HiDPI preview
+	baseW, baseH := float32(1000), float32(600)
+	scale := float32(1.0)
+	if s := strings.TrimSpace(os.Getenv("BM_GUI_SCALE")); s != "" {
+		if v, err := strconv.ParseFloat(s, 32); err == nil && v > 0 {
+			scale = float32(v)
+		}
+	} else if s := strings.TrimSpace(os.Getenv("GUI_WINDOW_SCALE")); s != "" {
+		if v, err := strconv.ParseFloat(s, 32); err == nil && v > 0 {
+			scale = float32(v)
+		}
+	}
+
+	// Scale details pane proportionally if requested
+	if scale > 1.0 {
+		SetDefaultRightPaneWidth(360 * scale)
+	}
+
 	window.SetContent(ui.createContent())
-	// Set more reasonable default size and allow proper resizing
-	window.Resize(fyne.NewSize(1000, 600))
+	// Set initial size and allow resizing
+	window.Resize(fyne.NewSize(baseW*scale, baseH*scale))
 	window.SetFixedSize(false) // Allow resizing
 	window.CenterOnScreen()
 	window.ShowAndRun()

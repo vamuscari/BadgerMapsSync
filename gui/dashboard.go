@@ -515,21 +515,29 @@ type LastSyncInfo struct {
 
 // getLastSyncInfo gets information about the last sync
 func (d *SmartDashboard) getLastSyncInfo() LastSyncInfo {
-	if d.ui.app.DB == nil || !d.ui.app.DB.IsConnected() {
-		return LastSyncInfo{
-			Time:   "Unavailable",
-			Status: "Connect the database to track sync runs",
-		}
-	}
+    if d.ui.app.DB == nil || !d.ui.app.DB.IsConnected() {
+        return LastSyncInfo{
+            Time:   "Unavailable",
+            Status: "Connect the database to track sync runs",
+        }
+    }
 
-	entries, err := database.GetRecentSyncHistory(d.ui.app.DB, 10)
-	if err != nil {
-		d.ui.app.Events.Dispatch(events.Errorf("dashboard", "Failed to load sync history: %v", err))
-		return LastSyncInfo{
-			Time:   "Unknown",
-			Status: "Unable to load sync history",
-		}
-	}
+    // Guard against missing schema on first run
+    if exists, err := d.ui.app.DB.TableExists("SyncHistory"); err != nil || !exists {
+        return LastSyncInfo{
+            Time:   "Never",
+            Status: "No sync history recorded yet",
+        }
+    }
+
+    entries, err := database.GetRecentSyncHistory(d.ui.app.DB, 10)
+    if err != nil {
+        d.ui.app.Events.Dispatch(events.Errorf("dashboard", "Failed to load sync history: %v", err))
+        return LastSyncInfo{
+            Time:   "Unknown",
+            Status: "Unable to load sync history",
+        }
+    }
 
 	var inProgress *database.SyncHistoryEntry
 	for i := range entries {
