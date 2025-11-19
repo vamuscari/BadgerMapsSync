@@ -41,13 +41,14 @@ func pullAccountCmd(presenter *CliPresenter) *cobra.Command {
 		Short: "Pull a single account from BadgerMaps",
 		Long:  `Pull a single account from the BadgerMaps API and store it in the local database.`,
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			accountID, err := strconv.Atoi(args[0])
-			if err != nil {
-				return fmt.Errorf("invalid account ID: %s", args[0])
-			}
-			return presenter.HandlePullAccount(accountID)
-		},
+	}
+	opts := bindResponseSaveFlags(cmd)
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		accountID, err := strconv.Atoi(args[0])
+		if err != nil {
+			return fmt.Errorf("invalid account ID: %s", args[0])
+		}
+		return presenter.HandlePullAccount(accountID, *opts)
 	}
 	return cmd
 }
@@ -70,13 +71,14 @@ func pullCheckinCmd(presenter *CliPresenter) *cobra.Command {
 		Short: "Pull a single checkin from BadgerMaps",
 		Long:  `Pull a single checkin from the BadgerMaps API and store it in the local database.`,
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			checkinID, err := strconv.Atoi(args[0])
-			if err != nil {
-				return fmt.Errorf("invalid checkin ID: %s", args[0])
-			}
-			return presenter.HandlePullCheckin(checkinID)
-		},
+	}
+	opts := bindResponseSaveFlags(cmd)
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		checkinID, err := strconv.Atoi(args[0])
+		if err != nil {
+			return fmt.Errorf("invalid checkin ID: %s", args[0])
+		}
+		return presenter.HandlePullCheckin(checkinID, *opts)
 	}
 	return cmd
 }
@@ -99,13 +101,14 @@ func pullRouteCmd(presenter *CliPresenter) *cobra.Command {
 		Short: "Pull a single route from BadgerMaps",
 		Long:  `Pull a single route from the BadgerMaps API and store it in the local database.`,
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			routeID, err := strconv.Atoi(args[0])
-			if err != nil {
-				return fmt.Errorf("invalid route ID: %s", args[0])
-			}
-			return presenter.HandlePullRoute(routeID)
-		},
+	}
+	opts := bindResponseSaveFlags(cmd)
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		routeID, err := strconv.Atoi(args[0])
+		if err != nil {
+			return fmt.Errorf("invalid route ID: %s", args[0])
+		}
+		return presenter.HandlePullRoute(routeID, *opts)
 	}
 	return cmd
 }
@@ -127,9 +130,10 @@ func pullProfileCmd(presenter *CliPresenter) *cobra.Command {
 		Use:   "profile",
 		Short: "Pull user profile from BadgerMaps",
 		Long:  `Pull the user profile from the BadgerMaps API and store it in the local database.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return presenter.HandlePullProfile()
-		},
+	}
+	opts := bindResponseSaveFlags(cmd)
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		return presenter.HandlePullProfile(*opts)
 	}
 	return cmd
 }

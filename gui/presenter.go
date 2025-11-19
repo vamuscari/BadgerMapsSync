@@ -86,7 +86,7 @@ func (p *GuiPresenter) HandlePullGroup() {
 			progress := 3*majorStepWeight + (float64(current)/float64(total))*majorStepWeight
 			p.view.SetProgress(progress)
 		}
-		if err := pull.PullProfile(p.app, profileCallback); err != nil {
+		if _, err := pull.PullProfile(p.app, profileCallback); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "Error pulling user profile: %v", err))
 			p.view.ShowToast("Error: The data pull failed.")
 			return
@@ -108,7 +108,7 @@ func (p *GuiPresenter) HandlePullAccount(idStr string) {
 	}
 	p.app.Events.Dispatch(events.Infof("presenter", "Starting pull for account ID: %d...", id))
 	go func() {
-		if err := pull.PullAccount(p.app, id); err != nil {
+		if _, err := pull.PullAccount(p.app, id); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
 			p.view.ShowToast(fmt.Sprintf("Error: Failed to pull account %d.", id))
 			return
@@ -300,7 +300,7 @@ func (p *GuiPresenter) HandlePullCheckin(idStr string) {
 	}
 	p.app.Events.Dispatch(events.Infof("presenter", "Starting pull for check-in ID: %d...", id))
 	go func() {
-		if err := pull.PullCheckin(p.app, id); err != nil {
+		if _, err := pull.PullCheckin(p.app, id); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
 			p.view.ShowToast(fmt.Sprintf("Error: Failed to pull check-in %d.", id))
 			return
@@ -355,7 +355,7 @@ func (p *GuiPresenter) HandlePullRoute(idStr string) {
 	}
 	p.app.Events.Dispatch(events.Infof("presenter", "Starting pull for route ID: %d...", id))
 	go func() {
-		if err := pull.PullRoute(p.app, id); err != nil {
+		if _, err := pull.PullRoute(p.app, id); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
 			p.view.ShowToast(fmt.Sprintf("Error: Failed to pull route %d.", id))
 			return
@@ -403,7 +403,7 @@ func (p *GuiPresenter) HandlePullProfile() {
 		callback := func(current, total int) {
 			p.view.SetProgress(float64(current) / float64(total))
 		}
-		if err := pull.PullProfile(p.app, callback); err != nil {
+		if _, err := pull.PullProfile(p.app, callback); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
 			p.view.ShowToast("Error: Failed to pull user profile.")
 			return

@@ -12,41 +12,55 @@ func TestBuildExplorerWhereClause(t *testing.T) {
 		mode        ExplorerFilterMode
 		value       string
 		expectedSQL string
+		dbType      string
 	}{
 		{
 			name:        "contains",
 			column:      "Name",
 			mode:        FilterModeContains,
 			value:       "Acme",
-			expectedSQL: "LOWER(Name) LIKE '%acme%'",
+			expectedSQL: "Name LIKE '%Acme%'",
+			dbType:      "sqlite3",
 		},
 		{
 			name:        "equals",
 			column:      "AccountID",
 			mode:        FilterModeEquals,
 			value:       "1234",
-			expectedSQL: "LOWER(AccountID) = '1234'",
+			expectedSQL: "AccountID = '1234'",
+			dbType:      "sqlite3",
 		},
 		{
 			name:        "starts with",
 			column:      "Email",
 			mode:        FilterModeStartsWith,
 			value:       "info@",
-			expectedSQL: "LOWER(Email) LIKE 'info@%'",
+			expectedSQL: "Email LIKE 'info@%'",
+			dbType:      "sqlite3",
 		},
 		{
 			name:        "ends with",
 			column:      "Email",
 			mode:        FilterModeEndsWith,
 			value:       "@badgermaps.com",
-			expectedSQL: "LOWER(Email) LIKE '%@badgermaps.com'",
+			expectedSQL: "Email LIKE '%@badgermaps.com'",
+			dbType:      "sqlite3",
 		},
 		{
 			name:        "not equals with quotes escaped",
 			column:      "Status",
 			mode:        FilterModeNotEquals,
 			value:       "O'Reilly",
-			expectedSQL: "LOWER(Status) <> 'o''reilly'",
+			expectedSQL: "Status <> 'O''Reilly'",
+			dbType:      "sqlite3",
+		},
+		{
+			name:        "postgres uses ilike",
+			column:      "Name",
+			mode:        FilterModeContains,
+			value:       "Acme",
+			expectedSQL: "Name ILIKE '%Acme%'",
+			dbType:      "postgres",
 		},
 	}
 
@@ -54,26 +68,26 @@ func TestBuildExplorerWhereClause(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			filters := []ExplorerFilterClause{{Column: tc.column, Mode: tc.mode, Value: tc.value}}
-			got := buildExplorerWhereClause(filters)
+			got := buildExplorerWhereClause(filters, tc.dbType)
 			if got != tc.expectedSQL {
 				t.Fatalf("expected %q, got %q", tc.expectedSQL, got)
 			}
 		})
 	}
 
-	if got := buildExplorerWhereClause([]ExplorerFilterClause{{Column: "", Mode: FilterModeContains, Value: "value"}}); got != "" {
+	if got := buildExplorerWhereClause([]ExplorerFilterClause{{Column: "", Mode: FilterModeContains, Value: "value"}}, "sqlite3"); got != "" {
 		t.Fatalf("expected empty where clause when column missing, got %q", got)
 	}
 
-	if got := buildExplorerWhereClause([]ExplorerFilterClause{{Column: "Name", Mode: FilterModeNone, Value: "value"}}); got != "" {
+	if got := buildExplorerWhereClause([]ExplorerFilterClause{{Column: "Name", Mode: FilterModeNone, Value: "value"}}, "sqlite3"); got != "" {
 		t.Fatalf("expected empty where clause when mode none, got %q", got)
 	}
 
 	multi := buildExplorerWhereClause([]ExplorerFilterClause{
 		{Column: "Status", Mode: FilterModeEquals, Value: "pending"},
 		{Column: "Name", Mode: FilterModeContains, Value: "Acme"},
-	})
-	expectedMulti := "LOWER(Status) = 'pending' AND LOWER(Name) LIKE '%acme%'"
+	}, "sqlite3")
+	expectedMulti := "Status = 'pending' AND Name LIKE '%Acme%'"
 	if multi != expectedMulti {
 		t.Fatalf("expected combined clause %q, got %q", expectedMulti, multi)
 	}
@@ -108,7 +122,7 @@ func TestBuildExplorerOrderClause(t *testing.T) {
 
 func TestBuildExplorerSelectQueryDialects(t *testing.T) {
 	table := "Accounts"
-	where := "LOWER(Name) LIKE '%ac%'"
+	where := "Name LIKE '%ac%'"
 	order := "ORDER BY CreatedAt DESC"
 	page := 0
 	pageSize := 25
@@ -121,17 +135,17 @@ func TestBuildExplorerSelectQueryDialects(t *testing.T) {
 		{
 			name:     "sqlite uses limit",
 			dbType:   "sqlite3",
-			expected: "SELECT * FROM Accounts WHERE LOWER(Name) LIKE '%ac%' ORDER BY CreatedAt DESC LIMIT 25 OFFSET 0",
+			expected: "SELECT * FROM Accounts WHERE Name LIKE '%ac%' ORDER BY CreatedAt DESC LIMIT 25 OFFSET 0",
 		},
 		{
 			name:     "postgres uses limit",
 			dbType:   "postgres",
-			expected: "SELECT * FROM Accounts WHERE LOWER(Name) LIKE '%ac%' ORDER BY CreatedAt DESC LIMIT 25 OFFSET 0",
+			expected: "SELECT * FROM Accounts WHERE Name LIKE '%ac%' ORDER BY CreatedAt DESC LIMIT 25 OFFSET 0",
 		},
 		{
 			name:     "mssql uses offset fetch",
 			dbType:   "mssql",
-			expected: "SELECT * FROM Accounts WHERE LOWER(Name) LIKE '%ac%' ORDER BY CreatedAt DESC OFFSET 0 ROWS FETCH NEXT 25 ROWS ONLY",
+			expected: "SELECT * FROM Accounts WHERE Name LIKE '%ac%' ORDER BY CreatedAt DESC OFFSET 0 ROWS FETCH NEXT 25 ROWS ONLY",
 		},
 	}
 
@@ -171,19 +185,19 @@ func TestExplorerQueryCompositionAcrossDialects(t *testing.T) {
 			name:           "sqlite normalized",
 			dbType:         "sqlite3",
 			expectedOrder:  "ORDER BY CreatedAt DESC",
-			expectedSelect: "SELECT * FROM Accounts WHERE LOWER(Name) LIKE 'ac%' ORDER BY CreatedAt DESC LIMIT 25 OFFSET 25",
+			expectedSelect: "SELECT * FROM Accounts WHERE Name LIKE 'Ac%' ORDER BY CreatedAt DESC LIMIT 25 OFFSET 25",
 		},
 		{
 			name:           "postgres normalized",
 			dbType:         "postgres",
 			expectedOrder:  "ORDER BY CreatedAt DESC",
-			expectedSelect: "SELECT * FROM Accounts WHERE LOWER(Name) LIKE 'ac%' ORDER BY CreatedAt DESC LIMIT 25 OFFSET 25",
+			expectedSelect: "SELECT * FROM Accounts WHERE Name ILIKE 'Ac%' ORDER BY CreatedAt DESC LIMIT 25 OFFSET 25",
 		},
 		{
 			name:           "mssql normalized",
 			dbType:         "mssql",
 			expectedOrder:  "ORDER BY CreatedAt DESC",
-			expectedSelect: "SELECT * FROM Accounts WHERE LOWER(Name) LIKE 'ac%' ORDER BY CreatedAt DESC OFFSET 25 ROWS FETCH NEXT 25 ROWS ONLY",
+			expectedSelect: "SELECT * FROM Accounts WHERE Name LIKE 'Ac%' ORDER BY CreatedAt DESC OFFSET 25 ROWS FETCH NEXT 25 ROWS ONLY",
 		},
 	}
 
@@ -192,7 +206,7 @@ func TestExplorerQueryCompositionAcrossDialects(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			normalized := normalizeExplorerOptions(baseOpts)
 			resolved := resolveExplorerFilters(normalized.Filters, columns)
-			whereClause := buildExplorerWhereClause(resolved)
+			whereClause := buildExplorerWhereClause(resolved, tc.dbType)
 			if whereClause == "" {
 				t.Fatalf("expected where clause for %s", tc.name)
 			}
@@ -209,7 +223,11 @@ func TestExplorerQueryCompositionAcrossDialects(t *testing.T) {
 			}
 
 			countQuery := buildExplorerCountQuery("Accounts", whereClause)
-			if !strings.Contains(countQuery, "WHERE LOWER(Name) LIKE 'ac%'") {
+			expectedWhere := "WHERE Name LIKE 'Ac%'"
+			if strings.EqualFold(tc.dbType, "postgres") {
+				expectedWhere = "WHERE Name ILIKE 'Ac%'"
+			}
+			if !strings.Contains(countQuery, expectedWhere) {
 				t.Fatalf("expected count query to include where clause, got %q", countQuery)
 			}
 		})

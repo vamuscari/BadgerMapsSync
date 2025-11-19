@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -46,9 +47,18 @@ func TestPullAccountCmd(t *testing.T) {
 
 	presenter := NewCliPresenter(app)
 	cmd := pullAccountCmd(presenter)
-	cmd.SetArgs([]string{"123"})
+	responsePath := filepath.Join(tempDir, "account-response.json")
+	cmd.SetArgs([]string{"--response-file", responsePath, "123"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("pullAccountCmd() failed with error: %v", err)
+	}
+
+	data, err := os.ReadFile(responsePath)
+	if err != nil {
+		t.Fatalf("failed to read response file: %v", err)
+	}
+	if !strings.Contains(string(data), `"id": 123`) {
+		t.Fatalf("response file missing expected payload, got: %s", string(data))
 	}
 }
 

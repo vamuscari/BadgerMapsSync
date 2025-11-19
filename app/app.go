@@ -656,7 +656,12 @@ func (a *App) InteractiveSetup() bool {
 	fmt.Println()
 	fmt.Println(utils.Colors.Yellow("This will guide you through setting up the BadgerMapsSync."))
 
-	a.ConfigFile = utils.GetConfigDirFile("config.yaml")
+	// Only set the config file path if it's not already set from LoadConfig.
+	// This ensures we save to the detected config location rather than always
+	// overwriting it with the default user config directory path.
+	if a.ConfigFile == "" {
+		a.ConfigFile = utils.GetConfigDirFile("config.yaml")
+	}
 
 	// API Settings
 	fmt.Println(utils.Colors.Blue("---" + " API Settings ---"))
@@ -694,15 +699,20 @@ func (a *App) InteractiveSetup() bool {
 	var err error
 	a.DB, err = database.NewDB(&a.Config.DB)
 	if err != nil {
-		a.Events.Dispatch(events.Errorf("setup", "Failed to load database settings: %v", err))
+		fmt.Println(utils.Colors.Red("✗ Failed to load database settings: %v", err))
+		return false
+	}
+	if err := a.DB.Connect(); err != nil {
+		fmt.Println(utils.Colors.Red("✗ Database connection failed: %v", err))
+		fmt.Println(utils.Colors.Yellow("Please check your database settings and try again."))
 		return false
 	}
 	if err := a.DB.TestConnection(); err != nil {
-		a.Events.Dispatch(events.Errorf("setup", "Database connection failed: %v", err))
-		a.Events.Dispatch(events.Warningf("setup", "Please check your database settings and try again."))
+		fmt.Println(utils.Colors.Red("✗ Database connection failed: %v", err))
+		fmt.Println(utils.Colors.Yellow("Please check your database settings and try again."))
 		return false
 	}
-	a.Events.Dispatch(events.Infof("setup", "Database connection successful."))
+	fmt.Println(utils.Colors.Green("✓ Database connection successful"))
 
 	// Advanced Settings
 	fmt.Println(utils.Colors.Blue("---" + " Advanced Settings ---"))
@@ -710,37 +720,36 @@ func (a *App) InteractiveSetup() bool {
 
 	// Save configuration
 	if err := a.SaveConfig(); err != nil {
-		a.Events.Dispatch(events.Errorf("setup", "Error saving config file: %v", err))
+		fmt.Println(utils.Colors.Red("✗ Error saving config file: %v", err))
 		return false
 	}
 
 	fmt.Println()
-	a.Events.Dispatch(events.Infof("setup", "✓ Setup completed successfully!"))
-	a.Events.Dispatch(events.Infof("setup", "Configuration saved to: %s", a.ConfigFile))
+	fmt.Println(utils.Colors.Green("✓ Configuration saved to: %s", a.ConfigFile))
 
 	// Check if the database schema is valid
 	if err := a.DB.ValidateSchema(a.State); err == nil {
-		a.Events.Dispatch(events.Warningf("setup", "Database schema already exists and is valid."))
+		fmt.Println(utils.Colors.Yellow("⚠ Database schema already exists and is valid."))
 		reinitialize := utils.PromptBool(reader, "Do you want to reinitialize the database? (This will delete all existing data)", false)
 		if reinitialize {
-			a.Events.Dispatch(events.Warningf("setup", "Re-initializing database schema and deleting all existing data..."))
+			fmt.Println(utils.Colors.Yellow("Re-initializing database schema and deleting all existing data..."))
 			if err := a.DB.ResetSchema(a.State); err != nil {
-				a.Events.Dispatch(events.Errorf("setup", "Error resetting schema: %v", err))
+				fmt.Println(utils.Colors.Red("✗ Error resetting schema: %v", err))
 				return false
 			}
-			a.Events.Dispatch(events.Infof("setup", "Database reinitialized successfully."))
+			fmt.Println(utils.Colors.Green("✓ Database reinitialized successfully"))
 		}
 	} else {
 		// Schema is invalid or does not exist
-		a.Events.Dispatch(events.Warningf("setup", "Database schema is invalid or missing."))
+		fmt.Println(utils.Colors.Yellow("⚠ Database schema is invalid or missing."))
 		enforce := utils.PromptBool(reader, "Do you want to create/update the database schema now?", true)
 		if enforce {
-			a.Events.Dispatch(events.Warningf("setup", "Enforcing schema..."))
+			fmt.Println(utils.Colors.Cyan("Enforcing schema..."))
 			if err := a.DB.EnforceSchema(a.State); err != nil {
-				a.Events.Dispatch(events.Errorf("setup", "Error enforcing schema: %v", err))
+				fmt.Println(utils.Colors.Red("✗ Error enforcing schema: %v", err))
 				return false
 			}
-			a.Events.Dispatch(events.Infof("setup", "Database schema created/updated successfully."))
+			fmt.Println(utils.Colors.Green("✓ Database schema created/updated successfully"))
 		}
 	}
 

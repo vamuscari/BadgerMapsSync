@@ -100,9 +100,12 @@ func TestPullAccount(t *testing.T) {
 	})
 
 	// Call the function to be tested
-	err := pull.PullAccount(testApp, 123)
+	account, err := pull.PullAccount(testApp, 123)
 	if err != nil {
 		t.Fatalf("PullAccount returned an unexpected error: %v", err)
+	}
+	if account == nil {
+		t.Fatal("PullAccount returned a nil account without error")
 	}
 
 	// Verify that the PullComplete event was dispatched

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -92,6 +93,13 @@ func (db *SQLiteConfig) GetSQL(command string) string {
 }
 
 func (db *SQLiteConfig) Connect() error {
+	// Ensure the parent directory exists before attempting to create the database file
+	dir := filepath.Dir(db.Path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		db.connected = false
+		return fmt.Errorf("failed to create database directory: %w", err)
+	}
+
 	var err error
 	db.db, err = sql.Open("sqlite3", db.DatabaseConnection())
 	if err != nil {

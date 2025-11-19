@@ -2466,16 +2466,18 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 				ui.app.Events.Dispatch(events.Errorf("gui", "Error getting tables: %v", err))
 				return
 			}
-			tableSelect.Options = tables
-			tableSelect.ClearSelected()
-			tableSelect.Refresh()
-			tableContainer.Objects = nil
-			tableContainer.Refresh()
-			pageInfoLabel.SetText("No data loaded")
-			prevBtn.Disable()
-			nextBtn.Disable()
-			firstPageBtn.Disable()
-			lastPageBtn.Disable()
+			fyne.Do(func() {
+				tableSelect.Options = tables
+				tableSelect.ClearSelected()
+				tableSelect.Refresh()
+				tableContainer.Objects = nil
+				tableContainer.Refresh()
+				pageInfoLabel.SetText("No data loaded")
+				prevBtn.Disable()
+				nextBtn.Disable()
+				firstPageBtn.Disable()
+				lastPageBtn.Disable()
+			})
 		}()
 	})
 
@@ -2486,8 +2488,10 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 			ui.app.Events.Dispatch(events.Errorf("gui", "Error getting tables: %v", err))
 			return
 		}
-		tableSelect.Options = tables
-		tableSelect.Refresh()
+		fyne.Do(func() {
+			tableSelect.Options = tables
+			tableSelect.Refresh()
+		})
 	}()
 
 	// Layout - simplified top section
@@ -3458,8 +3462,8 @@ func (ui *Gui) loadPaginatedTableData(tableName string, page, pageSize int, opts
 	resolvedFilters := resolveExplorerFilters(normalized.Filters, columns)
 	orderColumn := matchColumn(columns, normalized.OrderColumn)
 
-	whereClause := buildExplorerWhereClause(resolvedFilters)
 	dbType := ui.app.DB.GetType()
+	whereClause := buildExplorerWhereClause(resolvedFilters, dbType)
 	orderClause := buildExplorerOrderClause(columns, orderColumn, normalized.OrderDescending, dbType)
 
 	countQuery := buildExplorerCountQuery(tableName, whereClause)
@@ -3629,22 +3633,32 @@ func escapeSQLLiteral(value string) string {
 	return strings.ReplaceAll(value, "'", "''")
 }
 
-func buildFilterCondition(column string, mode ExplorerFilterMode, value string) string {
-	lowerColumn := fmt.Sprintf("LOWER(%s)", column)
-	lowerValue := strings.ToLower(value)
-	escaped := escapeSQLLiteral(lowerValue)
+func likeOperator(dbType string) string {
+	if strings.EqualFold(dbType, "postgres") {
+		return "ILIKE"
+	}
+	return "LIKE"
+}
+
+func buildFilterCondition(column string, mode ExplorerFilterMode, value string, dbType string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+
+	escaped := escapeSQLLiteral(trimmed)
 
 	switch mode {
 	case FilterModeEquals:
-		return fmt.Sprintf("%s = '%s'", lowerColumn, escaped)
+		return fmt.Sprintf("%s = '%s'", column, escaped)
 	case FilterModeNotEquals:
-		return fmt.Sprintf("%s <> '%s'", lowerColumn, escaped)
+		return fmt.Sprintf("%s <> '%s'", column, escaped)
 	case FilterModeStartsWith:
-		return fmt.Sprintf("%s LIKE '%s%%'", lowerColumn, escaped)
+		return fmt.Sprintf("%s %s '%s%%'", column, likeOperator(dbType), escaped)
 	case FilterModeEndsWith:
-		return fmt.Sprintf("%s LIKE '%%%s'", lowerColumn, escaped)
+		return fmt.Sprintf("%s %s '%%%s'", column, likeOperator(dbType), escaped)
 	default:
-		return fmt.Sprintf("%s LIKE '%%%s%%'", lowerColumn, escaped)
+		return fmt.Sprintf("%s %s '%%%s%%'", column, likeOperator(dbType), escaped)
 	}
 }
 
@@ -3677,7 +3691,7 @@ func resolveExplorerFilters(filters []ExplorerFilterClause, columns []string) []
 	return resolved
 }
 
-func buildExplorerWhereClause(filters []ExplorerFilterClause) string {
+func buildExplorerWhereClause(filters []ExplorerFilterClause, dbType string) string {
 	if len(filters) == 0 {
 		return ""
 	}
@@ -3687,7 +3701,7 @@ func buildExplorerWhereClause(filters []ExplorerFilterClause) string {
 		if clause.Column == "" || clause.Mode == FilterModeNone {
 			continue
 		}
-		condition := buildFilterCondition(clause.Column, clause.Mode, clause.Value)
+		condition := buildFilterCondition(clause.Column, clause.Mode, clause.Value, dbType)
 		if condition != "" {
 			clauses = append(clauses, condition)
 		}

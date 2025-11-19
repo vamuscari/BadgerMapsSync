@@ -32,6 +32,25 @@ func PullAllCmd(a *app.App) *cobra.Command {
 }
 
 func runPullGroup(a *app.App, top int) {
+	// Validate prerequisites before attempting to pull.
+	// Without these checks, the pull command would silently fail when API calls return errors
+	// due to missing credentials or database connection, making it difficult for users to
+	// understand why the command isn't working.
+	if a.API == nil || a.API.APIKey == "" {
+		fmt.Fprintf(os.Stderr, "Error: API key is not configured. Please run 'badgermaps config' to set up your API credentials.\n")
+		os.Exit(1)
+	}
+
+	if a.DB == nil {
+		fmt.Fprintf(os.Stderr, "Error: Database is not configured. Please run 'badgermaps config' to set up your database.\n")
+		os.Exit(1)
+	}
+
+	if !a.DB.IsConnected() {
+		fmt.Fprintf(os.Stderr, "Error: Database is not connected. Please check your database configuration.\n")
+		os.Exit(1)
+	}
+
 	log.SetOutput(os.Stderr) // Configure logger to write to stderr
 
 	pullListener := func(e events.Event) {
@@ -88,7 +107,7 @@ func runPullGroup(a *app.App, top int) {
 		os.Exit(1)
 	}
 
-	if err := pull.PullProfile(a, nil); err != nil {
+	if _, err := pull.PullProfile(a, nil); err != nil {
 		a.Events.Dispatch(events.Errorf("pull", "Failed to pull user profile: %v", err))
 		os.Exit(1)
 	}

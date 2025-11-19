@@ -6,6 +6,7 @@ import (
 	"badgermaps/events"
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/schollz/progressbar/v3"
 )
@@ -21,7 +22,7 @@ func NewCliPresenter(a *app.App) *CliPresenter {
 }
 
 // HandlePullAccount orchestrates pulling a single account.
-func (p *CliPresenter) HandlePullAccount(accountID int) error {
+func (p *CliPresenter) HandlePullAccount(accountID int, opts ResponseSaveOptions) error {
 	listener := func(e events.Event) {
 		if e.Source != "account" {
 			return
@@ -39,7 +40,11 @@ func (p *CliPresenter) HandlePullAccount(accountID int) error {
 	p.App.Events.Subscribe("pull.complete", listener)
 	p.App.Events.Subscribe("pull.error", listener)
 
-	return pull.PullAccount(p.App, accountID)
+	account, err := pull.PullAccount(p.App, accountID)
+	if err != nil {
+		return err
+	}
+	return p.saveResponse("account", strconv.Itoa(accountID), account, opts)
 }
 
 // HandlePullAccounts orchestrates pulling all accounts.
@@ -93,7 +98,7 @@ func (p *CliPresenter) HandlePullAccounts() error {
 }
 
 // HandlePullCheckin orchestrates pulling a single checkin.
-func (p *CliPresenter) HandlePullCheckin(checkinID int) error {
+func (p *CliPresenter) HandlePullCheckin(checkinID int, opts ResponseSaveOptions) error {
 	listener := func(e events.Event) {
 		if e.Source != "check-in" {
 			return
@@ -110,7 +115,11 @@ func (p *CliPresenter) HandlePullCheckin(checkinID int) error {
 	p.App.Events.Subscribe("pull.complete", listener)
 	p.App.Events.Subscribe("pull.error", listener)
 
-	return pull.PullCheckin(p.App, checkinID)
+	checkin, err := pull.PullCheckin(p.App, checkinID)
+	if err != nil {
+		return err
+	}
+	return p.saveResponse("checkin", strconv.Itoa(checkinID), checkin, opts)
 }
 
 // HandlePullCheckins orchestrates pulling all checkins.
@@ -164,7 +173,7 @@ func (p *CliPresenter) HandlePullCheckins() error {
 }
 
 // HandlePullRoute orchestrates pulling a single route.
-func (p *CliPresenter) HandlePullRoute(routeID int) error {
+func (p *CliPresenter) HandlePullRoute(routeID int, opts ResponseSaveOptions) error {
 	listener := func(e events.Event) {
 		if e.Source != "route" {
 			return
@@ -181,7 +190,11 @@ func (p *CliPresenter) HandlePullRoute(routeID int) error {
 	p.App.Events.Subscribe("pull.complete", listener)
 	p.App.Events.Subscribe("pull.error", listener)
 
-	return pull.PullRoute(p.App, routeID)
+	route, err := pull.PullRoute(p.App, routeID)
+	if err != nil {
+		return err
+	}
+	return p.saveResponse("route", strconv.Itoa(routeID), route, opts)
 }
 
 // HandlePullRoutes orchestrates pulling all routes.
@@ -235,7 +248,7 @@ func (p *CliPresenter) HandlePullRoutes() error {
 }
 
 // HandlePullProfile orchestrates pulling the user profile.
-func (p *CliPresenter) HandlePullProfile() error {
+func (p *CliPresenter) HandlePullProfile(opts ResponseSaveOptions) error {
 	listener := func(e events.Event) {
 		if e.Source != "user profile" {
 			return
@@ -252,5 +265,14 @@ func (p *CliPresenter) HandlePullProfile() error {
 	p.App.Events.Subscribe("pull.complete", listener)
 	p.App.Events.Subscribe("pull.error", listener)
 
-	return pull.PullProfile(p.App, nil)
+	profile, err := pull.PullProfile(p.App, nil)
+	if err != nil {
+		return err
+	}
+
+	identifier := "profile"
+	if profile != nil && profile.ProfileId.Valid {
+		identifier = fmt.Sprintf("%d", profile.ProfileId.Int64)
+	}
+	return p.saveResponse("profile", identifier, profile, opts)
 }

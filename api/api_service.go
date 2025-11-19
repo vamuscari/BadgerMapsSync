@@ -217,16 +217,19 @@ type Waypoint struct {
 	PlaceID         *null.String `json:"place_id"`
 }
 
-// Checkin represents a BadgerMaps checkin (apponull.Intment)
+// Checkin represents a BadgerMaps checkin (appointment)
 type Checkin struct {
-	CheckinId   null.Int     `json:"id"`
-	CrmId       *null.String `json:"crm_id"`
-	AccountId   null.Int     `json:"customer"` // Rename for clarity
-	LogDatetime null.String  `json:"log_datetime"`
-	Type        null.String  `json:"type"`
-	Comments    null.String  `json:"comments"`
-	ExtraFields *null.String `json:"extra_fields"`
-	CreatedBy   null.String  `json:"created_by"`
+	CheckinId   null.Int        `json:"id"`
+	CrmId       *null.String    `json:"crm_id"`
+	AccountId   null.Int        `json:"customer"` // Rename for clarity
+	LogDatetime null.String     `json:"log_datetime"`
+	Type        null.String     `json:"type"`
+	Comments    null.String     `json:"comments"`
+	// ExtraFields uses json.RawMessage instead of null.String because the API
+	// can return this field as either a string, object, or null depending on the data.
+	// Using json.RawMessage allows us to accept any valid JSON value without unmarshaling errors.
+	ExtraFields json.RawMessage `json:"extra_fields"`
+	CreatedBy   null.String     `json:"created_by"`
 }
 
 // UserProfile represents a BadgerMaps user profile
@@ -841,9 +844,20 @@ func (api *APIClient) GetCheckinsForAccount(customerID int) ([]Checkin, error) {
 		return nil, fmt.Errorf("endpoint appointments for customer %d test failed with status %d: %s", customerID, resp.StatusCode, string(body))
 	}
 
+	// Read the body first so we can log it if unmarshaling fails
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read appointments response body: %w", err)
+	}
+
 	var checkins []Checkin
-	if err := json.NewDecoder(resp.Body).Decode(&checkins); err != nil {
-		return nil, fmt.Errorf("failed to decode appointments response: %w", err)
+	if err := json.Unmarshal(body, &checkins); err != nil {
+		// Include the first 500 characters of the response to help debug the issue
+		preview := string(body)
+		if len(preview) > 500 {
+			preview = preview[:500] + "..."
+		}
+		return nil, fmt.Errorf("failed to decode appointments response: %w\nResponse preview: %s", err, preview)
 	}
 
 	return checkins, nil

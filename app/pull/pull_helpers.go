@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 )
 
-func PullAccount(a *app.App, accountID int) (err error) {
+func PullAccount(a *app.App, accountID int) (account *api.Account, err error) {
 	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "account", Payload: events.PullStartPayload{ResourceID: accountID}})
 	a.Events.Dispatch(events.Infof("pull", "Pulling account with ID: %d", accountID))
 
@@ -28,17 +28,17 @@ func PullAccount(a *app.App, accountID int) (err error) {
 		a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "account", Payload: payload})
 	}()
 
-	account, err := a.API.GetAccountDetailed(accountID)
+	account, err = a.API.GetAccountDetailed(accountID)
 	if err != nil {
-		return fmt.Errorf("error pulling account: %w", err)
+		return nil, fmt.Errorf("error pulling account: %w", err)
 	}
 
 	if err = StoreAccountDetailed(a, account); err != nil {
-		return fmt.Errorf("error storing account: %w", err)
+		return nil, fmt.Errorf("error storing account: %w", err)
 	}
 
 	a.Events.Dispatch(events.Infof("pull", "Successfully pulled account with ID: %d", accountID))
-	return nil
+	return account, nil
 }
 
 func PullGroupAccounts(a *app.App, top int, progressCallback func(current, total int)) (err error) {
@@ -123,7 +123,7 @@ func PullGroupAccounts(a *app.App, top int, progressCallback func(current, total
 	return err
 }
 
-func PullCheckin(a *app.App, checkinID int) (err error) {
+func PullCheckin(a *app.App, checkinID int) (checkin *api.Checkin, err error) {
 	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "check-in", Payload: events.PullStartPayload{ResourceID: checkinID}})
 	a.Events.Dispatch(events.Infof("pull", "Pulling checkin with ID: %d", checkinID))
 
@@ -139,17 +139,17 @@ func PullCheckin(a *app.App, checkinID int) (err error) {
 		a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "check-in", Payload: payload})
 	}()
 
-	checkin, err := a.API.GetCheckin(checkinID)
+	checkin, err = a.API.GetCheckin(checkinID)
 	if err != nil {
-		return fmt.Errorf("error pulling checkin: %w", err)
+		return nil, fmt.Errorf("error pulling checkin: %w", err)
 	}
 
 	if err = StoreCheckin(a, *checkin); err != nil {
-		return fmt.Errorf("error storing checkin: %w", err)
+		return nil, fmt.Errorf("error storing checkin: %w", err)
 	}
 
 	a.Events.Dispatch(events.Infof("pull", "Successfully pulled checkin with ID: %d", checkinID))
-	return nil
+	return checkin, nil
 }
 
 // PullCheckinsForAccount pulls all check-ins for a specific account ID.
@@ -282,7 +282,7 @@ func PullGroupCheckins(a *app.App, progressCallback func(current, total int)) (e
 	return err
 }
 
-func PullRoute(a *app.App, routeID int) (err error) {
+func PullRoute(a *app.App, routeID int) (route *api.Route, err error) {
 	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "route", Payload: events.PullStartPayload{ResourceID: routeID}})
 	a.Events.Dispatch(events.Infof("pull", "Pulling route with ID: %d", routeID))
 
@@ -298,17 +298,17 @@ func PullRoute(a *app.App, routeID int) (err error) {
 		a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "route", Payload: payload})
 	}()
 
-	route, err := a.API.GetRoute(routeID)
+	route, err = a.API.GetRoute(routeID)
 	if err != nil {
-		return fmt.Errorf("error pulling route: %w", err)
+		return nil, fmt.Errorf("error pulling route: %w", err)
 	}
 
 	if err = StoreRoute(a, *route); err != nil {
-		return fmt.Errorf("error storing route: %w", err)
+		return nil, fmt.Errorf("error storing route: %w", err)
 	}
 
 	a.Events.Dispatch(events.Infof("pull", "Successfully pulled route with ID: %d", routeID))
-	return nil
+	return route, nil
 }
 
 func PullGroupRoutes(a *app.App, progressCallback func(current, total int)) (err error) {
@@ -367,11 +367,10 @@ func PullGroupRoutes(a *app.App, progressCallback func(current, total int)) (err
 	return err
 }
 
-func PullProfile(a *app.App, progressCallback func(current, total int)) (err error) {
+func PullProfile(a *app.App, progressCallback func(current, total int)) (profile *api.UserProfile, err error) {
 	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "user profile"})
 	a.Events.Dispatch(events.Infof("pull", "Pulling user profile..."))
 
-	var profile *api.UserProfile
 	defer func() {
 		var profileID interface{}
 		if profile != nil && profile.ProfileId.Valid {
@@ -393,7 +392,7 @@ func PullProfile(a *app.App, progressCallback func(current, total int)) (err err
 
 	profile, err = a.API.GetUserProfile()
 	if err != nil {
-		return fmt.Errorf("error pulling user profile: %w", err)
+		return nil, fmt.Errorf("error pulling user profile: %w", err)
 	}
 	currentStep++
 	if progressCallback != nil {
@@ -401,7 +400,7 @@ func PullProfile(a *app.App, progressCallback func(current, total int)) (err err
 	}
 
 	if err = StoreProfile(a, profile); err != nil {
-		return fmt.Errorf("error storing profile: %w", err)
+		return nil, fmt.Errorf("error storing profile: %w", err)
 	}
 	currentStep++
 	if progressCallback != nil {
@@ -413,7 +412,7 @@ func PullProfile(a *app.App, progressCallback func(current, total int)) (err err
 	if progressCallback != nil {
 		progressCallback(currentStep, totalSteps)
 	}
-	return nil
+	return profile, nil
 }
 
 func StoreAccountDetailed(a *app.App, acc *api.Account) error {
@@ -443,9 +442,16 @@ func StoreCheckin(a *app.App, checkin api.Checkin) error {
 	if a.State.Verbose {
 		a.Events.Dispatch(events.Debugf("pull", "Storing checkin: %d", checkin.CheckinId.Int64))
 	}
+
+	// Convert ExtraFields (json.RawMessage) to string for database storage
+	var extraFieldsStr string
+	if len(checkin.ExtraFields) > 0 {
+		extraFieldsStr = string(checkin.ExtraFields)
+	}
+
 	return database.RunCommand(a.DB, "MergeAccountCheckins",
 		checkin.CheckinId, checkin.CrmId, checkin.AccountId, checkin.LogDatetime, checkin.Type, checkin.Comments,
-		checkin.ExtraFields, checkin.CreatedBy,
+		extraFieldsStr, checkin.CreatedBy,
 	)
 }
 
