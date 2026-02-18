@@ -13,11 +13,7 @@ func (api *APIClient) UpdateRoute(routeID int, data map[string]string) (*Route, 
 	url := api.endpoints.Route(routeID)
 
 	// Convert data to form-encoded string
-	formData := make([]string, 0, len(data))
-	for key, value := range data {
-		formData = append(formData, fmt.Sprintf("%s=%s", key, value))
-	}
-	body := strings.Join(formData, "&")
+	body := encodeFormData(data)
 
 	req, err := http.NewRequest("PATCH", url, strings.NewReader(body))
 	if err != nil {
@@ -51,11 +47,7 @@ func (api *APIClient) UpdateProfile(data map[string]string) (*UserProfile, error
 	url := api.endpoints.Profiles()
 
 	// Convert data to form-encoded string
-	formData := make([]string, 0, len(data))
-	for key, value := range data {
-		formData = append(formData, fmt.Sprintf("%s=%s", key, value))
-	}
-	body := strings.Join(formData, "&")
+	body := encodeFormData(data)
 
 	req, err := http.NewRequest("PATCH", url, strings.NewReader(body))
 	if err != nil {

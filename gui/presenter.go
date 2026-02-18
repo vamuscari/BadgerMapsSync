@@ -422,11 +422,15 @@ func (p *GuiPresenter) HandlePushAccounts() {
 	go func() {
 		if err := push.RunPushAccounts(p.app); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
-			p.view.ShowToast("Error: Failed to push account changes.")
+			fyne.Do(func() {
+				p.view.ShowToast("Error: Failed to push account changes.")
+			})
 			return
 		}
-		p.view.ShowToast("Success: Account changes pushed.")
-		p.view.RefreshPushTab()
+		fyne.Do(func() {
+			p.view.ShowToast("Success: Account changes pushed.")
+			p.view.RefreshPushTab()
+		})
 	}()
 }
 
@@ -437,11 +441,15 @@ func (p *GuiPresenter) HandlePushCheckins() {
 	go func() {
 		if err := push.RunPushCheckins(p.app); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
-			p.view.ShowToast("Error: Failed to push check-in changes.")
+			fyne.Do(func() {
+				p.view.ShowToast("Error: Failed to push check-in changes.")
+			})
 			return
 		}
-		p.view.ShowToast("Success: Check-in changes pushed.")
-		p.view.RefreshPushTab()
+		fyne.Do(func() {
+			p.view.ShowToast("Success: Check-in changes pushed.")
+			p.view.RefreshPushTab()
+		})
 	}()
 }
 
@@ -456,8 +464,10 @@ func (p *GuiPresenter) HandlePushAll() {
 		if err := push.RunPushCheckins(p.app); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR during check-in push: %v", err))
 		}
-		p.view.ShowToast("Success: All pending changes pushed.")
-		p.view.RefreshPushTab()
+		fyne.Do(func() {
+			p.view.ShowToast("Success: All pending changes pushed.")
+			p.view.RefreshPushTab()
+		})
 	}()
 }
 

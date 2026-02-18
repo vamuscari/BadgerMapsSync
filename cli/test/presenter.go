@@ -16,16 +16,16 @@ func NewCliPresenter(a *app.App) *CliPresenter {
 }
 
 // HandleRunTests runs all tests.
-func (p *CliPresenter) HandleRunTests() {
-	test.RunTests(p.App)
+func (p *CliPresenter) HandleRunTests() error {
+	return test.RunTests(p.App)
 }
 
 // HandleTestDatabase tests the database.
-func (p *CliPresenter) HandleTestDatabase() {
-	test.TestDatabase(p.App)
+func (p *CliPresenter) HandleTestDatabase() error {
+	return test.TestDatabase(p.App)
 }
 
 // HandleTestApi tests the API.
-func (p *CliPresenter) HandleTestApi(save bool) {
-	test.TestApi(p.App, save)
+func (p *CliPresenter) HandleTestApi(save bool) error {
+	return test.TestApi(p.App, save)
 }

@@ -3,11 +3,14 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/guregu/null/v6"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/guregu/null/v6"
 )
 
 const (
@@ -27,6 +30,14 @@ type APIClient struct {
 	client    *http.Client
 	endpoints *Endpoints
 	connected bool
+}
+
+// APIResponse contains both parsed response data and the raw response payload.
+type APIResponse[T any] struct {
+	Data       T
+	Raw        []byte
+	StatusCode int
+	Headers    http.Header
 }
 
 // NewAPIClient creates a new BadgerMaps API client
@@ -55,6 +66,61 @@ func (api *APIClient) SetConnected(connected bool) {
 	api.connected = connected
 }
 
+// encodeFormData converts a map into a URL-encoded form body.
+// Using url.Values ensures keys like "extra_fields[Meeting Notes]" and
+// values that contain spaces or special characters are encoded correctly.
+func encodeFormData(data map[string]string) string {
+	values := url.Values{}
+	for key, value := range data {
+		values.Set(key, value)
+	}
+	return values.Encode()
+}
+
+func (api *APIClient) applyAuthHeaders(req *http.Request, contentType string) {
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+}
+
+func responsePreview(body []byte, max int) string {
+	if len(body) <= max {
+		return string(body)
+	}
+	return string(body[:max]) + "..."
+}
+
+func (api *APIClient) doJSON[T any](req *http.Request, expectedStatus int, decodeErrPrefix string) (*APIResponse[T], error) {
+	resp, err := api.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode != expectedStatus {
+		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, responsePreview(body, 500))
+	}
+
+	var data T
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &data); err != nil {
+			return nil, fmt.Errorf("%s: %w\nResponse preview: %s", decodeErrPrefix, err, responsePreview(body, 500))
+		}
+	}
+
+	return &APIResponse[T]{
+		Data:       data,
+		Raw:        body,
+		StatusCode: resp.StatusCode,
+		Headers:    resp.Header.Clone(),
+	}, nil
+}
 
 // All other API method receivers need to be updated from `api.apiKey` to `api.APIKey`
 // Example for GetAccounts:
@@ -219,12 +285,12 @@ type Waypoint struct {
 
 // Checkin represents a BadgerMaps checkin (appointment)
 type Checkin struct {
-	CheckinId   null.Int        `json:"id"`
-	CrmId       *null.String    `json:"crm_id"`
-	AccountId   null.Int        `json:"customer"` // Rename for clarity
-	LogDatetime null.String     `json:"log_datetime"`
-	Type        null.String     `json:"type"`
-	Comments    null.String     `json:"comments"`
+	CheckinId   null.Int     `json:"id"`
+	CrmId       *null.String `json:"crm_id"`
+	AccountId   null.Int     `json:"customer"` // Rename for clarity
+	LogDatetime null.String  `json:"log_datetime"`
+	Type        null.String  `json:"type"`
+	Comments    null.String  `json:"comments"`
 	// ExtraFields uses json.RawMessage instead of null.String because the API
 	// can return this field as either a string, object, or null depending on the data.
 	// Using json.RawMessage allows us to accept any valid JSON value without unmarshaling errors.
@@ -499,169 +565,6 @@ func (api *APIClient) TestAPIConnection() error {
 	return fmt.Errorf("API test failed with status %d: %s", resp.StatusCode, string(body))
 }
 
-// GetRaw performs a GET request to the specified endpoint and returns the raw response body as a string.
-func (api *APIClient) GetRaw(endpoint string) (string, error) {
-	var url string
-	if strings.Contains(endpoint, "?") {
-		parts := strings.Split(endpoint, "?")
-		endpointName := parts[0]
-		queryParams := parts[1]
-		url = fmt.Sprintf("%s?%s", api.endpoints.GetEndpoint(endpointName), queryParams)
-	} else if strings.Contains(endpoint, "/") {
-		url = fmt.Sprintf("%s/%s/", api.BaseURL, endpoint)
-	} else {
-		url = api.endpoints.GetEndpoint(endpoint)
-		if url == "" {
-			return "", fmt.Errorf("endpoint not found: %s", endpoint)
-		}
-	}
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to create request for endpoint %s: %w", endpoint, err)
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := api.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to endpoint %s: %w", endpoint, err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response body from endpoint %s: %w", endpoint, err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return string(body), fmt.Errorf("endpoint %s test failed with status %d", endpoint, resp.StatusCode)
-	}
-
-	return string(body), nil
-}
-
-// PostRaw performs a POST request to the specified endpoint and returns the raw response body as a string.
-func (api *APIClient) PostRaw(endpoint string, data map[string]string) (string, error) {
-	url := api.endpoints.GetEndpoint(endpoint)
-	if url == "" {
-		return "", fmt.Errorf("endpoint not found: %s", endpoint)
-	}
-
-	formData := make([]string, 0, len(data))
-	for key, value := range data {
-		formData = append(formData, fmt.Sprintf("%s=%s", key, value))
-	}
-	body := strings.Join(formData, "&")
-
-	req, err := http.NewRequest("POST", url, strings.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request for endpoint %s: %w", endpoint, err)
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := api.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to endpoint %s: %w", endpoint, err)
-	}
-	defer resp.Body.Close()
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response body from endpoint %s: %w", endpoint, err)
-	}
-
-	if resp.StatusCode != http.StatusCreated {
-		return string(bodyBytes), fmt.Errorf("endpoint %s test failed with status %d", endpoint, resp.StatusCode)
-	}
-
-	return string(bodyBytes), nil
-}
-
-// PatchRaw performs a PATCH request to the specified endpoint and returns the raw response body as a string.
-func (api *APIClient) PatchRaw(endpoint string, data map[string]string) (string, error) {
-	var url string
-	if strings.Contains(endpoint, "/") {
-		url = fmt.Sprintf("%s/%s/", api.BaseURL, endpoint)
-	} else {
-		url = api.endpoints.GetEndpoint(endpoint)
-		if url == "" {
-			return "", fmt.Errorf("endpoint not found: %s", endpoint)
-		}
-	}
-
-	formData := make([]string, 0, len(data))
-	for key, value := range data {
-		formData = append(formData, fmt.Sprintf("%s=%s", key, value))
-	}
-	body := strings.Join(formData, "&")
-
-	req, err := http.NewRequest("PATCH", url, strings.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request for endpoint %s: %w", endpoint, err)
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := api.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to endpoint %s: %w", endpoint, err)
-	}
-	defer resp.Body.Close()
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response body from endpoint %s: %w", endpoint, err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return string(bodyBytes), fmt.Errorf("endpoint %s test failed with status %d", endpoint, resp.StatusCode)
-	}
-
-	return string(bodyBytes), nil
-}
-
-// DeleteRaw performs a DELETE request to the specified endpoint and returns the raw response body as a string.
-func (api *APIClient) DeleteRaw(endpoint string) (string, error) {
-	var url string
-	if strings.Contains(endpoint, "/") {
-		url = fmt.Sprintf("%s/%s/", api.BaseURL, endpoint)
-	} else {
-		url = api.endpoints.GetEndpoint(endpoint)
-		if url == "" {
-			return "", fmt.Errorf("endpoint not found: %s", endpoint)
-		}
-	}
-
-	req, err := http.NewRequest("DELETE", url, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to create request for endpoint %s: %w", endpoint, err)
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-
-	resp, err := api.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to endpoint %s: %w", endpoint, err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response body from endpoint %s: %w", endpoint, err)
-	}
-
-	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
-		return string(body), fmt.Errorf("endpoint %s test failed with status %d", endpoint, resp.StatusCode)
-	}
-
-	return string(body), nil
-}
-
 // GetAccountDetailed retrieves a specific account by ID
 func (api *APIClient) GetAccountDetailed(accountID int) (*Account, error) {
 	url := api.endpoints.Customer(accountID)
@@ -697,11 +600,7 @@ func (api *APIClient) UpdateAccount(accountID int, data map[string]string) (*Acc
 	url := api.endpoints.Customer(accountID)
 
 	// Convert data to form-encoded string
-	formData := make([]string, 0, len(data))
-	for key, value := range data {
-		formData = append(formData, fmt.Sprintf("%s=%s", key, value))
-	}
-	body := strings.Join(formData, "&")
+	body := encodeFormData(data)
 
 	req, err := http.NewRequest("PATCH", url, strings.NewReader(body))
 	if err != nil {
@@ -759,11 +658,7 @@ func (api *APIClient) CreateAccount(data map[string]string) (*Account, error) {
 	url := api.endpoints.Customers()
 
 	// Convert data to form-encoded string
-	formData := make([]string, 0, len(data))
-	for key, value := range data {
-		formData = append(formData, fmt.Sprintf("%s=%s", key, value))
-	}
-	body := strings.Join(formData, "&")
+	body := encodeFormData(data)
 
 	req, err := http.NewRequest("POST", url, strings.NewReader(body))
 	if err != nil {
@@ -901,16 +796,61 @@ func (api *APIClient) CreateCheckin(data map[string]string) (*Checkin, error) {
 	return &checkin, nil
 }
 
+// CreateCustomCheckin creates a new custom checkin for an account
+// Do not use unless enables for Badger Account.
+// Format for extra_fields -> {"Log Type":"Phone Call","Meeting Notes":"Notes"}
+// Encoding for extra_fields -> customer=someNumericID&extra_fields=%7B%22Log%20Type%22%3A%22Phone%20Call%22%2C%22Meeting%20Notes%22%3A%22Notes%22%7D
+func (api *APIClient) CreateCustomCheckin(customer int, data map[string]string) (*Checkin, error) {
+	api_url := api.endpoints.Appointments()
+
+	// Convert data to json string
+	extraFields := make([]string, 0, len(data))
+	for key, value := range data {
+		extraFields = append(extraFields, fmt.Sprintf("%s\":\"%s", key, value))
+	}
+
+	extraFieldsString := fmt.Sprintf("{%s}", strings.Join(extraFields, ","))
+	extraFieldsString = url.PathEscape(extraFieldsString)
+
+	formData := make([]string, 0, len(data))
+	formData = append(formData, strconv.Itoa(customer))
+	formData = append(formData, extraFieldsString)
+
+	body := strings.Join(formData, "&")
+
+	req, err := http.NewRequest("POST", api_url, strings.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := api.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create appointment: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("create appointment failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var checkin Checkin
+	if err := json.NewDecoder(resp.Body).Decode(&checkin); err != nil {
+		return nil, fmt.Errorf("failed to decode appointment response: %w", err)
+	}
+
+	return &checkin, nil
+}
+
 // UpdateLocation updates a location
 func (api *APIClient) UpdateLocation(locationID int, data map[string]string) (*Location, error) {
 	url := api.endpoints.Location(locationID)
 
 	// Convert data to form-encoded string
-	formData := make([]string, 0, len(data))
-	for key, value := range data {
-		formData = append(formData, fmt.Sprintf("%s=%s", key, value))
-	}
-	body := strings.Join(formData, "&")
+	body := encodeFormData(data)
 
 	req, err := http.NewRequest("PATCH", url, strings.NewReader(body))
 	if err != nil {
@@ -939,125 +879,7 @@ func (api *APIClient) UpdateLocation(locationID int, data map[string]string) (*L
 	return &location, nil
 }
 
-// SearchUsers searches for users by email or ID
-func (api *APIClient) SearchUsers(query string) (*UserProfile, error) {
-	url := api.endpoints.SearchUsers(query)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := api.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to search users: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("search users failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var user UserProfile
-	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
-		return nil, fmt.Errorf("failed to decode user search response: %w", err)
-	}
-
-	return &user, nil
-}
-
-// SearchAccounts searches for accounts by name or ID
-func (api *APIClient) SearchAccounts(query string) ([]Account, error) {
-	url := api.endpoints.SearchAccounts(query)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := api.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to search accounts: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("search accounts failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var accounts []Account
-	if err := json.NewDecoder(resp.Body).Decode(&accounts); err != nil {
-		return nil, fmt.Errorf("failed to decode accounts search response: %w", err)
-	}
-
-	return accounts, nil
-}
-
-// SearchLocations searches for locations by name or ID
-func (api *APIClient) SearchLocations(query string) ([]Location, error) {
-	url := api.endpoints.SearchLocations(query)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := api.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to search locations: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("search locations failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var locations []Location
-	if err := json.NewDecoder(resp.Body).Decode(&locations); err != nil {
-		return nil, fmt.Errorf("failed to decode locations search response: %w", err)
-	}
-
-	return locations, nil
-}
-
-// SearchProfiles searches for user profiles by name or ID
-func (api *APIClient) SearchProfiles(query string) ([]UserProfile, error) {
-	url := api.endpoints.SearchProfiles(query)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := api.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to search profiles: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("search profiles failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var profiles []UserProfile
-	if err := json.NewDecoder(resp.Body).Decode(&profiles); err != nil {
-		return nil, fmt.Errorf("failed to decode profiles search response: %w", err)
-	}
-
-	return profiles, nil
-}
+// TODO: Checkin needs to be fixed
 
 // GetCheckin retrieves a specific checkin by ID
 func (api *APIClient) GetCheckin(checkinID int) (*Checkin, error) {
@@ -1087,87 +909,4 @@ func (api *APIClient) GetCheckin(checkinID int) (*Checkin, error) {
 	}
 
 	return &checkin, nil
-}
-
-// UpdateCheckin updates a checkin
-func (api *APIClient) UpdateCheckin(checkinID int, data map[string]string) (*Checkin, error) {
-	url := api.endpoints.Appointment(checkinID)
-
-	// Convert data to form-encoded string
-	formData := make([]string, 0, len(data))
-	for key, value := range data {
-		formData = append(formData, fmt.Sprintf("%s=%s", key, value))
-	}
-	body := strings.Join(formData, "&")
-
-	req, err := http.NewRequest("PATCH", url, strings.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := api.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to update appointment %d: %w", checkinID, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("update appointment %d failed with status %d: %s", checkinID, resp.StatusCode, string(body))
-	}
-
-	var checkin Checkin
-	if err := json.NewDecoder(resp.Body).Decode(&checkin); err != nil {
-		return nil, fmt.Errorf("failed to decode appointment response: %w", err)
-	}
-
-	return &checkin, nil
-}
-
-// DeleteCheckin deletes a checkin
-func (api *APIClient) DeleteCheckin(checkinID int) error {
-	url := api.endpoints.Appointment(checkinID)
-	req, err := http.NewRequest("DELETE", url, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-
-	resp, err := api.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to delete appointment %d: %w", checkinID, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusNoContent {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("delete appointment %d failed with status %d: %s", checkinID, resp.StatusCode, string(body))
-	}
-
-	return nil
-}
-
-func (api *APIClient) RawRequest(method, endpoint string, data map[string]string) ([]byte, error) {
-	var body string
-	var err error
-	switch strings.ToUpper(method) {
-	case "GET":
-		body, err = api.GetRaw(endpoint)
-	case "POST":
-		body, err = api.PostRaw(endpoint, data)
-	case "PATCH":
-		body, err = api.PatchRaw(endpoint, data)
-	case "DELETE":
-		body, err = api.DeleteRaw(endpoint)
-	default:
-		return nil, fmt.Errorf("unsupported HTTP method: %s", method)
-	}
-	if err != nil {
-		return nil, err
-	}
-	return []byte(body), nil
 }

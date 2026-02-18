@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,32 +24,39 @@ type EndpointTestResult struct {
 }
 
 // RunTests runs all tests
-func RunTests(App *app.App) {
+func RunTests(App *app.App) error {
 	App.Events.Dispatch(events.Infof("test", "Running all tests..."))
-	TestDatabase(App)
-	TestApi(App, false)
+	if err := TestDatabase(App); err != nil {
+		return err
+	}
+	if err := TestApi(App, false); err != nil {
+		return err
+	}
 	App.Events.Dispatch(events.Infof("test", "All tests completed successfully"))
+	return nil
 }
 
 // TestApi tests the API
-func TestApi(App *app.App, save bool) {
+func TestApi(App *app.App, save bool) error {
 	var testDir string
+	var stopLogCapture func()
 
 	if save {
 		timestamp := time.Now().Format("2006-01-02_15-04-05")
 		testDir = fmt.Sprintf("test-run-%s", timestamp)
 		if err := os.Mkdir(testDir, 0755); err != nil {
 			App.Events.Dispatch(events.Errorf("test", "FAILED: Could not create test output directory: %v", err))
-			os.Exit(1)
+			return fmt.Errorf("create test output directory: %w", err)
 		}
 
 		logFilePath := filepath.Join(testDir, "test-run.log")
-		logFile, err := os.Create(logFilePath)
+		var err error
+		stopLogCapture, err = startAPITestLogCapture(App, logFilePath)
 		if err != nil {
-			App.Events.Dispatch(events.Errorf("test", "FAILED: Could not create log file: %v", err))
-			os.Exit(1)
+			App.Events.Dispatch(events.Errorf("test", "FAILED: Could not initialize log capture: %v", err))
+			return fmt.Errorf("initialize log capture: %w", err)
 		}
-		defer logFile.Close()
+		defer stopLogCapture()
 
 		App.Events.Dispatch(events.Infof("test", "Saving test results to %s", testDir))
 	}
@@ -57,14 +65,14 @@ func TestApi(App *app.App, save bool) {
 	api := App.API
 	if api == nil {
 		App.Events.Dispatch(events.Errorf("test", "FAILED: API client not initialized in App state"))
-		os.Exit(1)
+		return fmt.Errorf("api client not initialized in app state")
 	}
 
 	App.Events.Dispatch(events.Infof("test", "Connecting to API..."))
 	start := time.Now()
 	if !api.IsConnected() {
 		App.Events.Dispatch(events.Errorf("test", "FAILED: Could not connect to API"))
-		os.Exit(1)
+		return fmt.Errorf("could not connect to API")
 	}
 	duration := time.Since(start)
 	App.Events.Dispatch(events.Infof("test", "PASSED: API connection successful (%dms)", duration.Milliseconds()))
@@ -110,6 +118,8 @@ func TestApi(App *app.App, save bool) {
 			if checkinResult.Passed {
 				checkinsListResult := testGetAccountCheckins(App, testAccountId)
 				results = append(results, checkinsListResult)
+			} else {
+				App.Events.Dispatch(events.Warningf("test", "get account checkins: SKIPPED (create checkin failed)"))
 			}
 
 			deleteResult := testDeleteAccount(App, testAccountId)
@@ -118,10 +128,16 @@ func TestApi(App *app.App, save bool) {
 	}
 
 	hasErrors := false
+	failedEndpoints := []string{}
 	for _, result := range results {
 		if !result.Passed {
 			hasErrors = true
 			App.Events.Dispatch(events.Errorf("test", "%s: FAILED (%dms)", result.Endpoint, result.Duration.Milliseconds()))
+			if result.Error != nil {
+				failedEndpoints = append(failedEndpoints, fmt.Sprintf("%s (%v)", result.Endpoint, result.Error))
+			} else {
+				failedEndpoints = append(failedEndpoints, result.Endpoint)
+			}
 			if App.State.Debug {
 				App.Events.Dispatch(events.Debugf("test", "Error: %v", result.Error))
 				App.Events.Dispatch(events.Debugf("test", "Response: %s", result.Response))
@@ -139,10 +155,41 @@ func TestApi(App *app.App, save bool) {
 	}
 
 	if hasErrors {
-		App.Events.Dispatch(events.Errorf("test", "\nSome API endpoint tests failed."))
-		os.Exit(1)
+		failureSummary := strings.Join(failedEndpoints, "; ")
+		return fmt.Errorf("API endpoint tests failed: %s", failureSummary)
 	}
 	App.Events.Dispatch(events.Infof("test", "\nPASSED: All API endpoints responded successfully"))
+	return nil
+}
+
+func startAPITestLogCapture(App *app.App, logFilePath string) (func(), error) {
+	cloneState := *App.State
+	cloneState.Quiet = false
+	cloneState.LogFile = logFilePath
+
+	listener, err := events.NewLogListener(&cloneState, logFilePath)
+	if err != nil {
+		return nil, err
+	}
+
+	var active atomic.Bool
+	active.Store(true)
+
+	App.Events.Subscribe("log", func(e events.Event) {
+		if e.Type != events.EventType("log") || e.Source != "test" {
+			return
+		}
+		if !active.Load() {
+			return
+		}
+		listener.Handle(e)
+	})
+
+	return func() {
+		if active.Swap(false) {
+			listener.Close()
+		}
+	}, nil
 }
 
 func testCustomersEndpoint(App *app.App) EndpointTestResult {
@@ -292,8 +339,8 @@ func testCreateCheckin(App *app.App, accountId int) EndpointTestResult {
 	start := time.Now()
 	data := map[string]string{
 		"customer": strconv.Itoa(accountId),
-		"comments": "Test checkin",
-		"type":     "Drop-in",
+		"type":     "test",
+		"comments": "Chatted with Cindy and asked how things were going and she said that they are plugging along and that she will let Dr Shockley know that I stopped by",
 	}
 	resp, err := App.API.PostRaw("appointments", data)
 	duration := time.Since(start)
@@ -301,17 +348,77 @@ func testCreateCheckin(App *app.App, accountId int) EndpointTestResult {
 	passed := err == nil
 	if passed {
 		var createdCheckin struct {
-			Comments string `json:"comments"`
+			ID       int     `json:"id"`
+			Customer int     `json:"customer"`
+			Type     *string `json:"type"`
+			Comments *string `json:"comments"`
 		}
 		json.Unmarshal([]byte(resp), &createdCheckin)
-		if createdCheckin.Comments != "Test checkin" {
+		if createdCheckin.ID == 0 {
 			passed = false
-			err = fmt.Errorf("validation failed: expected comments 'Test checkin', got '%s'", createdCheckin.Comments)
+			err = fmt.Errorf("validation failed: expected created checkin to include a non-zero id")
+		}
+		if passed && createdCheckin.Customer != 0 && createdCheckin.Customer != accountId {
+			passed = false
+			err = fmt.Errorf("validation failed: expected customer %d, got %d", accountId, createdCheckin.Customer)
+		}
+		if createdCheckin.Type != nil && strings.TrimSpace(*createdCheckin.Type) != "" {
+			passed = false
+			err = fmt.Errorf("validation failed: expected null type, got '%v'", *createdCheckin.Type)
+		}
+		if passed && createdCheckin.Comments != nil && strings.TrimSpace(*createdCheckin.Comments) != "" {
+			passed = false
+			err = fmt.Errorf("validation failed: expected null comments, got '%v'", *createdCheckin.Comments)
 		}
 	}
 
 	return EndpointTestResult{
 		Endpoint: "create checkin",
+		Passed:   passed,
+		Duration: duration,
+		Response: resp,
+		Error:    err,
+	}
+}
+
+func testCreateCustomCheckin(App *app.App, accountId int) EndpointTestResult {
+	start := time.Now()
+	data := map[string]string{
+		"customer": strconv.Itoa(accountId),
+		"type":     "test",
+		"comments": "Chatted with Cindy and asked how things were going and she said that they are plugging along and that she will let Dr Shockley know that I stopped by",
+	}
+	resp, err := App.API.PostRaw("appointments", data)
+	duration := time.Since(start)
+
+	passed := err == nil
+	if passed {
+		var createdCheckin struct {
+			ID       int     `json:"id"`
+			Customer int     `json:"customer"`
+			Type     *string `json:"type"`
+			Comments *string `json:"comments"`
+		}
+		json.Unmarshal([]byte(resp), &createdCheckin)
+		if createdCheckin.ID == 0 {
+			passed = false
+			err = fmt.Errorf("validation failed: expected created checkin to include a non-zero id")
+		}
+		if passed && createdCheckin.Customer != 0 && createdCheckin.Customer != accountId {
+			passed = false
+			err = fmt.Errorf("validation failed: expected customer %d, got %d", accountId, createdCheckin.Customer)
+		}
+		if createdCheckin.Type != nil && strings.TrimSpace(*createdCheckin.Type) != "" {
+			passed = false
+			err = fmt.Errorf("validation failed: expected null type, got '%v'", *createdCheckin.Type)
+		}
+		if passed && createdCheckin.Comments != nil && strings.TrimSpace(*createdCheckin.Comments) != "" {
+			passed = false
+			err = fmt.Errorf("validation failed: expected null comments, got '%v'", *createdCheckin.Comments)
+		}
+	}
+	return EndpointTestResult{
+		Endpoint: "create custom checkin",
 		Passed:   passed,
 		Duration: duration,
 		Response: resp,
@@ -332,7 +439,11 @@ func testGetAccountCheckins(App *app.App, accountId int) EndpointTestResult {
 		} else {
 			found := false
 			for _, checkin := range checkins {
-				if checkin.Comments.String == "Test checkin" && checkin.AccountId.Int64 == int64(accountId) {
+				if checkin.AccountId.Int64 != int64(accountId) {
+					continue
+				}
+				checkinType := string(checkin.Type.String)
+				if checkinType != "" && strings.Contains(checkinType, "Test") {
 					found = true
 					break
 				}
@@ -378,19 +489,19 @@ func testDeleteAccount(App *app.App, accountId int) EndpointTestResult {
 }
 
 // TestDatabase tests the database
-func TestDatabase(App *app.App) {
+func TestDatabase(App *app.App) error {
 	App.Events.Dispatch(events.Infof("test", "Testing database..."))
 	db := App.DB
 	if db == nil {
 		App.Events.Dispatch(events.Errorf("test", "FAILED: Database not initialized in App state"))
-		os.Exit(1)
+		return fmt.Errorf("database not initialized in app state")
 	}
 
 	App.Events.Dispatch(events.Infof("test", "Connecting to %s database...", db.GetType()))
 	if err := db.TestConnection(); err != nil {
 		App.Events.Dispatch(events.Errorf("test", "FAILED: Could not connect to database"))
 		App.Events.Dispatch(events.Errorf("test", "Error: %v", err))
-		os.Exit(1)
+		return fmt.Errorf("could not connect to database: %w", err)
 	}
 	App.Events.Dispatch(events.Infof("test", "PASSED: Database connection successful"))
 
@@ -409,7 +520,7 @@ func TestDatabase(App *app.App) {
 				if App.State.Debug {
 					App.Events.Dispatch(events.Debugf("test", "Error: %v", err))
 				}
-				os.Exit(1)
+				return fmt.Errorf("could not enforce schema: %w", err)
 			}
 			App.Events.Dispatch(events.Infof("test", "Schema re-initialized successfully."))
 
@@ -419,11 +530,12 @@ func TestDatabase(App *app.App) {
 				if App.State.Debug {
 					App.Events.Dispatch(events.Debugf("test", "Error: %v", err))
 				}
-				os.Exit(1)
+				return fmt.Errorf("schema validation failed again after re-initialization: %w", err)
 			}
 		} else {
-			os.Exit(1)
+			return fmt.Errorf("schema validation failed")
 		}
 	}
 	App.Events.Dispatch(events.Infof("test", "PASSED: All required tables exist"))
+	return nil
 }

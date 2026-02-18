@@ -40,7 +40,7 @@ func createRootCmd() *cobra.Command {
 		Use:   "badgermaps",
 		Short: "BadgerMapsSync - Syncing interface for BadgerMaps",
 		Long: `BadgerMapsSync is a command line / gui interface for interacting with the BadgerMaps API.
-It allows you to push and pull data, run in server mode, and perform various utility operations.`,
+		It allows you to push and pull data, run in server mode, and perform various utility operations.`,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			// Don't load config for version, help, or gui commands
 			if cmd.Name() == "version" || cmd.Name() == "help" || (cmd.Name() == "badgermaps" && guiFlag) {

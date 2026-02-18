@@ -2,6 +2,7 @@ package events
 
 import (
 	"badgermaps/app/state"
+	"badgermaps/utils"
 	"fmt"
 	"io"
 	"os"
@@ -54,7 +55,7 @@ func (l *LogListener) Handle(e Event) {
 	}
 
 	// Respect quiet and verbosity settings
-	if payload.Level == LogLevelDebug && !l.State.Debug {
+	if payload.Level == LogLevelDebug && !(l.State.Debug || l.State.Verbose) {
 		return
 	}
 
@@ -66,11 +67,31 @@ func (l *LogListener) Handle(e Event) {
 	timestampStr := timestamp.Format("2006-01-02 15:04:05")
 	levelStr := payload.Level.String()
 	sourceStr := e.Source
+	colorize := l.file == nil
 
 	// Build the log string
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("%s ", timestampStr))
-	sb.WriteString(fmt.Sprintf("%-5s ", levelStr)) // Padded level
+	paddedLevel := fmt.Sprintf("%-5s", levelStr)
+	switch payload.Level {
+	case LogLevelDebug:
+		if colorize {
+			paddedLevel = utils.Colors.Gray("%-5s", levelStr)
+		}
+	case LogLevelInfo:
+		if colorize {
+			paddedLevel = utils.Colors.Cyan("%-5s", levelStr)
+		}
+	case LogLevelWarn:
+		if colorize {
+			paddedLevel = utils.Colors.Yellow("%-5s", levelStr)
+		}
+	case LogLevelError:
+		if colorize {
+			paddedLevel = utils.Colors.Red("%-5s", levelStr)
+		}
+	}
+	sb.WriteString(paddedLevel + " ")
 	sb.WriteString(fmt.Sprintf("[%s] ", sourceStr))
 	sb.WriteString(payload.Message)
 

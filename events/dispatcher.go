@@ -29,8 +29,6 @@ func (d *EventDispatcher) Subscribe(eventType EventType, listener EventListener)
 // Dispatch sends an event to all listeners whose subscribed pattern matches the event type.
 func (d *EventDispatcher) Dispatch(e Event) {
 	d.mu.RLock()
-	defer d.mu.RUnlock()
-
 	var listenersToCall []EventListener
 
 	for pattern, listeners := range d.listeners {
@@ -38,10 +36,11 @@ func (d *EventDispatcher) Dispatch(e Event) {
 			listenersToCall = append(listenersToCall, listeners...)
 		}
 	}
+	d.mu.RUnlock()
 
-	// Notify listeners asynchronously
+	// Notify listeners synchronously to preserve event order.
 	for _, listener := range listenersToCall {
-		go listener(e)
+		listener(e)
 	}
 }
 
