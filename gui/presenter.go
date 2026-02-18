@@ -480,6 +480,7 @@ func (p *GuiPresenter) HandleSaveConfig(
 	verbose, debug bool,
 	maxConcurrentStr string,
 	parallelProcessing bool,
+	customCheckins bool,
 ) {
 	p.app.Events.Dispatch(events.Debugf("presenter", "HandleSaveConfig called"))
 	p.app.Events.Dispatch(events.Infof("presenter", "Saving configuration..."))
@@ -508,6 +509,7 @@ func (p *GuiPresenter) HandleSaveConfig(
 		maxConcurrent = 10
 	}
 	p.app.Config.MaxConcurrentRequests = maxConcurrent
+	p.app.Config.CustomCheckins = customCheckins
 
 	port, _ := strconv.Atoi(dbPortStr)
 

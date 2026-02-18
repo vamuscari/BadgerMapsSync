@@ -7,6 +7,7 @@ CREATE TABLE AccountCheckins (
     Type NVARCHAR(100),
     Comments NVARCHAR(MAX),
     ExtraFields NVARCHAR(MAX),
+    EndpointType NVARCHAR(20) NOT NULL DEFAULT 'standard' CHECK(EndpointType IN ('standard', 'custom')),
     CreatedBy NVARCHAR(255),
     CreatedAt DATETIME2 DEFAULT GETDATE(),
     UpdatedAt DATETIME2 DEFAULT GETDATE(),

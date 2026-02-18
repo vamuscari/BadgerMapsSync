@@ -123,9 +123,11 @@ func (db *SQLiteConfig) GetDB() *sql.DB {
 
 func (db *SQLiteConfig) GetTableColumns(tableName string) ([]string, error) {
 	sqlDB := db.GetDB()
-	query := db.GetSQL("GetTableColumns")
+	queryTemplate := db.GetSQL("GetTableColumns")
+	escapedTableName := strings.ReplaceAll(tableName, "'", "''")
+	query := fmt.Sprintf(queryTemplate, escapedTableName)
 
-	rows, err := sqlDB.Query(query, tableName)
+	rows, err := sqlDB.Query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -1661,7 +1663,7 @@ func GetExpectedSchema() map[string][]string {
 			"CustomNumeric30", "CustomText30", "CreatedAt", "UpdatedAt",
 		},
 		"AccountCheckins": {
-			"CheckinId", "CrmId", "AccountId", "LogDatetime", "Type", "Comments", "ExtraFields", "CreatedBy",
+			"CheckinId", "CrmId", "AccountId", "LogDatetime", "Type", "Comments", "ExtraFields", "EndpointType", "CreatedBy",
 			"CreatedAt", "UpdatedAt",
 		},
 		"AccountLocations": {
@@ -1672,7 +1674,7 @@ func GetExpectedSchema() map[string][]string {
 			"ChangeId", "AccountId", "ChangeType", "Changes", "Status", "CreatedAt", "ProcessedAt",
 		},
 		"AccountCheckinsPendingChanges": {
-			"ChangeId", "CheckinId", "ChangeType", "Changes", "Status", "CreatedAt", "ProcessedAt",
+			"ChangeId", "CheckinId", "AccountId", "CrmId", "LogDatetime", "Type", "Comments", "ExtraFields", "EndpointType", "CreatedBy", "ChangeType", "Status", "CreatedAt", "ProcessedAt",
 		},
 		"Routes": {
 			"RouteId", "Name", "RouteDate", "Duration", "StartAddress", "DestinationAddress", "StartTime",

@@ -1,6 +1,8 @@
 package test
 
 import (
+	"badgermaps/api"
+	"badgermaps/api/models"
 	"badgermaps/app"
 	"badgermaps/events"
 	"badgermaps/utils"
@@ -78,6 +80,10 @@ func TestApi(App *app.App, save bool) error {
 	App.Events.Dispatch(events.Infof("test", "PASSED: API connection successful (%dms)", duration.Milliseconds()))
 
 	App.Events.Dispatch(events.Infof("test", "\nTesting all API endpoints..."))
+	customCheckinsEnabled := App.Config != nil && App.Config.CustomCheckins
+	if customCheckinsEnabled {
+		App.Events.Dispatch(events.Infof("test", "Custom checkin endpoint enabled."))
+	}
 
 	results := []EndpointTestResult{}
 
@@ -98,12 +104,16 @@ func TestApi(App *app.App, save bool) error {
 	results = append(results, createResult)
 	if createResult.Passed {
 		var createdAccount struct {
+			ID       int `json:"id"`
 			Customer struct {
 				ID int `json:"id"`
-			}
+			} `json:"customer"`
 		}
 		json.Unmarshal([]byte(createResult.Response), &createdAccount)
-		testAccountId = createdAccount.Customer.ID
+		testAccountId = createdAccount.ID
+		if testAccountId == 0 {
+			testAccountId = createdAccount.Customer.ID
+		}
 
 		if testAccountId != 0 {
 			detailsResult := testGetAccountDetails(App, testAccountId)
@@ -116,10 +126,37 @@ func TestApi(App *app.App, save bool) error {
 			results = append(results, checkinResult)
 
 			if checkinResult.Passed {
-				checkinsListResult := testGetAccountCheckins(App, testAccountId)
+				expectedCheckinID := 0
+				var createdCheckin struct {
+					ID int `json:"id"`
+				}
+				_ = json.Unmarshal([]byte(checkinResult.Response), &createdCheckin)
+				expectedCheckinID = createdCheckin.ID
+
+				checkinsListResult := testGetAccountCheckins(App, testAccountId, expectedCheckinID)
 				results = append(results, checkinsListResult)
 			} else {
 				App.Events.Dispatch(events.Warningf("test", "get account checkins: SKIPPED (create checkin failed)"))
+			}
+
+			if customCheckinsEnabled {
+				customCheckinResult := testCreateCustomCheckin(App, testAccountId)
+				results = append(results, customCheckinResult)
+
+				if customCheckinResult.Passed {
+					expectedCustomCheckinID := 0
+					var createdCheckin struct {
+						ID int `json:"id"`
+					}
+					_ = json.Unmarshal([]byte(customCheckinResult.Response), &createdCheckin)
+					expectedCustomCheckinID = createdCheckin.ID
+
+					customCheckinsListResult := testGetAccountCheckins(App, testAccountId, expectedCustomCheckinID)
+					customCheckinsListResult.Endpoint = "get account checkins (custom)"
+					results = append(results, customCheckinsListResult)
+				} else {
+					App.Events.Dispatch(events.Warningf("test", "get account checkins (custom): SKIPPED (create custom checkin failed)"))
+				}
 			}
 
 			deleteResult := testDeleteAccount(App, testAccountId)
@@ -194,8 +231,12 @@ func startAPITestLogCapture(App *app.App, logFilePath string) (func(), error) {
 
 func testCustomersEndpoint(App *app.App) EndpointTestResult {
 	start := time.Now()
-	resp, err := App.API.GetRaw("customers")
+	result, err := App.API.GetAccounts()
 	duration := time.Since(start)
+	resp := ""
+	if result != nil {
+		resp = string(result.Raw)
+	}
 	return EndpointTestResult{
 		Endpoint: "get customers",
 		Passed:   err == nil,
@@ -207,8 +248,12 @@ func testCustomersEndpoint(App *app.App) EndpointTestResult {
 
 func testRoutesEndpoint(App *app.App) EndpointTestResult {
 	start := time.Now()
-	resp, err := App.API.GetRaw("routes")
+	result, err := App.API.GetRoutes()
 	duration := time.Since(start)
+	resp := ""
+	if result != nil {
+		resp = string(result.Raw)
+	}
 	return EndpointTestResult{
 		Endpoint: "get routes",
 		Passed:   err == nil,
@@ -220,8 +265,12 @@ func testRoutesEndpoint(App *app.App) EndpointTestResult {
 
 func testAppointmentsEndpoint(App *app.App) EndpointTestResult {
 	start := time.Now()
-	resp, err := App.API.GetRaw("appointments")
+	result, err := App.API.GetCheckins()
 	duration := time.Since(start)
+	resp := ""
+	if result != nil {
+		resp = string(result.Raw)
+	}
 	return EndpointTestResult{
 		Endpoint: "get appointments",
 		Passed:   err == nil,
@@ -233,8 +282,12 @@ func testAppointmentsEndpoint(App *app.App) EndpointTestResult {
 
 func testProfilesEndpoint(App *app.App) EndpointTestResult {
 	start := time.Now()
-	resp, err := App.API.GetRaw("profiles")
+	result, err := App.API.GetUserProfile()
 	duration := time.Since(start)
+	resp := ""
+	if result != nil {
+		resp = string(result.Raw)
+	}
 	return EndpointTestResult{
 		Endpoint: "get profiles",
 		Passed:   err == nil,
@@ -253,20 +306,36 @@ func testCreateAccount(App *app.App) EndpointTestResult {
 		"phone_number":  "",
 		"account_owner": strconv.Itoa(App.API.UserID),
 	}
-	resp, err := App.API.PostRaw("customers", data)
+	result, err := App.API.CreateAccount(models.AccountUpload{Fields: data})
 	duration := time.Since(start)
+	resp := ""
+	if result != nil {
+		resp = string(result.Raw)
+	}
 
 	passed := err == nil
 	if passed {
-		var createdAccount struct {
-			Customer struct {
+		lastName := ""
+		if result.Data.LastName.Valid {
+			lastName = result.Data.LastName.String
+		}
+		if lastName == "" && len(resp) > 0 {
+			var createdAccount struct {
 				LastName string `json:"last_name"`
+				Customer struct {
+					LastName string `json:"last_name"`
+				} `json:"customer"`
+			}
+			_ = json.Unmarshal([]byte(resp), &createdAccount)
+			if createdAccount.LastName != "" {
+				lastName = createdAccount.LastName
+			} else {
+				lastName = createdAccount.Customer.LastName
 			}
 		}
-		json.Unmarshal([]byte(resp), &createdAccount)
-		if createdAccount.Customer.LastName != "Test Account" {
+		if lastName != "Test Account" {
 			passed = false
-			err = fmt.Errorf("validation failed: expected last name 'Test Account', got '%s'", createdAccount.Customer.LastName)
+			err = fmt.Errorf("validation failed: expected last name 'Test Account', got '%s'", lastName)
 		}
 	}
 
@@ -281,19 +350,18 @@ func testCreateAccount(App *app.App) EndpointTestResult {
 
 func testGetAccountDetails(App *app.App, accountId int) EndpointTestResult {
 	start := time.Now()
-	endpoint := "customers/" + strconv.Itoa(accountId)
-	resp, err := App.API.GetRaw(endpoint)
+	result, err := App.API.GetAccountDetailed(accountId)
 	duration := time.Since(start)
+	resp := ""
+	if result != nil {
+		resp = string(result.Raw)
+	}
 
 	passed := err == nil
 	if passed {
-		var fetchedAccount struct {
-			ID int `json:"id"`
-		}
-		json.Unmarshal([]byte(resp), &fetchedAccount)
-		if fetchedAccount.ID != accountId {
+		if !result.Data.AccountId.Valid || int(result.Data.AccountId.Int64) != accountId {
 			passed = false
-			err = fmt.Errorf("validation failed: expected account ID %d, got %d", accountId, fetchedAccount.ID)
+			err = fmt.Errorf("validation failed: expected account ID %d, got %d", accountId, result.Data.AccountId.Int64)
 		}
 	}
 
@@ -311,18 +379,18 @@ func testUpdateAccount(App *app.App, accountId int) EndpointTestResult {
 	data := map[string]string{
 		"last_name": "Test Account Updated",
 	}
-	resp, err := App.API.PatchRaw("customers/"+strconv.Itoa(accountId), data)
+	result, err := App.API.UpdateAccount(accountId, models.AccountUpload{Fields: data})
 	duration := time.Since(start)
+	resp := ""
+	if result != nil {
+		resp = string(result.Raw)
+	}
 
 	passed := err == nil
 	if passed {
-		var updatedAccount struct {
-			LastName string `json:"last_name"`
-		}
-		json.Unmarshal([]byte(resp), &updatedAccount)
-		if updatedAccount.LastName != "Test Account Updated" {
+		if !result.Data.LastName.Valid || result.Data.LastName.String != "Test Account Updated" {
 			passed = false
-			err = fmt.Errorf("validation failed: expected last name 'Test Account Updated', got '%s'", updatedAccount.LastName)
+			err = fmt.Errorf("validation failed: expected last name 'Test Account Updated', got '%s'", result.Data.LastName.String)
 		}
 	}
 
@@ -337,38 +405,43 @@ func testUpdateAccount(App *app.App, accountId int) EndpointTestResult {
 
 func testCreateCheckin(App *app.App, accountId int) EndpointTestResult {
 	start := time.Now()
+	checkinType := "test"
 	data := map[string]string{
-		"customer": strconv.Itoa(accountId),
-		"type":     "test",
-		"comments": "Chatted with Cindy and asked how things were going and she said that they are plugging along and that she will let Dr Shockley know that I stopped by",
+		"comments":     "Chatted with Cindy and asked how things were going and she said that they are plugging along and that she will let Dr Shockley know that I stopped by",
+		"log_datetime": "2020-01-02-T13:45:01.187",
 	}
-	resp, err := App.API.PostRaw("appointments", data)
+	result, err := App.API.CreateCheckin(models.CheckinUpload{
+		Customer: accountId,
+		Type:     checkinType,
+		Fields:   data,
+	})
 	duration := time.Since(start)
+	resp := ""
+	if result != nil {
+		resp = string(result.Raw)
+	}
 
 	passed := err == nil
 	if passed {
-		var createdCheckin struct {
-			ID       int     `json:"id"`
-			Customer int     `json:"customer"`
-			Type     *string `json:"type"`
-			Comments *string `json:"comments"`
-		}
-		json.Unmarshal([]byte(resp), &createdCheckin)
-		if createdCheckin.ID == 0 {
+		checkin := result.Data
+		if !checkin.CheckinId.Valid || checkin.CheckinId.Int64 == 0 {
 			passed = false
 			err = fmt.Errorf("validation failed: expected created checkin to include a non-zero id")
 		}
-		if passed && createdCheckin.Customer != 0 && createdCheckin.Customer != accountId {
+		if passed && checkin.AccountId.Valid && int(checkin.AccountId.Int64) != accountId {
 			passed = false
-			err = fmt.Errorf("validation failed: expected customer %d, got %d", accountId, createdCheckin.Customer)
+			err = fmt.Errorf("validation failed: expected customer %d, got %d", accountId, checkin.AccountId.Int64)
 		}
-		if createdCheckin.Type != nil && strings.TrimSpace(*createdCheckin.Type) != "" {
+		typeValue := strings.TrimSpace(checkin.Type.String)
+		if checkin.Type.Valid && typeValue != "" && !strings.EqualFold(typeValue, checkinType) {
 			passed = false
-			err = fmt.Errorf("validation failed: expected null type, got '%v'", *createdCheckin.Type)
+			err = fmt.Errorf("validation failed: expected type to be empty or 'test', got '%v'", checkin.Type.String)
 		}
-		if passed && createdCheckin.Comments != nil && strings.TrimSpace(*createdCheckin.Comments) != "" {
+		commentsValue := strings.TrimSpace(checkin.Comments.String)
+		expectedComments := strings.TrimSpace(data["comments"])
+		if passed && checkin.Comments.Valid && commentsValue != "" && commentsValue != expectedComments {
 			passed = false
-			err = fmt.Errorf("validation failed: expected null comments, got '%v'", *createdCheckin.Comments)
+			err = fmt.Errorf("validation failed: expected comments to be empty or match request, got '%v'", checkin.Comments.String)
 		}
 	}
 
@@ -383,38 +456,31 @@ func testCreateCheckin(App *app.App, accountId int) EndpointTestResult {
 
 func testCreateCustomCheckin(App *app.App, accountId int) EndpointTestResult {
 	start := time.Now()
+	checkinType := "Phone Call"
 	data := map[string]string{
-		"customer": strconv.Itoa(accountId),
-		"type":     "test",
-		"comments": "Chatted with Cindy and asked how things were going and she said that they are plugging along and that she will let Dr Shockley know that I stopped by",
+		"Meeting Notes": "Created by automated API test",
 	}
-	resp, err := App.API.PostRaw("appointments", data)
+	result, err := App.API.CreateCustomCheckin(models.CustomCheckinUpload{
+		Customer: accountId,
+		Type:     checkinType,
+		Fields:   data,
+	})
 	duration := time.Since(start)
+	resp := ""
+	if result != nil {
+		resp = string(result.Raw)
+	}
 
 	passed := err == nil
 	if passed {
-		var createdCheckin struct {
-			ID       int     `json:"id"`
-			Customer int     `json:"customer"`
-			Type     *string `json:"type"`
-			Comments *string `json:"comments"`
-		}
-		json.Unmarshal([]byte(resp), &createdCheckin)
-		if createdCheckin.ID == 0 {
+		checkin := result.Data
+		if !checkin.CheckinId.Valid || checkin.CheckinId.Int64 == 0 {
 			passed = false
 			err = fmt.Errorf("validation failed: expected created checkin to include a non-zero id")
 		}
-		if passed && createdCheckin.Customer != 0 && createdCheckin.Customer != accountId {
+		if passed && checkin.AccountId.Valid && int(checkin.AccountId.Int64) != accountId {
 			passed = false
-			err = fmt.Errorf("validation failed: expected customer %d, got %d", accountId, createdCheckin.Customer)
-		}
-		if createdCheckin.Type != nil && strings.TrimSpace(*createdCheckin.Type) != "" {
-			passed = false
-			err = fmt.Errorf("validation failed: expected null type, got '%v'", *createdCheckin.Type)
-		}
-		if passed && createdCheckin.Comments != nil && strings.TrimSpace(*createdCheckin.Comments) != "" {
-			passed = false
-			err = fmt.Errorf("validation failed: expected null comments, got '%v'", *createdCheckin.Comments)
+			err = fmt.Errorf("validation failed: expected customer %d, got %d", accountId, checkin.AccountId.Int64)
 		}
 	}
 	return EndpointTestResult{
@@ -426,24 +492,61 @@ func testCreateCustomCheckin(App *app.App, accountId int) EndpointTestResult {
 	}
 }
 
-func testGetAccountCheckins(App *app.App, accountId int) EndpointTestResult {
+func testGetAccountCheckins(App *app.App, accountId int, expectedCheckinID int) EndpointTestResult {
 	start := time.Now()
-	checkins, err := App.API.GetCheckinsForAccount(accountId)
+	var (
+		checkinsResp *api.APIResponse[[]models.Checkin]
+		err          error
+	)
+
+	// Account checkins can take a short moment to appear after creation.
+	for attempt := 0; attempt < 3; attempt++ {
+		checkinsResp, err = App.API.GetCheckinsForAccount(accountId)
+		if err != nil {
+			break
+		}
+		if expectedCheckinID == 0 {
+			break
+		}
+		found := false
+		for _, checkin := range checkinsResp.Data {
+			if checkin.CheckinId.Valid && int(checkin.CheckinId.Int64) == expectedCheckinID {
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
 	duration := time.Since(start)
+	resp := ""
+	if checkinsResp != nil {
+		resp = string(checkinsResp.Raw)
+	}
 
 	passed := err == nil
 	if passed {
+		checkins := checkinsResp.Data
 		if len(checkins) == 0 {
 			passed = false
 			err = fmt.Errorf("validation failed: expected at least one checkin, got 0")
 		} else {
 			found := false
 			for _, checkin := range checkins {
-				if checkin.AccountId.Int64 != int64(accountId) {
+				if checkin.AccountId.Valid && checkin.AccountId.Int64 != int64(accountId) {
 					continue
 				}
-				checkinType := string(checkin.Type.String)
-				if checkinType != "" && strings.Contains(checkinType, "Test") {
+				if expectedCheckinID != 0 {
+					if checkin.CheckinId.Valid && int(checkin.CheckinId.Int64) == expectedCheckinID {
+						found = true
+						break
+					}
+					continue
+				}
+				checkinType := strings.TrimSpace(checkin.Type.String)
+				if strings.EqualFold(checkinType, "test") {
 					found = true
 					break
 				}
@@ -459,20 +562,21 @@ func testGetAccountCheckins(App *app.App, accountId int) EndpointTestResult {
 		Endpoint: "get account checkins",
 		Passed:   passed,
 		Duration: duration,
-		Response: "", // No raw response to save
+		Response: resp,
 		Error:    err,
 	}
 }
 
 func testDeleteAccount(App *app.App, accountId int) EndpointTestResult {
 	start := time.Now()
-	resp, err := App.API.DeleteRaw("customers/" + strconv.Itoa(accountId))
+	err := App.API.DeleteAccount(accountId)
 	duration := time.Since(start)
+	resp := ""
 
 	passed := err == nil
 	if passed {
 		// To validate deletion, we can try to get the account and expect a 404
-		_, getErr := App.API.GetRaw("customers/" + strconv.Itoa(accountId))
+		_, getErr := App.API.GetAccountDetailed(accountId)
 		if getErr == nil || !strings.Contains(getErr.Error(), "404") {
 			passed = false
 			err = fmt.Errorf("validation failed: account still exists after deletion")

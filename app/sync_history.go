@@ -285,6 +285,9 @@ func (a *App) completeSyncHistoryRun(key, status string, itemsProcessed, errorCo
 	}
 
 	if err := database.CompleteSyncHistory(a.DB, correlationID, status, itemsProcessed, errorCount, durationSeconds, summary, details); err != nil {
+		if a.shouldSuppressSyncHistoryFinalizeError(err) {
+			return
+		}
 		a.Events.Dispatch(events.Errorf("sync_history", "Failed to finalize sync history: %v", err))
 		return
 	}
@@ -344,4 +347,17 @@ func countChanges(data any) int {
 	}
 
 	return 0
+}
+
+func (a *App) shouldSuppressSyncHistoryFinalizeError(err error) bool {
+	if err == nil || !a.IsShuttingDown() {
+		return false
+	}
+
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "database is closed") {
+		return true
+	}
+
+	return strings.Contains(message, "database connection is not initialized")
 }

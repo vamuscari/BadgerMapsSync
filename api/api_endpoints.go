@@ -2,7 +2,6 @@ package api
 
 import (
 	"fmt"
-	"net/url"
 )
 
 // Endpoints provides methods for building API endpoint URLs.
@@ -89,40 +88,6 @@ func (e *Endpoints) Profiles() string {
 // This endpoint is used for updating a single location.
 func (e *Endpoints) Location(id int) string {
 	return fmt.Sprintf("%s/locations/%d/", e.baseURL, id)
-}
-
-// SearchUsers returns the URL for searching users.
-// This endpoint searches for users by email or ID.
-func (e *Endpoints) SearchUsers(query string) string {
-	encodedQuery := url.QueryEscape(query)
-	return fmt.Sprintf("%s/search/users/?q=%s", e.baseURL, encodedQuery)
-}
-
-// SearchAccounts returns the URL for searching accounts.
-// This endpoint searches for customer accounts by name or ID.
-func (e *Endpoints) SearchAccounts(query string) string {
-	encodedQuery := url.QueryEscape(query)
-	return fmt.Sprintf("%s/search/accounts/?q=%s", e.baseURL, encodedQuery)
-}
-
-// SearchLocations returns the URL for searching locations.
-// This endpoint searches for locations by name or ID.
-func (e *Endpoints) SearchLocations(query string) string {
-	encodedQuery := url.QueryEscape(query)
-	return fmt.Sprintf("%s/search/locations/?q=%s", e.baseURL, encodedQuery)
-}
-
-// SearchProfiles returns the URL for searching profiles.
-// This endpoint searches for user profiles by name or ID.
-func (e *Endpoints) SearchProfiles(query string) string {
-	encodedQuery := url.QueryEscape(query)
-	return fmt.Sprintf("%s/search/profiles/?q=%s", e.baseURL, encodedQuery)
-}
-
-// Appointment returns the URL for a specific appointment by ID.
-// This endpoint returns details for a single appointment.
-func (e *Endpoints) Appointment(id int) string {
-	return fmt.Sprintf("%s/appointments/%d", e.baseURL, id)
 }
 
 // GetEndpoint returns the URL for a specific endpoint by name.

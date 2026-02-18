@@ -196,8 +196,6 @@ func NewActionFromConfig(config ActionConfig) (Action, error) {
 		action = &ExecAction{}
 	case "db":
 		action = &DbAction{}
-	case "api":
-		action = &ApiAction{}
 	default:
 		return nil, fmt.Errorf("unknown action type: %s", config.Type)
 	}
@@ -350,29 +348,6 @@ type ApiAction struct {
 	Endpoint string            `yaml:"endpoint"`
 	Method   string            `yaml:"method"`
 	Data     map[string]string `yaml:"data,omitempty"`
-}
-
-// Execute makes the API call.
-func (a *ApiAction) Execute(executor *Executor) error {
-	ctx := executor.Context()
-	method := a.Method
-	endpoint := a.Endpoint
-	data := a.Data
-
-	if ctx != nil {
-		method = replaceEventTokens(method, ctx)
-		endpoint = replaceEventTokens(endpoint, ctx)
-		if len(data) > 0 {
-			copied := make(map[string]string, len(data))
-			for k, v := range data {
-				copied[k] = replaceEventTokens(v, ctx)
-			}
-			data = copied
-		}
-	}
-
-	_, err := executor.API.RawRequest(method, endpoint, data)
-	return err
 }
 
 // Validate checks if the action is configured correctly.

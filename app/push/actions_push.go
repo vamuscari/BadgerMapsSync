@@ -1,11 +1,13 @@
 package push
 
 import (
+	"badgermaps/api/models"
 	"badgermaps/app"
 	"badgermaps/database"
 	"badgermaps/events"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // RunPushAccounts orchestrates pushing pending account changes to the API.
@@ -42,9 +44,9 @@ func RunPushAccounts(a *app.App) error {
 		var apiErr error
 		switch change.ChangeType {
 		case "CREATE":
-			_, apiErr = a.API.CreateAccount(data)
+			_, apiErr = a.API.CreateAccount(models.AccountUpload{Fields: data})
 		case "UPDATE":
-			_, apiErr = a.API.UpdateAccount(change.AccountId, data)
+			_, apiErr = a.API.UpdateAccount(change.AccountId, models.AccountUpload{Fields: data})
 		case "DELETE":
 			apiErr = a.API.DeleteAccount(change.AccountId)
 		}
@@ -85,19 +87,77 @@ func RunPushCheckins(a *app.App) error {
 		a.Events.Dispatch(events.Event{Type: "push.item.start", Source: "checkins", Payload: events.PushItemStartPayload{Change: change}})
 		database.UpdatePendingChangeStatus(a.DB, "AccountCheckinsPendingChanges", change.ChangeId, "processing")
 
-		data := make(map[string]string)
-		if err := json.Unmarshal([]byte(change.Changes), &data); err != nil {
-			parseErr := fmt.Errorf("invalid pending change payload (change_id=%d): %w", change.ChangeId, err)
-			a.Events.Dispatch(events.Event{Type: "push.item.error", Source: "checkins", Payload: events.PushItemErrorPayload{Error: parseErr}})
-			database.UpdatePendingChangeStatus(a.DB, "AccountCheckinsPendingChanges", change.ChangeId, "failed")
-			errorCount++
-			continue
-		}
-
 		var apiErr error
 		switch change.ChangeType {
 		case "CREATE":
-			_, apiErr = a.API.CreateCheckin(data)
+			endpointType := "standard"
+			if change.EndpointType.Valid {
+				candidate := strings.ToLower(strings.TrimSpace(change.EndpointType.String))
+				if candidate != "" {
+					endpointType = candidate
+				} else if strings.TrimSpace(change.ExtraFields.String) != "" {
+					endpointType = "custom"
+				}
+			} else if strings.TrimSpace(change.ExtraFields.String) != "" {
+				endpointType = "custom"
+			}
+
+			checkinType := strings.TrimSpace(change.Type.String)
+
+			switch endpointType {
+			case "standard":
+				fields := map[string]string{}
+				if value := strings.TrimSpace(change.Comments.String); value != "" {
+					fields["comments"] = value
+				}
+				if value := strings.TrimSpace(change.LogDatetime.String); value != "" {
+					fields["log_datetime"] = value
+				}
+				if value := strings.TrimSpace(change.CrmId.String); value != "" {
+					fields["crm_id"] = value
+				}
+				if value := strings.TrimSpace(change.CreatedBy.String); value != "" {
+					fields["created_by"] = value
+				}
+
+				_, apiErr = a.API.CreateCheckin(models.CheckinUpload{
+					Customer: change.AccountId,
+					Type:     checkinType,
+					Fields:   fields,
+				})
+			case "custom":
+				fields := map[string]string{}
+				if value := strings.TrimSpace(change.LogDatetime.String); value != "" {
+					fields["log_datetime"] = value
+				}
+				if value := strings.TrimSpace(change.CrmId.String); value != "" {
+					fields["crm_id"] = value
+				}
+				if value := strings.TrimSpace(change.CreatedBy.String); value != "" {
+					fields["created_by"] = value
+				}
+				if value := strings.TrimSpace(change.ExtraFields.String); value != "" {
+					fields["extra_fields"] = value
+				}
+
+				customInput := models.CustomCheckinUpload{
+					Customer: change.AccountId,
+					Type:     checkinType,
+					Fields:   fields,
+				}
+
+				if meetingNotes := strings.TrimSpace(change.Comments.String); meetingNotes != "" {
+					customInput.ExtraFields = &models.CustomCheckinExtraFields{
+						MeetingNotes: meetingNotes,
+					}
+				}
+
+				_, apiErr = a.API.CreateCustomCheckin(customInput)
+			default:
+				apiErr = fmt.Errorf("unsupported endpoint type %q for checkin change_id=%d", endpointType, change.ChangeId)
+			}
+		default:
+			apiErr = fmt.Errorf("unsupported checkin change type %q for change_id=%d", change.ChangeType, change.ChangeId)
 		}
 
 		if apiErr != nil {

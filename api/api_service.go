@@ -1,6 +1,7 @@
 package api
 
 import (
+	"badgermaps/api/models"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,14 +31,6 @@ type APIClient struct {
 	client    *http.Client
 	endpoints *Endpoints
 	connected bool
-}
-
-// APIResponse contains both parsed response data and the raw response payload.
-type APIResponse[T any] struct {
-	Data       T
-	Raw        []byte
-	StatusCode int
-	Headers    http.Header
 }
 
 // NewAPIClient creates a new BadgerMaps API client
@@ -77,6 +70,52 @@ func encodeFormData(data map[string]string) string {
 	return values.Encode()
 }
 
+func hasNonNullValue(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false
+	}
+	switch strings.ToLower(trimmed) {
+	case "null", "nil", "<nil>":
+		return false
+	default:
+		return true
+	}
+}
+
+func canonicalCustomCheckinExtraFieldKey(key string) string {
+	trimmed := strings.TrimSpace(key)
+	switch strings.ToLower(trimmed) {
+	case "log type":
+		return "Log Type"
+	case "meeting notes":
+		return "Meeting Notes"
+	default:
+		return trimmed
+	}
+}
+
+func parseRawExtraFields(raw string) (map[string]interface{}, error) {
+	parsed := map[string]interface{}{}
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return nil, err
+	}
+
+	normalized := map[string]interface{}{}
+	for key, value := range parsed {
+		canonicalKey := canonicalCustomCheckinExtraFieldKey(key)
+		if canonicalKey == "" {
+			continue
+		}
+		if stringValue, ok := value.(string); ok && !hasNonNullValue(stringValue) {
+			continue
+		}
+		normalized[canonicalKey] = value
+	}
+
+	return normalized, nil
+}
+
 func (api *APIClient) applyAuthHeaders(req *http.Request, contentType string) {
 	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
 	if contentType != "" {
@@ -91,7 +130,7 @@ func responsePreview(body []byte, max int) string {
 	return string(body[:max]) + "..."
 }
 
-func (api *APIClient) doJSON[T any](req *http.Request, expectedStatus int, decodeErrPrefix string) (*APIResponse[T], error) {
+func doJSON[T any](api *APIClient, req *http.Request, expectedStatus int, decodeErrPrefix string) (*APIResponse[T], error) {
 	resp, err := api.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -122,411 +161,140 @@ func (api *APIClient) doJSON[T any](req *http.Request, expectedStatus int, decod
 	}, nil
 }
 
-// All other API method receivers need to be updated from `api.apiKey` to `api.APIKey`
-// Example for GetAccounts:
-func (api *APIClient) GetAccounts() ([]Account, error) {
-	url := api.endpoints.Customers()
-	req, err := http.NewRequest("GET", url, nil)
+// GetAccounts retrieves all accounts from the BadgerMaps API.
+func (api *APIClient) GetAccounts() (*APIResponse[[]models.Account], error) {
+	endpoint := api.endpoints.Customers()
+	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/json")
+	api.applyAuthHeaders(req, "application/json")
 
-	resp, err := api.client.Do(req)
+	result, err := doJSON[[]models.Account](api, req, http.StatusOK, "failed to decode customers response")
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to customers: %w", err)
+		return nil, fmt.Errorf("customers request failed: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("endpoint customers test failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var accounts []Account
-	if err := json.NewDecoder(resp.Body).Decode(&accounts); err != nil {
-		return nil, fmt.Errorf("failed to decode customers response: %w", err)
-	}
-
-	return accounts, nil
-}
-
-// Account represents a BadgerMaps account (customer)
-type Account struct {
-	AccountId            null.Int     `json:"id"`
-	FirstName            *null.String `json:"first_name"`
-	LastName             null.String  `json:"last_name"`
-	FullName             null.String  `json:"full_name"`
-	PhoneNumber          null.String  `json:"phone_number"`
-	Email                null.String  `json:"email"`
-	CustomerId           *null.String `json:"customer_id"`
-	Notes                *null.String `json:"notes"`
-	OriginalAddress      null.String  `json:"original_address"`
-	CrmId                *null.String `json:"crm_id"`
-	AccountOwner         *null.String `json:"account_owner"`
-	DaysSinceLastCheckin null.Int     `json:"days_since_last_checkin"`
-	LastCheckinDate      *null.String `json:"last_checkin_date"`
-	LastModifiedDate     *null.String `json:"last_modified_date"`
-	FollowUpDate         *null.String `json:"follow_up_date"`
-	Locations            []Location   `json:"locations"`
-	CustomNumeric        *null.Float  `json:"custom_numeric"`
-	CustomText           *null.String `json:"custom_text"`
-	CustomNumeric2       *null.Float  `json:"custom_numeric2"`
-	CustomText2          *null.String `json:"custom_text2"`
-	CustomNumeric3       *null.Float  `json:"custom_numeric3"`
-	CustomText3          *null.String `json:"custom_text3"`
-	CustomNumeric4       *null.Float  `json:"custom_numeric4"`
-	CustomText4          *null.String `json:"custom_text4"`
-	CustomNumeric5       *null.Float  `json:"custom_numeric5"`
-	CustomText5          *null.String `json:"custom_text5"`
-	CustomNumeric6       *null.Float  `json:"custom_numeric6"`
-	CustomText6          *null.String `json:"custom_text6"`
-	CustomNumeric7       *null.Float  `json:"custom_numeric7"`
-	CustomText7          *null.String `json:"custom_text7"`
-	CustomNumeric8       *null.Float  `json:"custom_numeric8"`
-	CustomText8          *null.String `json:"custom_text8"`
-	CustomNumeric9       *null.Float  `json:"custom_numeric9"`
-	CustomText9          *null.String `json:"custom_text9"`
-	CustomNumeric10      *null.Float  `json:"custom_numeric10"`
-	CustomText10         *null.String `json:"custom_text10"`
-	CustomNumeric11      *null.Float  `json:"custom_numeric11"`
-	CustomText11         *null.String `json:"custom_text11"`
-	CustomNumeric12      *null.Float  `json:"custom_numeric12"`
-	CustomText12         *null.String `json:"custom_text12"`
-	CustomNumeric13      *null.Float  `json:"custom_numeric13"`
-	CustomText13         *null.String `json:"custom_text13"`
-	CustomNumeric14      *null.Float  `json:"custom_numeric14"`
-	CustomText14         *null.String `json:"custom_text14"`
-	CustomNumeric15      *null.Float  `json:"custom_numeric15"`
-	CustomText15         *null.String `json:"custom_text15"`
-	CustomNumeric16      *null.Float  `json:"custom_numeric16"`
-	CustomText16         *null.String `json:"custom_text16"`
-	CustomNumeric17      *null.Float  `json:"custom_numeric17"`
-	CustomText17         *null.String `json:"custom_text17"`
-	CustomNumeric18      *null.Float  `json:"custom_numeric18"`
-	CustomText18         *null.String `json:"custom_text18"`
-	CustomNumeric19      *null.Float  `json:"custom_numeric19"`
-	CustomText19         *null.String `json:"custom_text19"`
-	CustomNumeric20      *null.Float  `json:"custom_numeric20"`
-	CustomText20         *null.String `json:"custom_text20"`
-	CustomNumeric21      *null.Float  `json:"custom_numeric21"`
-	CustomText21         *null.String `json:"custom_text21"`
-	CustomNumeric22      *null.Float  `json:"custom_numeric22"`
-	CustomText22         *null.String `json:"custom_text22"`
-	CustomNumeric23      *null.Float  `json:"custom_numeric23"`
-	CustomText23         *null.String `json:"custom_text23"`
-	CustomNumeric24      *null.Float  `json:"custom_numeric24"`
-	CustomText24         *null.String `json:"custom_text24"`
-	CustomNumeric25      *null.Float  `json:"custom_numeric25"`
-	CustomText25         *null.String `json:"custom_text25"`
-	CustomNumeric26      *null.Float  `json:"custom_numeric26"`
-	CustomText26         *null.String `json:"custom_text26"`
-	CustomNumeric27      *null.Float  `json:"custom_numeric27"`
-	CustomText27         *null.String `json:"custom_text27"`
-	CustomNumeric28      *null.Float  `json:"custom_numeric28"`
-	CustomText28         *null.String `json:"custom_text28"`
-	CustomNumeric29      *null.Float  `json:"custom_numeric29"`
-	CustomText29         *null.String `json:"custom_text29"`
-	CustomNumeric30      *null.Float  `json:"custom_numeric30"`
-	CustomText30         *null.String `json:"custom_text30"`
-	CreatedAt            null.String  `json:"created_at"`
-	UpdatedAt            null.String  `json:"updated_at"`
-}
-
-// Location represents a BadgerMaps location
-type Location struct {
-	LocationId    null.Int     `json:"id"`
-	City          null.String  `json:"city"`
-	Name          *null.String `json:"name"`
-	Zipcode       null.String  `json:"zipcode"`
-	Long          null.Float   `json:"long"`
-	State         null.String  `json:"state"`
-	Lat           null.Float   `json:"lat"`
-	AddressLine1  null.String  `json:"address_line_1"`
-	Location      null.String  `json:"location"`
-	IsApproximate null.Bool    `json:"is_approximate"`
-}
-
-// Route represents a BadgerMaps route
-type Route struct {
-	RouteId            null.Int    `json:"id"`
-	Name               null.String `json:"name"`
-	RouteDate          null.String `json:"route_date"`
-	Duration           *null.Int   `json:"duration"`
-	Waypoints          []Waypoint  `json:"waypoints"`
-	StartAddress       null.String `json:"start_address"`
-	DestinationAddress null.String `json:"destination_address"`
-	StartTime          null.String `json:"start_time"`
-}
-
-// Wayponull.Int represents a route waypoint
-type Waypoint struct {
-	WaypointID      null.Int     `json:"id"`
-	Name            null.String  `json:"name"`
-	Address         null.String  `json:"address"`
-	Suite           *null.String `json:"suite"`
-	City            *null.String `json:"city"`
-	State           *null.String `json:"state"`
-	Zipcode         *null.String `json:"zipcode"`
-	Location        null.String  `json:"location"`
-	Lat             null.Float   `json:"lat"`
-	Long            null.Float   `json:"long"`
-	LayoverMinutes  null.Int     `json:"layover_minutes"`
-	Position        null.Int     `json:"position"`
-	CompleteAddress *null.String `json:"complete_address"`
-	LocationID      null.Int     `json:"location_id"`
-	CustomerID      null.Int     `json:"customer_id"`
-	ApptTime        *null.String `json:"appt_time"`
-	Type            null.Int     `json:"type"`
-	PlaceID         *null.String `json:"place_id"`
-}
-
-// Checkin represents a BadgerMaps checkin (appointment)
-type Checkin struct {
-	CheckinId   null.Int     `json:"id"`
-	CrmId       *null.String `json:"crm_id"`
-	AccountId   null.Int     `json:"customer"` // Rename for clarity
-	LogDatetime null.String  `json:"log_datetime"`
-	Type        null.String  `json:"type"`
-	Comments    null.String  `json:"comments"`
-	// ExtraFields uses json.RawMessage instead of null.String because the API
-	// can return this field as either a string, object, or null depending on the data.
-	// Using json.RawMessage allows us to accept any valid JSON value without unmarshaling errors.
-	ExtraFields json.RawMessage `json:"extra_fields"`
-	CreatedBy   null.String     `json:"created_by"`
-}
-
-// UserProfile represents a BadgerMaps user profile
-type UserProfile struct {
-	ProfileId                 null.Int      `json:"id"`
-	Email                     null.String   `json:"email"`
-	FirstName                 null.String   `json:"first_name"`
-	LastName                  null.String   `json:"last_name"`
-	IsManager                 null.Bool     `json:"is_manager"`
-	IsHideReferralIOSBanner   null.Bool     `json:"is_hide_referral_ios_banner"`
-	MarkerIcon                null.String   `json:"marker_icon"`
-	Manager                   *null.String  `json:"manager"`
-	CRMEditableFieldsList     []null.String `json:"crm_editable_fields_list"`
-	CRMBaseURL                null.String   `json:"crm_base_url"`
-	CRMType                   null.String   `json:"crm_type"`
-	ReferralURL               null.String   `json:"referral_url"`
-	MapStartZoom              null.Int      `json:"map_start_zoom"`
-	MapStart                  null.String   `json:"map_start"`
-	IsUserCanEdit             null.Bool     `json:"is_user_can_edit"`
-	IsUserCanDeleteCheckins   null.Bool     `json:"is_user_can_delete_checkins"`
-	IsUserCanAddNewTextValues null.Bool     `json:"is_user_can_add_new_text_values"`
-	HasData                   null.Bool     `json:"has_data"`
-	DefaultApptLength         null.Int      `json:"default_appt_length"`
-	Completed                 null.Bool     `json:"completed"`
-	TrialDaysLeft             null.Int      `json:"trial_days_left"`
-	ApptlogFields             []DataField   `json:"apptlog_fields"`
-	AcctlogFields             []DataField   `json:"acctlog_fields"`
-	Datafields                []DataField   `json:"datafields"`
-	Company                   Company       `json:"company"`
-}
-
-// Company represents a BadgerMaps company
-type Company struct {
-	Id        null.Int    `json:"id"`
-	ShortName null.String `json:"short_name"`
-	Name      null.String `json:"name"`
-}
-
-// DataField represents a custom data field
-type DataField struct {
-	Name                      null.String  `json:"name"`
-	Filterable                null.Bool    `json:"filterable"`
-	Label                     null.String  `json:"label"`
-	Values                    []FieldValue `json:"values,omitempty"`
-	Position                  null.Int     `json:"position"`
-	Type                      null.String  `json:"type"`
-	HasData                   null.Bool    `json:"has_data"`
-	IsUserCanAddNewTextValues null.Bool    `json:"is_user_can_add_new_text_values"`
-	RawMin                    *null.Float  `json:"rawmin,omitempty"`
-	Min                       *null.Float  `json:"min,omitempty"`
-	Max                       *null.Float  `json:"max,omitempty"`
-	RawMax                    *null.Float  `json:"rawmax,omitempty"`
-	AccountField              null.String  `json:"account_field"`
-}
-
-// FieldValue represents a field value option
-type FieldValue struct {
-	Text  null.String `json:"text"`
-	Value interface{} `json:"value"`
+	return result, nil
 }
 
 // GetAccountIDs retrieves all account IDs from the BadgerMaps API
-func (api *APIClient) GetAccountIDs() ([]int, error) {
-	url := api.endpoints.Customers()
-	req, err := http.NewRequest("GET", url, nil)
+func (api *APIClient) GetAccountIDs() (*APIResponse[[]int], error) {
+	endpoint := api.endpoints.Customers()
+	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/json")
+	api.applyAuthHeaders(req, "application/json")
 
-	resp, err := api.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to customers: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("endpoint customers test failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Use a temporary struct to decode only the ID
-	var accounts []struct {
+	rawResult, err := doJSON[[]struct {
 		ID int `json:"id"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&accounts); err != nil {
-		return nil, fmt.Errorf("failed to decode customers response: %w", err)
+	}](api, req, http.StatusOK, "failed to decode customers response")
+	if err != nil {
+		return nil, fmt.Errorf("customers request failed: %w", err)
 	}
 
 	// Extract IDs into a slice of ints
-	ids := make([]int, len(accounts))
-	for i, acc := range accounts {
+	ids := make([]int, len(rawResult.Data))
+	for i, acc := range rawResult.Data {
 		ids[i] = acc.ID
 	}
 
-	return ids, nil
+	return &APIResponse[[]int]{
+		Data:       ids,
+		Raw:        rawResult.Raw,
+		StatusCode: rawResult.StatusCode,
+		Headers:    rawResult.Headers,
+	}, nil
 }
 
 // GetCheckinIDs retrieves all checkin IDs from the BadgerMaps API
-func (api *APIClient) GetCheckinIDs() ([]int, error) {
-	url := api.endpoints.Appointments()
-	req, err := http.NewRequest("GET", url, nil)
+func (api *APIClient) GetCheckinIDs() (*APIResponse[[]int], error) {
+	endpoint := api.endpoints.Appointments()
+	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/json")
+	api.applyAuthHeaders(req, "application/json")
 
-	resp, err := api.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to appointments: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("endpoint appointments test failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var checkins []struct {
+	rawResult, err := doJSON[[]struct {
 		ID int `json:"id"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&checkins); err != nil {
-		return nil, fmt.Errorf("failed to decode appointments response: %w", err)
+	}](api, req, http.StatusOK, "failed to decode appointments response")
+	if err != nil {
+		return nil, fmt.Errorf("appointments request failed: %w", err)
 	}
 
-	ids := make([]int, len(checkins))
-	for i, checkin := range checkins {
+	ids := make([]int, len(rawResult.Data))
+	for i, checkin := range rawResult.Data {
 		ids[i] = checkin.ID
 	}
 
-	return ids, nil
+	return &APIResponse[[]int]{
+		Data:       ids,
+		Raw:        rawResult.Raw,
+		StatusCode: rawResult.StatusCode,
+		Headers:    rawResult.Headers,
+	}, nil
 }
 
 // GetRoutes retrieves all routes from the BadgerMaps API
-func (api *APIClient) GetRoutes() ([]Route, error) {
-	url := api.endpoints.Routes()
-	req, err := http.NewRequest("GET", url, nil)
+func (api *APIClient) GetRoutes() (*APIResponse[[]models.Route], error) {
+	endpoint := api.endpoints.Routes()
+	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/json")
+	api.applyAuthHeaders(req, "application/json")
 
-	resp, err := api.client.Do(req)
+	result, err := doJSON[[]models.Route](api, req, http.StatusOK, "failed to decode routes response")
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to routes: %w", err)
+		return nil, fmt.Errorf("routes request failed: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("endpoint routes test failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var routes []Route
-	if err := json.NewDecoder(resp.Body).Decode(&routes); err != nil {
-		return nil, fmt.Errorf("failed to decode routes response: %w", err)
-	}
-
-	return routes, nil
+	return result, nil
 }
 
 // GetCheckins retrieves all checkins from the BadgerMaps API
-func (api *APIClient) GetCheckins() ([]Checkin, error) {
-	url := api.endpoints.Appointments()
-	req, err := http.NewRequest("GET", url, nil)
+func (api *APIClient) GetCheckins() (*APIResponse[[]models.Checkin], error) {
+	endpoint := api.endpoints.Appointments()
+	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/json")
+	api.applyAuthHeaders(req, "application/json")
 
-	resp, err := api.client.Do(req)
+	result, err := doJSON[[]models.Checkin](api, req, http.StatusOK, "failed to decode appointments response")
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to appointments: %w", err)
+		return nil, fmt.Errorf("appointments request failed: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("endpoint appointments test failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var checkins []Checkin
-	if err := json.NewDecoder(resp.Body).Decode(&checkins); err != nil {
-		return nil, fmt.Errorf("failed to decode appointments response: %w", err)
-	}
-
-	return checkins, nil
+	return result, nil
 }
 
 // GetUserProfile retrieves the current user's profile from the BadgerMaps API
-func (api *APIClient) GetUserProfile() (*UserProfile, error) {
-	url := api.endpoints.Profiles()
-	req, err := http.NewRequest("GET", url, nil)
+func (api *APIClient) GetUserProfile() (*APIResponse[models.UserProfile], error) {
+	endpoint := api.endpoints.Profiles()
+	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/json")
+	api.applyAuthHeaders(req, "application/json")
 
-	resp, err := api.client.Do(req)
+	result, err := doJSON[models.UserProfile](api, req, http.StatusOK, "failed to decode profiles response")
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to profiles: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("endpoint profiles test failed with status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("profiles request failed: %w", err)
 	}
 
-	var profile UserProfile
-	if err := json.NewDecoder(resp.Body).Decode(&profile); err != nil {
-		return nil, fmt.Errorf("failed to decode profiles response: %w", err)
-	}
-
-	for i, datafield := range profile.Datafields {
+	for i, datafield := range result.Data.Datafields {
 		if accountField, ok := DataSetAccountFieldMappings[datafield.Name.String]; ok {
-			profile.Datafields[i].AccountField = null.StringFrom(accountField)
+			result.Data.Datafields[i].AccountField = null.StringFrom(accountField)
 		}
 	}
 
-	return &profile, nil
+	return result, nil
 }
 
 // TestAPIConnection tests the API connectivity
@@ -566,67 +334,45 @@ func (api *APIClient) TestAPIConnection() error {
 }
 
 // GetAccountDetailed retrieves a specific account by ID
-func (api *APIClient) GetAccountDetailed(accountID int) (*Account, error) {
-	url := api.endpoints.Customer(accountID)
-	req, err := http.NewRequest("GET", url, nil)
+func (api *APIClient) GetAccountDetailed(accountID int) (*APIResponse[models.Account], error) {
+	endpoint := api.endpoints.Customer(accountID)
+	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/json")
+	api.applyAuthHeaders(req, "application/json")
 
-	resp, err := api.client.Do(req)
+	result, err := doJSON[models.Account](api, req, http.StatusOK, "failed to decode customer response")
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to customer %d: %w", accountID, err)
+		return nil, fmt.Errorf("customer %d request failed: %w", accountID, err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("endpoint customer %d test failed with status %d: %s", accountID, resp.StatusCode, string(body))
-	}
-
-	var account Account
-	if err := json.NewDecoder(resp.Body).Decode(&account); err != nil {
-		return nil, fmt.Errorf("failed to decode customer response: %w", err)
-	}
-
-	return &account, nil
+	return result, nil
 }
 
 // UpdateAccount updates an account
-func (api *APIClient) UpdateAccount(accountID int, data map[string]string) (*Account, error) {
-	url := api.endpoints.Customer(accountID)
+func (api *APIClient) UpdateAccount(accountID int, input models.AccountUpload) (*APIResponse[models.Account], error) {
+	endpoint := api.endpoints.Customer(accountID)
+	if input.Fields == nil {
+		input.Fields = map[string]string{}
+	}
 
 	// Convert data to form-encoded string
-	body := encodeFormData(data)
+	body := encodeFormData(input.Fields)
 
-	req, err := http.NewRequest("PATCH", url, strings.NewReader(body))
+	req, err := http.NewRequest("PATCH", endpoint, strings.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	api.applyAuthHeaders(req, "application/x-www-form-urlencoded")
 
-	resp, err := api.client.Do(req)
+	result, err := doJSON[models.Account](api, req, http.StatusOK, "failed to decode customer response")
 	if err != nil {
 		return nil, fmt.Errorf("failed to update customer %d: %w", accountID, err)
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("update customer %d failed with status %d: %s", accountID, resp.StatusCode, string(body))
-	}
-
-	var account Account
-	if err := json.NewDecoder(resp.Body).Decode(&account); err != nil {
-		return nil, fmt.Errorf("failed to decode customer response: %w", err)
-	}
-
-	return &account, nil
+	return result, nil
 }
 
 // DeleteAccount deletes an account
@@ -645,7 +391,7 @@ func (api *APIClient) DeleteAccount(accountID int) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusNoContent {
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("delete customer %d failed with status %d: %s", accountID, resp.StatusCode, string(body))
 	}
@@ -654,259 +400,232 @@ func (api *APIClient) DeleteAccount(accountID int) error {
 }
 
 // CreateAccount creates a new account
-func (api *APIClient) CreateAccount(data map[string]string) (*Account, error) {
-	url := api.endpoints.Customers()
+func (api *APIClient) CreateAccount(input models.AccountUpload) (*APIResponse[models.Account], error) {
+	endpoint := api.endpoints.Customers()
+	if input.Fields == nil {
+		input.Fields = map[string]string{}
+	}
 
 	// Convert data to form-encoded string
-	body := encodeFormData(data)
+	body := encodeFormData(input.Fields)
 
-	req, err := http.NewRequest("POST", url, strings.NewReader(body))
+	req, err := http.NewRequest("POST", endpoint, strings.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	api.applyAuthHeaders(req, "application/x-www-form-urlencoded")
 
-	resp, err := api.client.Do(req)
+	result, err := doJSON[models.Account](api, req, http.StatusCreated, "failed to decode customer response")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create customer: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("create customer failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var account Account
-	if err := json.NewDecoder(resp.Body).Decode(&account); err != nil {
-		return nil, fmt.Errorf("failed to decode customer response: %w", err)
-	}
-
-	return &account, nil
+	return result, nil
 }
 
 // GetRoute retrieves a specific route by ID
-func (api *APIClient) GetRoute(routeID int) (*Route, error) {
-	url := api.endpoints.Route(routeID)
-	req, err := http.NewRequest("GET", url, nil)
+func (api *APIClient) GetRoute(routeID int) (*APIResponse[models.Route], error) {
+	endpoint := api.endpoints.Route(routeID)
+	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/json")
+	api.applyAuthHeaders(req, "application/json")
 
-	resp, err := api.client.Do(req)
+	result, err := doJSON[models.Route](api, req, http.StatusOK, "failed to decode route response")
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to route %d: %w", routeID, err)
+		return nil, fmt.Errorf("route %d request failed: %w", routeID, err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("endpoint route %d test failed with status %d: %s", routeID, resp.StatusCode, string(body))
-	}
-
-	var route Route
-	if err := json.NewDecoder(resp.Body).Decode(&route); err != nil {
-		return nil, fmt.Errorf("failed to decode route response: %w", err)
-	}
-
-	return &route, nil
+	return result, nil
 }
 
 // GetCheckinsForAccount retrieves checkins for a specific account
-func (api *APIClient) GetCheckinsForAccount(customerID int) ([]Checkin, error) {
-	url := api.endpoints.AppointmentsForCustomer(customerID)
-	req, err := http.NewRequest("GET", url, nil)
+func (api *APIClient) GetCheckinsForAccount(customerID int) (*APIResponse[[]models.Checkin], error) {
+	endpoint := api.endpoints.AppointmentsForCustomer(customerID)
+	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/json")
+	api.applyAuthHeaders(req, "application/json")
 
-	resp, err := api.client.Do(req)
+	result, err := doJSON[[]models.Checkin](api, req, http.StatusOK, "failed to decode appointments response")
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to appointments for customer %d: %w", customerID, err)
+		return nil, fmt.Errorf("appointments for customer %d request failed: %w", customerID, err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("endpoint appointments for customer %d test failed with status %d: %s", customerID, resp.StatusCode, string(body))
-	}
-
-	// Read the body first so we can log it if unmarshaling fails
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read appointments response body: %w", err)
-	}
-
-	var checkins []Checkin
-	if err := json.Unmarshal(body, &checkins); err != nil {
-		// Include the first 500 characters of the response to help debug the issue
-		preview := string(body)
-		if len(preview) > 500 {
-			preview = preview[:500] + "..."
-		}
-		return nil, fmt.Errorf("failed to decode appointments response: %w\nResponse preview: %s", err, preview)
-	}
-
-	return checkins, nil
+	return result, nil
 }
 
-// CreateCheckin creates a new checkin for an account
-func (api *APIClient) CreateCheckin(data map[string]string) (*Checkin, error) {
-	url := api.endpoints.Appointments()
+// CreateCheckin creates a new checkin for an account.
+// checkinType is required; fields with empty/null-like values are skipped.
+func (api *APIClient) CreateCheckin(input models.CheckinUpload) (*APIResponse[models.Checkin], error) {
+	customer := input.Customer
+	checkinType := input.Type
+	fields := input.Fields
+
+	if customer <= 0 {
+		return nil, fmt.Errorf("customer is required and must be > 0")
+	}
+	if !hasNonNullValue(checkinType) {
+		return nil, fmt.Errorf("checkin type is required")
+	}
+
+	endpoint := api.endpoints.Appointments()
+	form := map[string]string{
+		"customer": strconv.Itoa(customer),
+		"type":     strings.TrimSpace(checkinType),
+	}
+	for key, value := range fields {
+		normalized := strings.ToLower(strings.TrimSpace(key))
+		if normalized == "" || normalized == "customer" || normalized == "type" {
+			continue
+		}
+		if !hasNonNullValue(value) {
+			continue
+		}
+		form[normalized] = value
+	}
 
 	// Convert data to form-encoded string
-	formData := make([]string, 0, len(data))
-	for key, value := range data {
-		formData = append(formData, fmt.Sprintf("%s=%s", key, value))
-	}
-	body := strings.Join(formData, "&")
+	body := encodeFormData(form)
 
-	req, err := http.NewRequest("POST", url, strings.NewReader(body))
+	req, err := http.NewRequest("POST", endpoint, strings.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	api.applyAuthHeaders(req, "application/x-www-form-urlencoded")
 
-	resp, err := api.client.Do(req)
+	result, err := doJSON[models.Checkin](api, req, http.StatusCreated, "failed to decode appointment response")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create appointment: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("create appointment failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var checkin Checkin
-	if err := json.NewDecoder(resp.Body).Decode(&checkin); err != nil {
-		return nil, fmt.Errorf("failed to decode appointment response: %w", err)
-	}
-
-	return &checkin, nil
+	return result, nil
 }
 
-// CreateCustomCheckin creates a new custom checkin for an account
+// CreateCustomCheckin creates a new custom checkin for an account.
 // Do not use unless enables for Badger Account.
 // Format for extra_fields -> {"Log Type":"Phone Call","Meeting Notes":"Notes"}
 // Encoding for extra_fields -> customer=someNumericID&extra_fields=%7B%22Log%20Type%22%3A%22Phone%20Call%22%2C%22Meeting%20Notes%22%3A%22Notes%22%7D
-func (api *APIClient) CreateCustomCheckin(customer int, data map[string]string) (*Checkin, error) {
-	api_url := api.endpoints.Appointments()
+// checkinType is required; fields with empty/null-like values are skipped.
+func (api *APIClient) CreateCustomCheckin(input models.CustomCheckinUpload) (*APIResponse[models.Checkin], error) {
+	customer := input.Customer
+	checkinType := input.Type
+	fields := input.Fields
+	typedExtraFields := input.ExtraFields
 
-	// Convert data to json string
-	extraFields := make([]string, 0, len(data))
-	for key, value := range data {
-		extraFields = append(extraFields, fmt.Sprintf("%s\":\"%s", key, value))
+	if customer <= 0 {
+		return nil, fmt.Errorf("customer is required and must be > 0")
+	}
+	if !hasNonNullValue(checkinType) {
+		return nil, fmt.Errorf("checkin type is required")
 	}
 
-	extraFieldsString := fmt.Sprintf("{%s}", strings.Join(extraFields, ","))
-	extraFieldsString = url.PathEscape(extraFieldsString)
+	endpoint := api.endpoints.Appointments()
 
-	formData := make([]string, 0, len(data))
-	formData = append(formData, strconv.Itoa(customer))
-	formData = append(formData, extraFieldsString)
+	form := map[string]string{
+		"customer": strconv.Itoa(customer),
+		"type":     strings.TrimSpace(checkinType),
+	}
+	var rawExtraFields string
+	derivedExtraFields := map[string]string{}
+	for key, value := range fields {
+		normalized := strings.ToLower(strings.TrimSpace(key))
+		switch normalized {
+		case "", "customer", "type":
+			continue
+		case "extra_fields":
+			if !hasNonNullValue(value) {
+				continue
+			}
+			rawExtraFields = value
+		case "comments", "log_datetime", "crm_id", "lat", "long", "created_by":
+			if !hasNonNullValue(value) {
+				continue
+			}
+			form[normalized] = value
+		default:
+			if !hasNonNullValue(value) {
+				continue
+			}
+			canonicalKey := canonicalCustomCheckinExtraFieldKey(key)
+			if canonicalKey == "" {
+				continue
+			}
+			derivedExtraFields[canonicalKey] = value
+		}
+	}
 
-	body := strings.Join(formData, "&")
+	combinedExtraFields := map[string]interface{}{}
+	if rawExtraFields != "" {
+		parsedRawExtraFields, err := parseRawExtraFields(rawExtraFields)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode existing extra_fields JSON: %w", err)
+		}
+		for key, value := range parsedRawExtraFields {
+			combinedExtraFields[key] = value
+		}
+	}
 
-	req, err := http.NewRequest("POST", api_url, strings.NewReader(body))
+	combinedExtraFields["Log Type"] = strings.TrimSpace(checkinType)
+	if typedExtraFields != nil {
+		if hasNonNullValue(typedExtraFields.LogType) {
+			combinedExtraFields["Log Type"] = strings.TrimSpace(typedExtraFields.LogType)
+		}
+		if hasNonNullValue(typedExtraFields.MeetingNotes) {
+			combinedExtraFields["Meeting Notes"] = typedExtraFields.MeetingNotes
+		}
+	}
+	for key, value := range derivedExtraFields {
+		combinedExtraFields[key] = value
+	}
+
+	if len(combinedExtraFields) > 0 {
+		extraFieldsJSON, err := json.Marshal(combinedExtraFields)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode merged extra_fields: %w", err)
+		}
+		form["extra_fields"] = string(extraFieldsJSON)
+	}
+
+	body := encodeFormData(form)
+
+	req, err := http.NewRequest("POST", endpoint, strings.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	api.applyAuthHeaders(req, "application/x-www-form-urlencoded")
 
-	resp, err := api.client.Do(req)
+	result, err := doJSON[models.Checkin](api, req, http.StatusCreated, "failed to decode appointment response")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create appointment: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("create appointment failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var checkin Checkin
-	if err := json.NewDecoder(resp.Body).Decode(&checkin); err != nil {
-		return nil, fmt.Errorf("failed to decode appointment response: %w", err)
-	}
-
-	return &checkin, nil
+	return result, nil
 }
 
 // UpdateLocation updates a location
-func (api *APIClient) UpdateLocation(locationID int, data map[string]string) (*Location, error) {
-	url := api.endpoints.Location(locationID)
+func (api *APIClient) UpdateLocation(locationID int, input models.LocationUpload) (*APIResponse[models.Location], error) {
+	endpoint := api.endpoints.Location(locationID)
+	if input.Fields == nil {
+		input.Fields = map[string]string{}
+	}
 
 	// Convert data to form-encoded string
-	body := encodeFormData(data)
+	body := encodeFormData(input.Fields)
 
-	req, err := http.NewRequest("PATCH", url, strings.NewReader(body))
+	req, err := http.NewRequest("PATCH", endpoint, strings.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	api.applyAuthHeaders(req, "application/x-www-form-urlencoded")
 
-	resp, err := api.client.Do(req)
+	result, err := doJSON[models.Location](api, req, http.StatusOK, "failed to decode location response")
 	if err != nil {
 		return nil, fmt.Errorf("failed to update location %d: %w", locationID, err)
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("update location %d failed with status %d: %s", locationID, resp.StatusCode, string(body))
-	}
-
-	var location Location
-	if err := json.NewDecoder(resp.Body).Decode(&location); err != nil {
-		return nil, fmt.Errorf("failed to decode location response: %w", err)
-	}
-
-	return &location, nil
-}
-
-// TODO: Checkin needs to be fixed
-
-// GetCheckin retrieves a specific checkin by ID
-func (api *APIClient) GetCheckin(checkinID int) (*Checkin, error) {
-	url := api.endpoints.Appointment(checkinID)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Token %s", api.APIKey))
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := api.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to appointment %d: %w", checkinID, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("endpoint appointment %d test failed with status %d: %s", checkinID, resp.StatusCode, string(body))
-	}
-
-	var checkin Checkin
-	if err := json.NewDecoder(resp.Body).Decode(&checkin); err != nil {
-		return nil, fmt.Errorf("failed to decode appointment response: %w", err)
-	}
-
-	return &checkin, nil
+	return result, nil
 }

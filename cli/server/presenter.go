@@ -1,7 +1,7 @@
 package server
 
 import (
-	"badgermaps/api"
+	"badgermaps/api/models"
 	"badgermaps/app"
 	"badgermaps/app/pull"
 	"badgermaps/database"
@@ -209,7 +209,7 @@ func (p *CliPresenter) HandleAccountCreateWebhook(w http.ResponseWriter, r *http
 		http.Error(w, "can't read body", http.StatusInternalServerError)
 		return
 	}
-	var acc api.Account
+	var acc models.Account
 	if err := json.Unmarshal(body, &acc); err != nil {
 		http.Error(w, "invalid JSON payload", http.StatusBadRequest)
 		return
@@ -238,7 +238,7 @@ func (p *CliPresenter) HandleCheckinWebhook(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "can't read body", http.StatusInternalServerError)
 		return
 	}
-	var checkin api.Checkin
+	var checkin models.Checkin
 	if err := json.Unmarshal(body, &checkin); err != nil {
 		http.Error(w, "invalid JSON payload", http.StatusBadRequest)
 		return

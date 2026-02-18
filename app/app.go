@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -50,6 +52,7 @@ type Config struct {
 	Server                ServerConfig         `yaml:"server"`
 	ThemePreference       string               `yaml:"theme_preference"`
 	MaxConcurrentRequests int                  `yaml:"max_concurrent_requests"`
+	CustomCheckins        bool                 `yaml:"custom_checkins"`
 	EventActions          []action.EventAction `yaml:"event_actions"`
 	CronJobs              []server.CronJob     `yaml:"cron_jobs"`
 	WebhookCatchAll       bool                 `yaml:"webhook_catch_all"`
@@ -73,45 +76,41 @@ type App struct {
 	syncHistoryRuns map[string]*syncHistoryRun
 	syncHistoryMu   sync.Mutex
 	syncHistoryOnce bool
+	closeOnce       sync.Once
+	shuttingDown    atomic.Bool
 }
 
 func (a *App) Close() {
-	if a.DB != nil {
-		a.DB.Close()
-	}
-	if a.LogListener != nil {
-		a.LogListener.Close()
-	}
+	a.closeOnce.Do(func() {
+		a.shuttingDown.Store(true)
+
+		if a.Events != nil {
+			// Let async event handlers finish before DB resources are torn down.
+			a.Events.WaitForDrain(2 * time.Second)
+		}
+
+		if a.DB != nil {
+			a.DB.Close()
+		}
+		if a.LogListener != nil {
+			a.LogListener.Close()
+		}
+	})
 }
 
 func (a *App) GetState() *state.State {
 	return a.State
 }
+
+func (a *App) IsShuttingDown() bool {
+	return a.shuttingDown.Load()
+}
+
 func (a *App) GetDB() database.DB {
 	return a.DB
 }
 func (a *App) GetAPI() *api.APIClient {
 	return a.API
-}
-func (a *App) RawRequest(method, endpoint string, data map[string]string) ([]byte, error) {
-	var body string
-	var err error
-	switch strings.ToUpper(method) {
-	case "GET":
-		body, err = a.API.GetRaw(endpoint)
-	case "POST":
-		body, err = a.API.PostRaw(endpoint, data)
-	case "PATCH":
-		body, err = a.API.PatchRaw(endpoint, data)
-	case "DELETE":
-		body, err = a.API.DeleteRaw(endpoint)
-	default:
-		return nil, fmt.Errorf("unsupported HTTP method: %s", method)
-	}
-	if err != nil {
-		return nil, err
-	}
-	return []byte(body), nil
 }
 func NewApp() *App {
 	a := &App{
@@ -132,6 +131,7 @@ func NewApp() *App {
 			},
 			ThemePreference:       ThemePreferenceAuto,
 			MaxConcurrentRequests: 5,
+			CustomCheckins:        false,
 		},
 	}
 	a.State.PIDFile = utils.GetConfigDirFile(".badgermaps.pid")
@@ -717,6 +717,7 @@ func (a *App) InteractiveSetup() bool {
 	// Advanced Settings
 	fmt.Println(utils.Colors.Blue("---" + " Advanced Settings ---"))
 	a.Config.MaxConcurrentRequests = utils.PromptInt(reader, "Max Concurrent Requests", a.Config.MaxConcurrentRequests)
+	a.Config.CustomCheckins = utils.PromptBool(reader, "Enable Custom Checkins API", a.Config.CustomCheckins)
 
 	// Save configuration
 	if err := a.SaveConfig(); err != nil {

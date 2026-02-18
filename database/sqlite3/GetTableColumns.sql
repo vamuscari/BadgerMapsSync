@@ -1,1 +1,1 @@
-PRAGMA table_info(?);
+PRAGMA table_info('%s');

@@ -71,9 +71,21 @@ func (p *CliPresenter) HandleList(entityType, status, date string, accountID int
 			p.App.Events.Dispatch(events.Infof("push", "No pending check-in changes found."))
 			return nil
 		}
-		fmt.Fprintln(w, "ID\tCheckin ID\tAccount ID\tType\tStatus\tCreated At\tChanges")
+		fmt.Fprintln(w, "ID\tCheckin ID\tAccount ID\tChange Type\tEndpoint\tCheckin Type\tStatus\tCreated At\tComments")
 		for _, c := range changes {
-			fmt.Fprintf(w, "%d\t%d\t%d\t%s\t%s\t%s\t%s\n", c.ChangeId, c.CheckinId, c.AccountId, c.ChangeType, c.Status, c.CreatedAt.Format(time.RFC3339), c.Changes)
+			fmt.Fprintf(
+				w,
+				"%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				c.ChangeId,
+				c.CheckinId,
+				c.AccountId,
+				c.ChangeType,
+				c.EndpointType.String,
+				c.Type.String,
+				c.Status,
+				c.CreatedAt.Format(time.RFC3339),
+				c.Comments.String,
+			)
 		}
 	}
 

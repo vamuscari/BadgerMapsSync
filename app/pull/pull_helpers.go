@@ -1,18 +1,21 @@
 package pull
 
 import (
-	"badgermaps/api"
+	"badgermaps/api/models"
 	"badgermaps/app"
 	"badgermaps/database"
 	"badgermaps/events"
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/guregu/null/v6"
 )
 
-func PullAccount(a *app.App, accountID int) (account *api.Account, err error) {
+func PullAccount(a *app.App, accountID int) (account *models.Account, err error) {
 	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "account", Payload: events.PullStartPayload{ResourceID: accountID}})
 	a.Events.Dispatch(events.Infof("pull", "Pulling account with ID: %d", accountID))
 
@@ -28,10 +31,11 @@ func PullAccount(a *app.App, accountID int) (account *api.Account, err error) {
 		a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "account", Payload: payload})
 	}()
 
-	account, err = a.API.GetAccountDetailed(accountID)
+	accountResp, err := a.API.GetAccountDetailed(accountID)
 	if err != nil {
 		return nil, fmt.Errorf("error pulling account: %w", err)
 	}
+	account = &accountResp.Data
 
 	if err = StoreAccountDetailed(a, account); err != nil {
 		return nil, fmt.Errorf("error storing account: %w", err)
@@ -50,12 +54,13 @@ func PullGroupAccounts(a *app.App, top int, progressCallback func(current, total
 		}
 	}()
 
-	accountIDs, err := a.API.GetAccountIDs()
+	accountIDsResp, err := a.API.GetAccountIDs()
 	if err != nil {
 		err = fmt.Errorf("error getting account IDs: %w", err)
 		a.Events.Dispatch(events.Event{Type: "pull.error", Source: "accounts", Payload: events.ErrorPayload{Error: err}})
 		return err
 	}
+	accountIDs := accountIDsResp.Data
 
 	if top > 0 && top < len(accountIDs) {
 		accountIDs = accountIDs[:top]
@@ -77,13 +82,14 @@ func PullGroupAccounts(a *app.App, top int, progressCallback func(current, total
 			defer func() { <-sem }()
 
 			a.Events.Dispatch(events.Event{Type: "pull.fetch_detail.start", Source: "accounts", Payload: events.FetchDetailStartPayload{ResourceID: accountID}})
-			account, err := a.API.GetAccountDetailed(accountID)
+			accountResp, err := a.API.GetAccountDetailed(accountID)
 			if err != nil {
 				err = fmt.Errorf("error getting detailed account info for ID %d: %w", accountID, err)
 				a.Events.Dispatch(events.Event{Type: "pull.error", Source: "accounts", Payload: events.ErrorPayload{Error: err, ResourceID: accountID}})
 				errorChan <- err
 				return
 			}
+			account := &accountResp.Data
 			a.Events.Dispatch(events.Event{Type: "pull.fetch_detail.success", Source: "accounts", Payload: events.FetchDetailSuccessPayload{Data: account}})
 
 			if err := StoreAccountDetailed(a, account); err != nil {
@@ -123,7 +129,7 @@ func PullGroupAccounts(a *app.App, top int, progressCallback func(current, total
 	return err
 }
 
-func PullCheckin(a *app.App, checkinID int) (checkin *api.Checkin, err error) {
+func PullCheckin(a *app.App, checkinID int) (checkin *models.Checkin, err error) {
 	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "check-in", Payload: events.PullStartPayload{ResourceID: checkinID}})
 	a.Events.Dispatch(events.Infof("pull", "Pulling checkin with ID: %d", checkinID))
 
@@ -139,17 +145,7 @@ func PullCheckin(a *app.App, checkinID int) (checkin *api.Checkin, err error) {
 		a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "check-in", Payload: payload})
 	}()
 
-	checkin, err = a.API.GetCheckin(checkinID)
-	if err != nil {
-		return nil, fmt.Errorf("error pulling checkin: %w", err)
-	}
-
-	if err = StoreCheckin(a, *checkin); err != nil {
-		return nil, fmt.Errorf("error storing checkin: %w", err)
-	}
-
-	a.Events.Dispatch(events.Infof("pull", "Successfully pulled checkin with ID: %d", checkinID))
-	return checkin, nil
+	return nil, fmt.Errorf("pulling a single checkin by ID is not supported: /appointments/{id} endpoint removed")
 }
 
 // PullCheckinsForAccount pulls all check-ins for a specific account ID.
@@ -170,10 +166,11 @@ func PullCheckinsForAccount(a *app.App, accountID int) (err error) {
 		a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "checkins", Payload: payload})
 	}()
 
-	checkins, err := a.API.GetCheckinsForAccount(accountID)
+	checkinsResp, err := a.API.GetCheckinsForAccount(accountID)
 	if err != nil {
 		return fmt.Errorf("error getting check-ins for account %d: %w", accountID, err)
 	}
+	checkins := checkinsResp.Data
 
 	count = len(checkins)
 	for _, checkin := range checkins {
@@ -195,12 +192,13 @@ func PullGroupCheckins(a *app.App, progressCallback func(current, total int)) (e
 		}
 	}()
 
-	accountIDs, err := a.API.GetAccountIDs()
+	accountIDsResp, err := a.API.GetAccountIDs()
 	if err != nil {
 		err = fmt.Errorf("error getting account IDs: %w", err)
 		a.Events.Dispatch(events.Event{Type: "pull.error", Source: "checkins", Payload: events.ErrorPayload{Error: err}})
 		return err
 	}
+	accountIDs := accountIDsResp.Data
 	total := len(accountIDs)
 	a.Events.Dispatch(events.Event{Type: "pull.ids_fetched", Source: "checkins", Payload: events.ResourceIDsFetchedPayload{Count: total}})
 
@@ -227,7 +225,7 @@ func PullGroupCheckins(a *app.App, progressCallback func(current, total int)) (e
 			}
 
 			a.Events.Dispatch(events.Event{Type: "pull.fetch_detail.start", Source: "checkins", Payload: events.FetchDetailStartPayload{ResourceID: accountID}})
-			checkins, err := a.API.GetCheckinsForAccount(accountID)
+			checkinsResp, err := a.API.GetCheckinsForAccount(accountID)
 			if err != nil {
 				err = fmt.Errorf("error getting checkins for account ID %d: %w", accountID, err)
 				a.Events.Dispatch(events.Event{Type: "pull.error", Source: "checkins", Payload: events.ErrorPayload{Error: err, ResourceID: accountID}})
@@ -235,6 +233,7 @@ func PullGroupCheckins(a *app.App, progressCallback func(current, total int)) (e
 				cancel() // Cancel context on first error
 				return
 			}
+			checkins := checkinsResp.Data
 			a.Events.Dispatch(events.Event{Type: "pull.fetch_detail.success", Source: "checkins", Payload: events.FetchDetailSuccessPayload{Data: checkins}})
 
 			for _, checkin := range checkins {
@@ -282,7 +281,7 @@ func PullGroupCheckins(a *app.App, progressCallback func(current, total int)) (e
 	return err
 }
 
-func PullRoute(a *app.App, routeID int) (route *api.Route, err error) {
+func PullRoute(a *app.App, routeID int) (route *models.Route, err error) {
 	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "route", Payload: events.PullStartPayload{ResourceID: routeID}})
 	a.Events.Dispatch(events.Infof("pull", "Pulling route with ID: %d", routeID))
 
@@ -298,10 +297,11 @@ func PullRoute(a *app.App, routeID int) (route *api.Route, err error) {
 		a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "route", Payload: payload})
 	}()
 
-	route, err = a.API.GetRoute(routeID)
+	routeResp, err := a.API.GetRoute(routeID)
 	if err != nil {
 		return nil, fmt.Errorf("error pulling route: %w", err)
 	}
+	route = &routeResp.Data
 
 	if err = StoreRoute(a, *route); err != nil {
 		return nil, fmt.Errorf("error storing route: %w", err)
@@ -320,12 +320,13 @@ func PullGroupRoutes(a *app.App, progressCallback func(current, total int)) (err
 		}
 	}()
 
-	routes, err := a.API.GetRoutes()
+	routesResp, err := a.API.GetRoutes()
 	if err != nil {
 		err = fmt.Errorf("error getting routes: %w", err)
 		a.Events.Dispatch(events.Event{Type: "pull.error", Source: "routes", Payload: events.ErrorPayload{Error: err}})
 		return err
 	}
+	routes := routesResp.Data
 	total := len(routes)
 	a.Events.Dispatch(events.Event{Type: "pull.ids_fetched", Source: "routes", Payload: events.ResourceIDsFetchedPayload{Count: total}})
 
@@ -367,7 +368,7 @@ func PullGroupRoutes(a *app.App, progressCallback func(current, total int)) (err
 	return err
 }
 
-func PullProfile(a *app.App, progressCallback func(current, total int)) (profile *api.UserProfile, err error) {
+func PullProfile(a *app.App, progressCallback func(current, total int)) (profile *models.UserProfile, err error) {
 	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "user profile"})
 	a.Events.Dispatch(events.Infof("pull", "Pulling user profile..."))
 
@@ -390,10 +391,11 @@ func PullProfile(a *app.App, progressCallback func(current, total int)) (profile
 	totalSteps := 3 // 1. Get profile, 2. Store profile, 3. Update configs
 	currentStep := 0
 
-	profile, err = a.API.GetUserProfile()
+	profileResp, err := a.API.GetUserProfile()
 	if err != nil {
 		return nil, fmt.Errorf("error pulling user profile: %w", err)
 	}
+	profile = &profileResp.Data
 	currentStep++
 	if progressCallback != nil {
 		progressCallback(currentStep, totalSteps)
@@ -415,7 +417,7 @@ func PullProfile(a *app.App, progressCallback func(current, total int)) (profile
 	return profile, nil
 }
 
-func StoreAccountDetailed(a *app.App, acc *api.Account) error {
+func StoreAccountDetailed(a *app.App, acc *models.Account) error {
 	if a.State.Verbose {
 		a.Events.Dispatch(events.Debugf("pull", "Storing account: %s", acc.FullName.String))
 	}
@@ -438,24 +440,51 @@ func StoreAccountDetailed(a *app.App, acc *api.Account) error {
 	)
 }
 
-func StoreCheckin(a *app.App, checkin api.Checkin) error {
+func StoreCheckin(a *app.App, checkin models.Checkin) error {
 	if a.State.Verbose {
 		a.Events.Dispatch(events.Debugf("pull", "Storing checkin: %d", checkin.CheckinId.Int64))
 	}
+
+	endpointType := "standard"
+	storedType := checkin.Type
+	storedComments := checkin.Comments
 
 	// Convert ExtraFields (json.RawMessage) to string for database storage
 	var extraFieldsStr string
 	if len(checkin.ExtraFields) > 0 {
 		extraFieldsStr = string(checkin.ExtraFields)
+
+		trimmedRaw := strings.TrimSpace(extraFieldsStr)
+		if trimmedRaw == "" || strings.EqualFold(trimmedRaw, "null") || trimmedRaw == "{}" {
+			endpointType = "standard"
+			extraFieldsStr = ""
+		} else {
+			endpointType = "custom"
+			var extraFields map[string]interface{}
+			if err := json.Unmarshal(checkin.ExtraFields, &extraFields); err == nil {
+				if value, ok := extraFields["Log Type"].(string); ok {
+					trimmed := strings.TrimSpace(value)
+					if trimmed != "" {
+						storedType = null.StringFrom(trimmed)
+					}
+				}
+				if value, ok := extraFields["Meeting Notes"].(string); ok {
+					trimmed := strings.TrimSpace(value)
+					if trimmed != "" {
+						storedComments = null.StringFrom(trimmed)
+					}
+				}
+			}
+		}
 	}
 
 	return database.RunCommand(a.DB, "MergeAccountCheckins",
-		checkin.CheckinId, checkin.CrmId, checkin.AccountId, checkin.LogDatetime, checkin.Type, checkin.Comments,
-		extraFieldsStr, checkin.CreatedBy,
+		checkin.CheckinId, checkin.CrmId, checkin.AccountId, checkin.LogDatetime, storedType, storedComments,
+		extraFieldsStr, endpointType, checkin.CreatedBy,
 	)
 }
 
-func StoreRoute(a *app.App, route api.Route) error {
+func StoreRoute(a *app.App, route models.Route) error {
 	if a.State.Verbose {
 		a.Events.Dispatch(events.Debugf("pull", "Storing route: %s", route.Name.String))
 	}
@@ -465,7 +494,7 @@ func StoreRoute(a *app.App, route api.Route) error {
 	)
 }
 
-func StoreProfile(a *app.App, profile *api.UserProfile) error {
+func StoreProfile(a *app.App, profile *models.UserProfile) error {
 	if a.State.Verbose {
 		a.Events.Dispatch(events.Debugf("pull", "Storing profile for: %s", profile.Email.String))
 	}

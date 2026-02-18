@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS AccountCheckins (
     Type VARCHAR(100),
     Comments TEXT,
     ExtraFields TEXT,
+    EndpointType VARCHAR(20) NOT NULL DEFAULT 'standard' CHECK(EndpointType IN ('standard', 'custom')),
     CreatedBy VARCHAR(255),
     CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

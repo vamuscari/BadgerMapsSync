@@ -1,1 +1,1 @@
-SELECT CheckinId, CrmId, AccountId, LogDatetime, Type, Comments, ExtraFields, CreatedBy FROM AccountCheckins WHERE CheckinId = ?
+SELECT CheckinId, CrmId, AccountId, LogDatetime, Type, Comments, ExtraFields, EndpointType, CreatedBy FROM AccountCheckins WHERE CheckinId = ?

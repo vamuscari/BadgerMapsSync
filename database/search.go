@@ -1,7 +1,7 @@
 package database
 
 import (
-	"badgermaps/api"
+	"badgermaps/api/models"
 	"fmt"
 	"strings"
 )
@@ -13,7 +13,7 @@ type CheckinRow struct {
 	LogDatetime string
 }
 
-func SearchAccounts(db DB, q string) ([]api.Account, error) {
+func SearchAccounts(db DB, q string) ([]models.Account, error) {
 	sqlText := db.GetSQL("SearchAccounts")
 	if sqlText == "" {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: SearchAccounts")
@@ -34,9 +34,9 @@ func SearchAccounts(db DB, q string) ([]api.Account, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var list []api.Account
+	var list []models.Account
 	for rows.Next() {
-		var a api.Account
+		var a models.Account
 		if err := rows.Scan(&a.AccountId, &a.FullName); err != nil {
 			return nil, err
 		}
@@ -45,7 +45,7 @@ func SearchAccounts(db DB, q string) ([]api.Account, error) {
 	return list, nil
 }
 
-func SearchRoutes(db DB, q string) ([]api.Route, error) {
+func SearchRoutes(db DB, q string) ([]models.Route, error) {
 	sqlText := db.GetSQL("SearchRoutes")
 	if sqlText == "" {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: SearchRoutes")
@@ -60,9 +60,9 @@ func SearchRoutes(db DB, q string) ([]api.Route, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var list []api.Route
+	var list []models.Route
 	for rows.Next() {
-		var r api.Route
+		var r models.Route
 		if err := rows.Scan(&r.RouteId, &r.Name, &r.RouteDate); err != nil {
 			return nil, err
 		}

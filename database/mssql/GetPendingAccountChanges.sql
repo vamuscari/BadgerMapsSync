@@ -8,3 +8,7 @@ SELECT
     ProcessedAt
 FROM
     AccountsPendingChanges
+WHERE
+    Status = 'pending'
+ORDER BY
+    CreatedAt;

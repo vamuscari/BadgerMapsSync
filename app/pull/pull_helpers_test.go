@@ -2,6 +2,7 @@ package pull_test
 
 import (
 	"badgermaps/api"
+	"badgermaps/api/models"
 	"badgermaps/app"
 	"badgermaps/app/pull"
 	"badgermaps/app/state"
@@ -144,7 +145,7 @@ func TestStoreAccountDetailed(t *testing.T) {
 	defer teardown()
 
 	// Create a mock account object
-	mockAccount := &api.Account{
+	mockAccount := &models.Account{
 		AccountId: null.NewInt(456, true),
 		FirstName: &null.String{NullString: sql.NullString{String: "Jane", Valid: true}},
 		LastName:  null.NewString("Smith", true),

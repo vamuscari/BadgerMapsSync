@@ -1,11 +1,11 @@
 package database
 
 import (
-	"badgermaps/api"
+	"badgermaps/api/models"
 	"fmt"
 )
 
-func GetAccountByID(db DB, accountID int) (*api.Account, error) {
+func GetAccountByID(db DB, accountID int) (*models.Account, error) {
 	sqlText := db.GetSQL("GetAccountById")
 	if sqlText == "" {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: GetAccountById")
@@ -13,7 +13,7 @@ func GetAccountByID(db DB, accountID int) (*api.Account, error) {
 
 	sqlDB := db.GetDB()
 
-	var account api.Account
+	var account models.Account
 	err := sqlDB.QueryRow(sqlText, accountID).Scan(
 		&account.AccountId, &account.FirstName, &account.LastName, &account.FullName, &account.PhoneNumber,
 		&account.Email, &account.CustomerId, &account.Notes, &account.OriginalAddress, &account.CrmId,
@@ -41,7 +41,7 @@ func GetAccountByID(db DB, accountID int) (*api.Account, error) {
 	return &account, nil
 }
 
-func GetCheckinByID(db DB, checkinID int) (*api.Checkin, error) {
+func GetCheckinByID(db DB, checkinID int) (*models.Checkin, error) {
 	sqlText := db.GetSQL("GetCheckinById")
 	if sqlText == "" {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: GetCheckinById")
@@ -49,10 +49,10 @@ func GetCheckinByID(db DB, checkinID int) (*api.Checkin, error) {
 
 	sqlDB := db.GetDB()
 
-	var checkin api.Checkin
+	var checkin models.Checkin
 	err := sqlDB.QueryRow(sqlText, checkinID).Scan(
 		&checkin.CheckinId, &checkin.CrmId, &checkin.AccountId, &checkin.LogDatetime, &checkin.Type,
-		&checkin.Comments, &checkin.ExtraFields, &checkin.CreatedBy,
+		&checkin.Comments, &checkin.ExtraFields, &checkin.EndpointType, &checkin.CreatedBy,
 	)
 	if err != nil {
 		return nil, err
@@ -60,7 +60,7 @@ func GetCheckinByID(db DB, checkinID int) (*api.Checkin, error) {
 	return &checkin, nil
 }
 
-func GetRouteByID(db DB, routeID int) (*api.Route, error) {
+func GetRouteByID(db DB, routeID int) (*models.Route, error) {
 	sqlText := db.GetSQL("GetRouteById")
 	if sqlText == "" {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: GetRouteById")
@@ -68,7 +68,7 @@ func GetRouteByID(db DB, routeID int) (*api.Route, error) {
 
 	sqlDB := db.GetDB()
 
-	var route api.Route
+	var route models.Route
 	err := sqlDB.QueryRow(sqlText, routeID).Scan(
 		&route.RouteId, &route.Name, &route.RouteDate, &route.Duration, &route.StartAddress,
 		&route.DestinationAddress, &route.StartTime,
@@ -79,7 +79,7 @@ func GetRouteByID(db DB, routeID int) (*api.Route, error) {
 	return &route, nil
 }
 
-func GetProfile(db DB) (*api.UserProfile, error) {
+func GetProfile(db DB) (*models.UserProfile, error) {
 	sqlText := db.GetSQL("GetProfile")
 	if sqlText == "" {
 		return nil, fmt.Errorf("unknown or unavailable SQL command: GetProfile")
@@ -87,7 +87,7 @@ func GetProfile(db DB) (*api.UserProfile, error) {
 
 	sqlDB := db.GetDB()
 
-	var profile api.UserProfile
+	var profile models.UserProfile
 	err := sqlDB.QueryRow(sqlText).Scan(
 		&profile.ProfileId, &profile.Email, &profile.FirstName, &profile.LastName, &profile.IsManager,
 		&profile.IsHideReferralIOSBanner, &profile.MarkerIcon, &profile.Manager, &profile.CRMEditableFieldsList,

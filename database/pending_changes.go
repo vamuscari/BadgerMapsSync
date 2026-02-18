@@ -17,14 +17,20 @@ type AccountPendingChange struct {
 }
 
 type CheckinPendingChange struct {
-	ChangeId    int
-	CheckinId   int
-	AccountId   int
-	ChangeType  string
-	Changes     string
-	Status      string
-	CreatedAt   time.Time
-	ProcessedAt sql.NullTime
+	ChangeId     int
+	CheckinId    int
+	AccountId    int
+	CrmId        sql.NullString
+	LogDatetime  sql.NullString
+	Type         sql.NullString
+	Comments     sql.NullString
+	ExtraFields  sql.NullString
+	EndpointType sql.NullString
+	CreatedBy    sql.NullString
+	ChangeType   string
+	Status       string
+	CreatedAt    time.Time
+	ProcessedAt  sql.NullTime
 }
 
 func GetPendingAccountChanges(db DB) ([]AccountPendingChange, error) {
@@ -67,7 +73,22 @@ func GetPendingCheckinChanges(db DB) ([]CheckinPendingChange, error) {
 	var changes []CheckinPendingChange
 	for rows.Next() {
 		var change CheckinPendingChange
-		if err := rows.Scan(&change.ChangeId, &change.CheckinId, &change.AccountId, &change.ChangeType, &change.Changes, &change.Status, &change.CreatedAt, &change.ProcessedAt); err != nil {
+		if err := rows.Scan(
+			&change.ChangeId,
+			&change.CheckinId,
+			&change.AccountId,
+			&change.CrmId,
+			&change.LogDatetime,
+			&change.Type,
+			&change.Comments,
+			&change.ExtraFields,
+			&change.EndpointType,
+			&change.CreatedBy,
+			&change.ChangeType,
+			&change.Status,
+			&change.CreatedAt,
+			&change.ProcessedAt,
+		); err != nil {
 			return nil, err
 		}
 		changes = append(changes, change)

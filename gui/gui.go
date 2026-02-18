@@ -1163,7 +1163,7 @@ func (ui *Gui) createPendingChangesTable(entityType string) fyne.CanvasObject {
 			})
 		}
 	case "checkins":
-		headers = []string{"ID", "Checkin ID", "Account ID", "Type", "Status", "Created At", "Changes"}
+		headers = []string{"ID", "Checkin ID", "Account ID", "Change Type", "Endpoint", "Checkin Type", "Status", "Created At", "Comments"}
 		changes, ok := results.([]database.CheckinPendingChange)
 		if !ok {
 			return widget.NewLabel("Error: Could not load check-in changes.")
@@ -1174,9 +1174,11 @@ func (ui *Gui) createPendingChangesTable(entityType string) fyne.CanvasObject {
 				fmt.Sprintf("%d", c.CheckinId),
 				fmt.Sprintf("%d", c.AccountId),
 				c.ChangeType,
+				c.EndpointType.String,
+				c.Type.String,
 				c.Status,
 				c.CreatedAt.Format(time.RFC3339),
-				c.Changes,
+				c.Comments.String,
 			})
 		}
 	}
@@ -3235,7 +3237,12 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 	// Other Settings
 	verboseCheck := widget.NewCheck("Debug", nil)
 	verboseCheck.SetChecked(ui.app.State.Debug)
-	otherCard := ui.newSectionCard("Other Settings", "", verboseCheck)
+	testCustomCheckinsCheck := widget.NewCheck("Enable custom checkin API", nil)
+	testCustomCheckinsCheck.SetChecked(ui.app.Config.CustomCheckins)
+	otherCard := ui.newSectionCard("Other Settings", "", container.NewVBox(
+		verboseCheck,
+		testCustomCheckinsCheck,
+	))
 
 	// Buttons
 	saveButton := NewSecondaryButton("Save Configuration", theme.ConfirmIcon(), func() {
@@ -3253,6 +3260,7 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 			verboseCheck.Checked,
 			maxConcurrentEntry.Text,
 			parallelProcessingCheck.Checked,
+			testCustomCheckinsCheck.Checked,
 		)
 	})
 

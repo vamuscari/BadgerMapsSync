@@ -86,3 +86,96 @@ func TestMatchFunction(t *testing.T) {
 		})
 	}
 }
+
+func TestEventDispatcher_NonBlockingDispatchMaintainsListenerOrder(t *testing.T) {
+	dispatcher := NewEventDispatcher()
+	blocker := make(chan struct{})
+	received := make(chan EventType, 2)
+
+	dispatcher.Subscribe("pull.*", func(e Event) {
+		if e.Type == "pull.start" {
+			<-blocker
+		}
+		received <- e.Type
+	})
+
+	start := time.Now()
+	dispatcher.Dispatch(Event{Type: "pull.start"})
+	dispatcher.Dispatch(Event{Type: "pull.complete"})
+
+	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
+		t.Fatalf("dispatch should be non-blocking, took %v", elapsed)
+	}
+
+	close(blocker)
+
+	var got []EventType
+	timeout := time.After(1 * time.Second)
+	for len(got) < 2 {
+		select {
+		case e := <-received:
+			got = append(got, e)
+		case <-timeout:
+			t.Fatalf("timed out waiting for listener events, got %v", got)
+		}
+	}
+
+	if got[0] != "pull.start" || got[1] != "pull.complete" {
+		t.Fatalf("expected in-order delivery [pull.start pull.complete], got %v", got)
+	}
+}
+
+func TestEventDispatcher_WaitForDrain(t *testing.T) {
+	dispatcher := NewEventDispatcher()
+	release := make(chan struct{})
+
+	dispatcher.Subscribe("pull.start", func(e Event) {
+		<-release
+	})
+
+	dispatcher.Dispatch(Event{Type: "pull.start"})
+
+	done := make(chan bool, 1)
+	go func() {
+		done <- dispatcher.WaitForDrain(1 * time.Second)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("wait should not complete before listener drains")
+	case <-time.After(50 * time.Millisecond):
+		// expected
+	}
+
+	close(release)
+
+	select {
+	case ok := <-done:
+		if !ok {
+			t.Fatal("expected wait to succeed after listener drained")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for dispatcher to drain")
+	}
+}
+
+func TestEventDispatcher_WaitForDrainTimeout(t *testing.T) {
+	dispatcher := NewEventDispatcher()
+	block := make(chan struct{})
+
+	dispatcher.Subscribe("pull.start", func(e Event) {
+		<-block
+	})
+
+	dispatcher.Dispatch(Event{Type: "pull.start"})
+
+	if ok := dispatcher.WaitForDrain(20 * time.Millisecond); ok {
+		t.Fatal("expected wait to time out while listener is blocked")
+	}
+
+	close(block)
+
+	if ok := dispatcher.WaitForDrain(1 * time.Second); !ok {
+		t.Fatal("expected wait to succeed once listener unblocks")
+	}
+}
