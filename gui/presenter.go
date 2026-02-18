@@ -551,6 +551,7 @@ func (p *GuiPresenter) HandleSaveConfig(
 	if err := p.app.ReloadDB(); err != nil {
 		p.app.Events.Dispatch(events.Errorf("presenter", "ERROR reloading database: %v", err))
 		p.view.ShowToast("Error: Failed to reload database.")
+		return
 	}
 
 	p.view.ApplyThemePreference(p.app.Config.ThemePreference)
@@ -645,6 +646,23 @@ func (p *GuiPresenter) HandleTestDBConnection(dbType, dbPath, dbHost, dbPortStr,
 // HandleSchemaEnforcement initializes or re-initializes the database schema.
 func (p *GuiPresenter) HandleSchemaEnforcement() {
 	p.app.Events.Dispatch(events.Debugf("presenter", "HandleSchemaEnforcement called"))
+	if p.app.DB == nil {
+		p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: Database is not configured."))
+		p.view.ShowToast("Error: Database is not configured.")
+		return
+	}
+	if p.app.DB.GetDB() == nil {
+		if err := p.app.DB.Connect(); err != nil {
+			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: Failed to connect database before schema action: %v", err))
+			p.view.ShowToast("Error: Failed to connect to database.")
+			return
+		}
+		if err := p.app.DB.TestConnection(); err != nil {
+			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: Database connection test failed before schema action: %v", err))
+			p.view.ShowToast("Error: Failed to verify database connection.")
+			return
+		}
+	}
 	if err := p.app.DB.ValidateSchema(p.app.State); err == nil {
 		// Schema exists, confirm re-initialization
 		p.view.ShowConfirmDialog("Re-initialize Schema?", "This will delete all existing data. Are you sure?", func(ok bool) {

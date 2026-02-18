@@ -93,6 +93,11 @@ func TestSQLFiles(t *testing.T) {
 		"CheckProcedureExists.sql",
 		"CheckTriggerExists.sql",
 	}
+	mssqlExtraFiles := []string{
+		"AddAccountCheckinsPendingChangesAccountIdColumn.sql",
+		"AddAccountCheckinsEndpointTypeColumn.sql",
+		"AddAccountCheckinsPendingChangesEndpointTypeColumn.sql",
+	}
 
 	checkFiles := func(t *testing.T, dir string, expected []string) {
 		actualFiles := make(map[string]bool)
@@ -138,8 +143,77 @@ func TestSQLFiles(t *testing.T) {
 	})
 
 	t.Run("mssql", func(t *testing.T) {
-		checkFiles(t, filepath.Join("database", "mssql"), append(baseExpectedFiles, postgresMssqlExtraFiles...))
+		checkFiles(t, filepath.Join("database", "mssql"), append(append(baseExpectedFiles, postgresMssqlExtraFiles...), mssqlExtraFiles...))
 	})
+}
+
+func TestExtractMSSQLCreateTableColumnDefinitions(t *testing.T) {
+	mssqlDB := &MSSQLConfig{}
+	sqlText := mssqlDB.GetSQL("CreateAccountCheckinsPendingChangesTable")
+	if sqlText == "" {
+		t.Fatalf("failed to load MSSQL create table SQL for AccountCheckinsPendingChanges")
+	}
+
+	definitions, err := extractMSSQLCreateTableColumnDefinitions(sqlText)
+	if err != nil {
+		t.Fatalf("failed to parse MSSQL create table SQL: %v", err)
+	}
+
+	definitionsByColumn := make(map[string]string, len(definitions))
+	for _, definition := range definitions {
+		definitionsByColumn[strings.ToLower(definition.Name)] = definition.Definition
+	}
+
+	if _, ok := definitionsByColumn["accountid"]; !ok {
+		t.Fatalf("expected parsed definitions to include AccountId")
+	}
+
+	if crmDef, ok := definitionsByColumn["crmid"]; !ok {
+		t.Fatalf("expected parsed definitions to include CrmId")
+	} else if !strings.Contains(strings.ToUpper(crmDef), "NVARCHAR") {
+		t.Fatalf("expected CrmId definition to include NVARCHAR, got: %s", crmDef)
+	}
+}
+
+func TestBuildMSSQLFallbackColumnDefinition(t *testing.T) {
+	tests := []struct {
+		name        string
+		definition  string
+		contains    []string
+		notContains []string
+	}{
+		{
+			name:        "not null to nullable",
+			definition:  "INT NOT NULL",
+			contains:    []string{"INT", "NULL"},
+			notContains: []string{"NOT NULL"},
+		},
+		{
+			name:        "strip identity and primary key",
+			definition:  "INT IDENTITY(1,1) PRIMARY KEY",
+			contains:    []string{"INT", "NULL"},
+			notContains: []string{"IDENTITY", "PRIMARY KEY"},
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			fallback := buildMSSQLFallbackColumnDefinition(testCase.definition)
+			upperFallback := strings.ToUpper(fallback)
+
+			for _, expected := range testCase.contains {
+				if !strings.Contains(upperFallback, strings.ToUpper(expected)) {
+					t.Fatalf("expected fallback definition %q to contain %q", fallback, expected)
+				}
+			}
+
+			for _, unexpected := range testCase.notContains {
+				if strings.Contains(upperFallback, strings.ToUpper(unexpected)) {
+					t.Fatalf("expected fallback definition %q to not contain %q", fallback, unexpected)
+				}
+			}
+		})
+	}
 }
 
 func TestEnforceSchema(t *testing.T) {

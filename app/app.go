@@ -147,6 +147,13 @@ func (a *App) InitLogging() error {
 	if logPath == "" {
 		logPath = a.Config.LogFile
 	}
+	if strings.TrimSpace(logPath) == "" {
+		logPath = a.defaultLogFilePath()
+	}
+	a.State.LogFile = logPath
+	if strings.TrimSpace(a.Config.LogFile) == "" {
+		a.Config.LogFile = logPath
+	}
 
 	var err error
 	a.LogListener, err = events.NewLogListener(a.State, logPath)
@@ -156,6 +163,19 @@ func (a *App) InitLogging() error {
 
 	a.Events.Subscribe("log", a.LogListener.Handle)
 	return nil
+}
+
+func (a *App) defaultLogFilePath() string {
+	configPath := strings.TrimSpace(a.ConfigFile)
+	if configPath == "" {
+		if detectedPath, ok, err := a.GetConfigFilePath(); err == nil && ok {
+			configPath = strings.TrimSpace(detectedPath)
+		}
+	}
+	if configPath != "" {
+		return filepath.Join(filepath.Dir(configPath), "badgermaps.log")
+	}
+	return utils.GetConfigDirFile("badgermaps.log")
 }
 
 func (a *App) LoadConfig() error {
@@ -386,7 +406,23 @@ func (a *App) ReloadDB() error {
 	}
 	var err error
 	a.DB, err = database.NewDB(&a.Config.DB)
-	return err
+	if err != nil {
+		return err
+	}
+	if a.DB == nil {
+		return fmt.Errorf("database connection is not initialized")
+	}
+	if err := a.DB.Connect(); err != nil {
+		a.DB.Close()
+		a.DB = nil
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+	if err := a.DB.TestConnection(); err != nil {
+		a.DB.Close()
+		a.DB = nil
+		return fmt.Errorf("failed to test database connection: %w", err)
+	}
+	return nil
 }
 
 func (a *App) GetConfigFilePath() (string, bool, error) {
@@ -401,13 +437,22 @@ func (a *App) GetConfigFilePath() (string, bool, error) {
 
 	// Auto-detection logic
 	// 1. Check local config.yaml
-	if utils.CheckIfFileExists(filepath.Join(".", "config.yaml")) {
-		return filepath.Join(".", "config.yaml"), true, nil
+	localConfigPath := filepath.Join(".", "config.yaml")
+	if utils.CheckIfFileExists(localConfigPath) {
+		absPath, err := filepath.Abs(localConfigPath)
+		if err != nil {
+			return "", false, fmt.Errorf("error getting absolute path for %s: %w", localConfigPath, err)
+		}
+		return absPath, true, nil
 	}
 	// 2. Check user config directory
 	userConfigPath := utils.GetConfigDirFile("config.yaml")
 	if utils.CheckIfFileExists(userConfigPath) {
-		return userConfigPath, true, nil
+		absPath, err := filepath.Abs(userConfigPath)
+		if err != nil {
+			return "", false, fmt.Errorf("error getting absolute path for %s: %w", userConfigPath, err)
+		}
+		return absPath, true, nil
 	}
 
 	return "", false, nil

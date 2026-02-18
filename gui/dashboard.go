@@ -31,6 +31,8 @@ func NewSmartDashboard(ui *Gui, presenter *GuiPresenter) *SmartDashboard {
 
 // CreateContent builds the smart dashboard interface
 func (d *SmartDashboard) CreateContent() fyne.CanvasObject {
+	d.ui.app.Events.Dispatch(events.Debugf("dashboard", "Building dashboard content"))
+
 	// Header with greeting and status
 	header := d.createHeader()
 
@@ -42,6 +44,7 @@ func (d *SmartDashboard) CreateContent() fyne.CanvasObject {
 
 	// Refresh button pinned to page bottom
 	refreshBtn := widget.NewButtonWithIcon("Refresh", theme.ViewRefreshIcon(), func() {
+		d.ui.app.Events.Dispatch(events.Infof("dashboard", "Dashboard refresh requested"))
 		d.presenter.HandleRefreshStatus()
 		// Refresh the dashboard
 		if d.ui.tabs != nil {
@@ -200,6 +203,7 @@ func (d *SmartDashboard) createConnectionCard(title, statusText string, isHealth
 func (d *SmartDashboard) showRecentActivityInDetails() {
 	// Get actual recent activities or show placeholder
 	activities := d.getRecentActivities()
+	d.ui.app.Events.Dispatch(events.Debugf("dashboard", "Rendering recent activity panel with %d item(s)", len(activities)))
 
 	var activityContent []fyne.CanvasObject
 
@@ -451,6 +455,8 @@ func (d *SmartDashboard) getSystemStatistics() []SystemStat {
 		})
 	}
 
+	d.ui.app.Events.Dispatch(events.Debugf("dashboard", "Computed %d dashboard statistic card(s)", len(stats)))
+
 	return stats
 }
 
@@ -515,29 +521,31 @@ type LastSyncInfo struct {
 
 // getLastSyncInfo gets information about the last sync
 func (d *SmartDashboard) getLastSyncInfo() LastSyncInfo {
-    if d.ui.app.DB == nil || !d.ui.app.DB.IsConnected() {
-        return LastSyncInfo{
-            Time:   "Unavailable",
-            Status: "Connect the database to track sync runs",
-        }
-    }
+	if d.ui.app.DB == nil || !d.ui.app.DB.IsConnected() {
+		d.ui.app.Events.Dispatch(events.Debugf("dashboard", "Sync history unavailable because database is not connected"))
+		return LastSyncInfo{
+			Time:   "Unavailable",
+			Status: "Connect the database to track sync runs",
+		}
+	}
 
-    // Guard against missing schema on first run
-    if exists, err := d.ui.app.DB.TableExists("SyncHistory"); err != nil || !exists {
-        return LastSyncInfo{
-            Time:   "Never",
-            Status: "No sync history recorded yet",
-        }
-    }
+	// Guard against missing schema on first run
+	if exists, err := d.ui.app.DB.TableExists("SyncHistory"); err != nil || !exists {
+		d.ui.app.Events.Dispatch(events.Debugf("dashboard", "SyncHistory table missing or unavailable"))
+		return LastSyncInfo{
+			Time:   "Never",
+			Status: "No sync history recorded yet",
+		}
+	}
 
-    entries, err := database.GetRecentSyncHistory(d.ui.app.DB, 10)
-    if err != nil {
-        d.ui.app.Events.Dispatch(events.Errorf("dashboard", "Failed to load sync history: %v", err))
-        return LastSyncInfo{
-            Time:   "Unknown",
-            Status: "Unable to load sync history",
-        }
-    }
+	entries, err := database.GetRecentSyncHistory(d.ui.app.DB, 10)
+	if err != nil {
+		d.ui.app.Events.Dispatch(events.Errorf("dashboard", "Failed to load sync history: %v", err))
+		return LastSyncInfo{
+			Time:   "Unknown",
+			Status: "Unable to load sync history",
+		}
+	}
 
 	var inProgress *database.SyncHistoryEntry
 	for i := range entries {

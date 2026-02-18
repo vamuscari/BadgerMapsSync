@@ -6,31 +6,36 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
 
 // LogListener handles log events and prints them to the console or a file.
 type LogListener struct {
-	State  *state.State
-	writer io.Writer
-	file   *os.File
+	State         *state.State
+	consoleWriter io.Writer
+	fileWriter    io.Writer
+	file          *os.File
 }
 
 // NewLogListener creates a new LogListener.
 func NewLogListener(state *state.State, logFilePath string) (*LogListener, error) {
 	l := &LogListener{
-		State:  state,
-		writer: os.Stdout, // Default to stdout
+		State:         state,
+		consoleWriter: os.Stdout,
 	}
 
 	if logFilePath != "" {
+		if err := utils.EnsureDirExists(filepath.Dir(logFilePath)); err != nil {
+			return nil, fmt.Errorf("failed to create log directory: %w", err)
+		}
 		file, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open log file: %w", err)
 		}
 		l.file = file
-		l.writer = file
+		l.fileWriter = file
 	}
 
 	return l, nil
@@ -54,11 +59,6 @@ func (l *LogListener) Handle(e Event) {
 		return // Not a log event we can handle
 	}
 
-	// Respect quiet and verbosity settings
-	if payload.Level == LogLevelDebug && !(l.State.Debug || l.State.Verbose) {
-		return
-	}
-
 	// Prepare output parts
 	timestamp := payload.Timestamp
 	if timestamp.IsZero() {
@@ -67,37 +67,35 @@ func (l *LogListener) Handle(e Event) {
 	timestampStr := timestamp.Format("2006-01-02 15:04:05")
 	levelStr := payload.Level.String()
 	sourceStr := e.Source
-	colorize := l.file == nil
 
-	// Build the log string
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%s ", timestampStr))
-	paddedLevel := fmt.Sprintf("%-5s", levelStr)
-	switch payload.Level {
-	case LogLevelDebug:
-		if colorize {
-			paddedLevel = utils.Colors.Gray("%-5s", levelStr)
+	buildLine := func(colorize bool) string {
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("%s ", timestampStr))
+		paddedLevel := fmt.Sprintf("%-5s", levelStr)
+		switch payload.Level {
+		case LogLevelDebug:
+			if colorize {
+				paddedLevel = utils.Colors.Gray("%-5s", levelStr)
+			}
+		case LogLevelInfo:
+			if colorize {
+				paddedLevel = utils.Colors.Cyan("%-5s", levelStr)
+			}
+		case LogLevelWarn:
+			if colorize {
+				paddedLevel = utils.Colors.Yellow("%-5s", levelStr)
+			}
+		case LogLevelError:
+			if colorize {
+				paddedLevel = utils.Colors.Red("%-5s", levelStr)
+			}
 		}
-	case LogLevelInfo:
-		if colorize {
-			paddedLevel = utils.Colors.Cyan("%-5s", levelStr)
+		sb.WriteString(paddedLevel + " ")
+		sb.WriteString(fmt.Sprintf("[%s] ", sourceStr))
+		sb.WriteString(payload.Message)
+		if len(payload.Fields) > 0 {
+			sb.WriteString(" ")
 		}
-	case LogLevelWarn:
-		if colorize {
-			paddedLevel = utils.Colors.Yellow("%-5s", levelStr)
-		}
-	case LogLevelError:
-		if colorize {
-			paddedLevel = utils.Colors.Red("%-5s", levelStr)
-		}
-	}
-	sb.WriteString(paddedLevel + " ")
-	sb.WriteString(fmt.Sprintf("[%s] ", sourceStr))
-	sb.WriteString(payload.Message)
-
-	// Append fields if they exist
-	if len(payload.Fields) > 0 {
-		sb.WriteString(" ")
 		first := true
 		for k, v := range payload.Fields {
 			if !first {
@@ -107,9 +105,21 @@ func (l *LogListener) Handle(e Event) {
 			sb.WriteString(fmt.Sprintf("%v", v))
 			first = false
 		}
+		sb.WriteString("\n")
+		return sb.String()
 	}
-	sb.WriteString("\n")
 
-	// Write to the configured writer
-	fmt.Fprint(l.writer, sb.String())
+	// Console output: preserve existing behavior (debug logs only in debug/verbose mode).
+	if payload.Level != LogLevelDebug || l.State.Debug || l.State.Verbose {
+		fmt.Fprint(l.consoleWriter, buildLine(true))
+	}
+
+	// File output:
+	// - debug on: write all levels
+	// - debug off: write only errors
+	if l.fileWriter != nil {
+		if l.State.Debug || payload.Level == LogLevelError {
+			fmt.Fprint(l.fileWriter, buildLine(false))
+		}
+	}
 }

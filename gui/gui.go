@@ -860,8 +860,8 @@ func (ui *Gui) createHomeTab() fyne.CanvasObject {
 	)
 }
 
-// RefreshAllTabs rebuilds the main tabs, which is useful when connection status changes.
-func (ui *Gui) RefreshAllTabs() {
+// refreshAllTabs rebuilds the main tabs on the UI thread.
+func (ui *Gui) refreshAllTabs() {
 	if ui.tabs == nil {
 		return
 	}
@@ -899,7 +899,15 @@ func (ui *Gui) RefreshAllTabs() {
 	ui.tabs.Refresh()
 }
 
-func (ui *Gui) RefreshHomeTab() {
+// RefreshAllTabs rebuilds the main tabs, which is useful when connection status changes.
+func (ui *Gui) RefreshAllTabs() {
+	fyne.Do(func() {
+		ui.refreshAllTabs()
+	})
+}
+
+// refreshHomeTab rebuilds and refreshes the home tab on the UI thread.
+func (ui *Gui) refreshHomeTab() {
 	if ui.tabs != nil {
 		for _, tab := range ui.tabs.Items {
 			if tab.Text == "Home" {
@@ -909,6 +917,12 @@ func (ui *Gui) RefreshHomeTab() {
 		}
 		ui.tabs.Refresh()
 	}
+}
+
+func (ui *Gui) RefreshHomeTab() {
+	fyne.Do(func() {
+		ui.refreshHomeTab()
+	})
 }
 
 func (ui *Gui) createRightPaneHeader() fyne.CanvasObject {
@@ -1119,7 +1133,7 @@ func (ui *Gui) createPushTab() fyne.CanvasObject {
 	return container.NewVScroll(container.NewBorder(pushCard, nil, nil, nil, changesCard))
 }
 
-func (ui *Gui) RefreshPushTab() {
+func (ui *Gui) refreshPushTab() {
 	if ui.tabs != nil {
 		for _, tab := range ui.tabs.Items {
 			if tab.Text == "Push" {
@@ -1129,6 +1143,12 @@ func (ui *Gui) RefreshPushTab() {
 		}
 		ui.tabs.Refresh()
 	}
+}
+
+func (ui *Gui) RefreshPushTab() {
+	fyne.Do(func() {
+		ui.refreshPushTab()
+	})
 }
 
 func (ui *Gui) createPendingChangesTable(entityType string) fyne.CanvasObject {
@@ -3355,8 +3375,8 @@ func (ui *Gui) GetMainWindow() fyne.Window {
 	return ui.window
 }
 
-// refreshConfigTab rebuilds and refreshes the configuration tab
-func (ui *Gui) RefreshConfigTab() {
+// refreshConfigTab rebuilds and refreshes the configuration tab on the UI thread.
+func (ui *Gui) refreshConfigTab() {
 	newConfigTab := ui.buildConfigTab()
 	ui.configTab = newConfigTab
 	if ui.tabs != nil {
@@ -3368,6 +3388,13 @@ func (ui *Gui) RefreshConfigTab() {
 		}
 		ui.tabs.Refresh()
 	}
+}
+
+// RefreshConfigTab rebuilds and refreshes the configuration tab.
+func (ui *Gui) RefreshConfigTab() {
+	fyne.Do(func() {
+		ui.refreshConfigTab()
+	})
 }
 
 // WrappingLabel is a simple custom widget that wraps text.

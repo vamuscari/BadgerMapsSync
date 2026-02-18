@@ -40,6 +40,345 @@ var postgresFS embed.FS
 //go:embed sqlite3/*.sql
 var sqlite3FS embed.FS
 
+type columnMigration struct {
+	Table   string
+	Column  string
+	Command string
+}
+
+type mssqlColumnDefinition struct {
+	Name       string
+	Definition string
+}
+
+var legacyColumnMigrations = []columnMigration{
+	{
+		Table:   "AccountCheckins",
+		Column:  "EndpointType",
+		Command: "AddAccountCheckinsEndpointTypeColumn",
+	},
+	{
+		Table:   "AccountCheckinsPendingChanges",
+		Column:  "AccountId",
+		Command: "AddAccountCheckinsPendingChangesAccountIdColumn",
+	},
+	{
+		Table:   "AccountCheckinsPendingChanges",
+		Column:  "EndpointType",
+		Command: "AddAccountCheckinsPendingChangesEndpointTypeColumn",
+	},
+}
+
+func applyColumnMigrations(db DB, migrations []columnMigration, s *state.State) error {
+	sqlDB := db.GetDB()
+	if sqlDB == nil {
+		return fmt.Errorf("database connection is not initialized")
+	}
+
+	checkSQL := db.GetSQL("CheckColumnExists")
+	if checkSQL == "" {
+		return fmt.Errorf("failed to load SQL command 'CheckColumnExists' for database type '%s'", db.GetType())
+	}
+
+	for _, migration := range migrations {
+		var count int
+		if err := sqlDB.QueryRow(checkSQL, migration.Table, migration.Column).Scan(&count); err != nil {
+			return fmt.Errorf("failed to inspect column '%s' on table '%s': %w", migration.Column, migration.Table, err)
+		}
+		if count > 0 {
+			continue
+		}
+
+		alterSQL := db.GetSQL(migration.Command)
+		if alterSQL == "" {
+			return fmt.Errorf("failed to load SQL command '%s' for database type '%s'", migration.Command, db.GetType())
+		}
+
+		if (s.Verbose || s.Debug) && !s.Quiet {
+			fmt.Printf("Applying schema migration: %s.%s... ", migration.Table, migration.Column)
+		}
+		if _, err := sqlDB.Exec(alterSQL); err != nil {
+			if (s.Verbose || s.Debug) && !s.Quiet {
+				fmt.Println(color.RedString("ERROR"))
+			}
+			return fmt.Errorf("failed to apply schema migration for column '%s' on table '%s': %w", migration.Column, migration.Table, err)
+		}
+		if (s.Verbose || s.Debug) && !s.Quiet {
+			fmt.Println(color.GreenString("OK"))
+		}
+	}
+
+	return nil
+}
+
+func addMSSQLMissingColumnsRecursively(db *MSSQLConfig, s *state.State) error {
+	sqlDB := db.GetDB()
+	if sqlDB == nil {
+		return fmt.Errorf("database connection is not initialized")
+	}
+
+	definitionsByTable := make(map[string][]mssqlColumnDefinition, len(RequiredTables()))
+	for _, tableName := range RequiredTables() {
+		createCmd := CreateCommandForTable(tableName)
+		createSQL := db.GetSQL(createCmd)
+		if createSQL == "" {
+			return fmt.Errorf("failed to load SQL command '%s' for database type '%s'", createCmd, db.GetType())
+		}
+
+		definitions, err := extractMSSQLCreateTableColumnDefinitions(createSQL)
+		if err != nil {
+			return fmt.Errorf("failed to parse column definitions for table '%s': %w", tableName, err)
+		}
+		definitionsByTable[tableName] = definitions
+	}
+
+	const maxPasses = 8
+	for pass := 1; pass <= maxPasses; pass++ {
+		changed := false
+
+		for _, tableName := range RequiredTables() {
+			definitions := definitionsByTable[tableName]
+			if len(definitions) == 0 {
+				continue
+			}
+
+			columns, err := db.GetTableColumns(tableName)
+			if err != nil {
+				return fmt.Errorf("failed to get columns for table '%s': %w", tableName, err)
+			}
+
+			existingColumns := make(map[string]struct{}, len(columns))
+			for _, column := range columns {
+				existingColumns[normalizeSQLIdentifier(column)] = struct{}{}
+			}
+
+			for _, definition := range definitions {
+				normalizedColumn := normalizeSQLIdentifier(definition.Name)
+				if _, exists := existingColumns[normalizedColumn]; exists {
+					continue
+				}
+
+				if (s.Verbose || s.Debug) && !s.Quiet {
+					fmt.Printf("Adding missing column: %s.%s... ", tableName, definition.Name)
+				}
+				if err := addMSSQLColumnFromDefinition(sqlDB, tableName, definition); err != nil {
+					if (s.Verbose || s.Debug) && !s.Quiet {
+						fmt.Println(color.RedString("ERROR"))
+					}
+					return fmt.Errorf("failed to add missing column '%s' to table '%s': %w", definition.Name, tableName, err)
+				}
+				if (s.Verbose || s.Debug) && !s.Quiet {
+					fmt.Println(color.GreenString("OK"))
+				}
+
+				existingColumns[normalizedColumn] = struct{}{}
+				changed = true
+			}
+		}
+
+		if !changed {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("schema migration exceeded maximum number of passes while adding missing columns")
+}
+
+func addMSSQLColumnFromDefinition(sqlDB *sql.DB, tableName string, definition mssqlColumnDefinition) error {
+	quotedTable := fmt.Sprintf("[%s]", escapeMSSQLIdentifier(tableName))
+	quotedColumn := fmt.Sprintf("[%s]", escapeMSSQLIdentifier(definition.Name))
+	fullDefinition := strings.TrimSpace(definition.Definition)
+	primarySQL := fmt.Sprintf("ALTER TABLE %s ADD %s %s;", quotedTable, quotedColumn, fullDefinition)
+
+	if _, err := sqlDB.Exec(primarySQL); err == nil {
+		return nil
+	} else {
+		fallbackDefinition := buildMSSQLFallbackColumnDefinition(fullDefinition)
+		if fallbackDefinition == "" || strings.EqualFold(fallbackDefinition, fullDefinition) {
+			return err
+		}
+
+		fallbackSQL := fmt.Sprintf("ALTER TABLE %s ADD %s %s;", quotedTable, quotedColumn, fallbackDefinition)
+		if _, fallbackErr := sqlDB.Exec(fallbackSQL); fallbackErr != nil {
+			return fmt.Errorf("%w (fallback failed: %v)", err, fallbackErr)
+		}
+	}
+
+	return nil
+}
+
+func buildMSSQLFallbackColumnDefinition(definition string) string {
+	fallback := strings.TrimSpace(definition)
+	fallback = mssqlPrimaryKeyRegex.ReplaceAllString(fallback, "")
+	fallback = mssqlUniqueRegex.ReplaceAllString(fallback, "")
+	fallback = mssqlIdentityRegex.ReplaceAllString(fallback, "")
+	if mssqlNotNullRegex.MatchString(fallback) {
+		fallback = mssqlNotNullRegex.ReplaceAllString(fallback, "NULL")
+	} else if !mssqlNullRegex.MatchString(fallback) {
+		fallback += " NULL"
+	}
+	return strings.Join(strings.Fields(fallback), " ")
+}
+
+func extractMSSQLCreateTableColumnDefinitions(createSQL string) ([]mssqlColumnDefinition, error) {
+	columnsBlock, err := extractCreateTableColumnsBlock(createSQL)
+	if err != nil {
+		return nil, err
+	}
+
+	clauses := splitTopLevelSQLClauses(columnsBlock)
+	definitions := make([]mssqlColumnDefinition, 0, len(clauses))
+	for _, clause := range clauses {
+		clause = strings.TrimSpace(clause)
+		if clause == "" || isMSSQLTableConstraintClause(clause) {
+			continue
+		}
+
+		columnName, columnDefinition, ok := splitMSSQLColumnDefinition(clause)
+		if !ok || strings.TrimSpace(columnDefinition) == "" {
+			continue
+		}
+		definitions = append(definitions, mssqlColumnDefinition{
+			Name:       columnName,
+			Definition: strings.TrimSpace(columnDefinition),
+		})
+	}
+
+	return definitions, nil
+}
+
+func extractCreateTableColumnsBlock(createSQL string) (string, error) {
+	upperSQL := strings.ToUpper(createSQL)
+	createTableIndex := strings.Index(upperSQL, "CREATE TABLE")
+	if createTableIndex == -1 {
+		return "", fmt.Errorf("CREATE TABLE statement not found")
+	}
+
+	openParenOffset := strings.Index(createSQL[createTableIndex:], "(")
+	if openParenOffset == -1 {
+		return "", fmt.Errorf("opening parenthesis for CREATE TABLE not found")
+	}
+	openParenIndex := createTableIndex + openParenOffset
+
+	depth := 0
+	inString := false
+	for i := openParenIndex; i < len(createSQL); i++ {
+		ch := createSQL[i]
+		if ch == '\'' {
+			if inString && i+1 < len(createSQL) && createSQL[i+1] == '\'' {
+				i++
+				continue
+			}
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+
+		switch ch {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return createSQL[openParenIndex+1 : i], nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("unclosed CREATE TABLE column definition list")
+}
+
+func splitTopLevelSQLClauses(input string) []string {
+	clauses := make([]string, 0, 8)
+	start := 0
+	depth := 0
+	inString := false
+
+	for i := 0; i < len(input); i++ {
+		ch := input[i]
+		if ch == '\'' {
+			if inString && i+1 < len(input) && input[i+1] == '\'' {
+				i++
+				continue
+			}
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+
+		switch ch {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				clauses = append(clauses, input[start:i])
+				start = i + 1
+			}
+		}
+	}
+
+	if start < len(input) {
+		clauses = append(clauses, input[start:])
+	}
+
+	return clauses
+}
+
+func isMSSQLTableConstraintClause(clause string) bool {
+	upperClause := strings.ToUpper(strings.TrimSpace(clause))
+	return strings.HasPrefix(upperClause, "PRIMARY KEY") ||
+		strings.HasPrefix(upperClause, "FOREIGN KEY") ||
+		strings.HasPrefix(upperClause, "UNIQUE") ||
+		strings.HasPrefix(upperClause, "CONSTRAINT") ||
+		strings.HasPrefix(upperClause, "CHECK")
+}
+
+func splitMSSQLColumnDefinition(clause string) (string, string, bool) {
+	clause = strings.TrimSpace(clause)
+	if clause == "" {
+		return "", "", false
+	}
+
+	if strings.HasPrefix(clause, "[") {
+		endIndex := strings.Index(clause, "]")
+		if endIndex == -1 {
+			return "", "", false
+		}
+
+		columnName := clause[1:endIndex]
+		columnDefinition := strings.TrimSpace(clause[endIndex+1:])
+		return columnName, columnDefinition, columnDefinition != ""
+	}
+
+	for i, r := range clause {
+		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			columnName := clause[:i]
+			columnDefinition := strings.TrimSpace(clause[i+1:])
+			return columnName, columnDefinition, columnDefinition != ""
+		}
+	}
+
+	return "", "", false
+}
+
+func normalizeSQLIdentifier(identifier string) string {
+	identifier = strings.TrimSpace(identifier)
+	identifier = strings.Trim(identifier, "[]`\"")
+	return strings.ToLower(identifier)
+}
+
+func escapeMSSQLIdentifier(identifier string) string {
+	return strings.ReplaceAll(identifier, "]", "]]")
+}
+
 type DB interface {
 	GetType() string
 	DatabaseConnection() string
@@ -151,6 +490,9 @@ func (db *SQLiteConfig) GetTableColumns(tableName string) ([]string, error) {
 
 func (db *SQLiteConfig) EnforceSchema(s *state.State) error {
 	sqlDB := db.GetDB()
+	if sqlDB == nil {
+		return fmt.Errorf("database connection is not initialized")
+	}
 
 	for _, tableName := range RequiredTables() {
 		if (s.Verbose || s.Debug) && !s.Quiet {
@@ -230,7 +572,12 @@ func (db *SQLiteConfig) EnforceSchema(s *state.State) error {
 }
 
 func (db *SQLiteConfig) TestConnection() error {
-	err := db.GetDB().Ping()
+	sqlDB := db.GetDB()
+	if sqlDB == nil {
+		db.connected = false
+		return fmt.Errorf("database connection is not initialized")
+	}
+	err := sqlDB.Ping()
 	if err != nil {
 		db.connected = false
 		return err
@@ -241,7 +588,7 @@ func (db *SQLiteConfig) TestConnection() error {
 
 func (db *SQLiteConfig) ValidateSchema(s *state.State) error {
 	if db.db == nil {
-		return nil
+		return fmt.Errorf("database connection is not initialized")
 	}
 	expectedSchema := GetExpectedSchema()
 	for _, tableName := range RequiredTables() {
@@ -368,6 +715,9 @@ func (db *SQLiteConfig) PromptDatabaseSettings() {
 
 func (db *SQLiteConfig) DropAllTables() error {
 	sqlDB := db.GetDB()
+	if sqlDB == nil {
+		return fmt.Errorf("database connection is not initialized")
+	}
 	for _, viewName := range requiredViews() {
 		query := fmt.Sprintf("DROP VIEW IF EXISTS %s", viewName)
 		if _, err := sqlDB.Exec(query); err != nil {
@@ -519,6 +869,9 @@ func (db *PostgreSQLConfig) GetTableColumns(tableName string) ([]string, error) 
 
 func (db *PostgreSQLConfig) EnforceSchema(s *state.State) error {
 	sqlDB := db.GetDB()
+	if sqlDB == nil {
+		return fmt.Errorf("database connection is not initialized")
+	}
 
 	for _, tableName := range RequiredTables() {
 		if (s.Verbose || s.Debug) && !s.Quiet {
@@ -662,7 +1015,12 @@ func (db *PostgreSQLConfig) EnforceSchema(s *state.State) error {
 	return nil
 }
 func (db *PostgreSQLConfig) TestConnection() error {
-	err := db.GetDB().Ping()
+	sqlDB := db.GetDB()
+	if sqlDB == nil {
+		db.connected = false
+		return fmt.Errorf("database connection is not initialized")
+	}
+	err := sqlDB.Ping()
 	if err != nil {
 		db.connected = false
 		return err
@@ -672,7 +1030,7 @@ func (db *PostgreSQLConfig) TestConnection() error {
 }
 func (db *PostgreSQLConfig) ValidateSchema(s *state.State) error {
 	if db.db == nil {
-		return nil
+		return fmt.Errorf("database connection is not initialized")
 	}
 	expectedSchema := GetExpectedSchema()
 	for _, tableName := range RequiredTables() {
@@ -873,6 +1231,9 @@ func (db *PostgreSQLConfig) PromptDatabaseSettings() {
 
 func (db *PostgreSQLConfig) DropAllTables() error {
 	sqlDB := db.GetDB()
+	if sqlDB == nil {
+		return fmt.Errorf("database connection is not initialized")
+	}
 	for _, viewName := range requiredViews() {
 		query := fmt.Sprintf("DROP VIEW IF EXISTS \"%s\" CASCADE", viewName)
 		if _, err := sqlDB.Exec(query); err != nil {
@@ -1038,6 +1399,9 @@ func (db *MSSQLConfig) GetTableColumns(tableName string) ([]string, error) {
 
 func (db *MSSQLConfig) EnforceSchema(s *state.State) error {
 	sqlDB := db.GetDB()
+	if sqlDB == nil {
+		return fmt.Errorf("database connection is not initialized")
+	}
 
 	for _, tableName := range RequiredTables() {
 		if (s.Verbose || s.Debug) && !s.Quiet {
@@ -1060,6 +1424,13 @@ func (db *MSSQLConfig) EnforceSchema(s *state.State) error {
 		if (s.Verbose || s.Debug) && !s.Quiet {
 			fmt.Println(color.GreenString("OK"))
 		}
+	}
+
+	if err := applyColumnMigrations(db, legacyColumnMigrations, s); err != nil {
+		return err
+	}
+	if err := addMSSQLMissingColumnsRecursively(db, s); err != nil {
+		return err
 	}
 
 	// Insert initial data for FieldMaps
@@ -1181,7 +1552,12 @@ func (db *MSSQLConfig) EnforceSchema(s *state.State) error {
 	return nil
 }
 func (db *MSSQLConfig) TestConnection() error {
-	err := db.GetDB().Ping()
+	sqlDB := db.GetDB()
+	if sqlDB == nil {
+		db.connected = false
+		return fmt.Errorf("database connection is not initialized")
+	}
+	err := sqlDB.Ping()
 	if err != nil {
 		db.connected = false
 		return err
@@ -1191,7 +1567,7 @@ func (db *MSSQLConfig) TestConnection() error {
 }
 func (db *MSSQLConfig) ValidateSchema(s *state.State) error {
 	if db.db == nil {
-		return nil
+		return fmt.Errorf("database connection is not initialized")
 	}
 	expectedSchema := GetExpectedSchema()
 	for _, tableName := range RequiredTables() {
@@ -1390,31 +1766,43 @@ func (db *MSSQLConfig) PromptDatabaseSettings() {
 
 func (db *MSSQLConfig) DropAllTables() error {
 	sqlDB := db.GetDB()
+	if sqlDB == nil {
+		return fmt.Errorf("database connection is not initialized")
+	}
 	// First, drop all foreign key constraints
 	// This is a bit of a heavy-handed approach, but it's reliable
 	// A more elegant solution would be to drop tables in the correct order
 	// but that requires parsing the schema, which is complex.
 
-	rows, err := sqlDB.Query("SELECT name, object_id FROM sys.foreign_keys")
+	rows, err := sqlDB.Query(`
+		SELECT
+			fk.name,
+			OBJECT_SCHEMA_NAME(fk.parent_object_id) AS schema_name,
+			OBJECT_NAME(fk.parent_object_id) AS table_name
+		FROM sys.foreign_keys fk
+	`)
 	if err != nil {
 		return fmt.Errorf("failed to query foreign keys: %w", err)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		var name, objectId string
-		if err := rows.Scan(&name, &objectId); err != nil {
+		var name, schemaName, tableName string
+		if err := rows.Scan(&name, &schemaName, &tableName); err != nil {
 			return fmt.Errorf("failed to scan foreign key: %w", err)
 		}
-		parentTableQuery := fmt.Sprintf("SELECT OBJECT_NAME(parent_object_id) FROM sys.foreign_keys WHERE object_id = %s", objectId)
-		var parentTable string
-		if err := sqlDB.QueryRow(parentTableQuery).Scan(&parentTable); err != nil {
-			return fmt.Errorf("failed to get parent table for foreign key %s: %w", name, err)
-		}
-		query := fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %s", parentTable, name)
+		query := fmt.Sprintf(
+			"ALTER TABLE [%s].[%s] DROP CONSTRAINT [%s]",
+			strings.ReplaceAll(schemaName, "]", "]]"),
+			strings.ReplaceAll(tableName, "]", "]]"),
+			strings.ReplaceAll(name, "]", "]]"),
+		)
 		if _, err := sqlDB.Exec(query); err != nil {
 			return fmt.Errorf("failed to drop foreign key %s: %w", name, err)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error iterating foreign keys: %w", err)
 	}
 
 	for _, viewName := range requiredViews() {
@@ -1587,6 +1975,11 @@ func requiredViews() []string {
 
 var matchFirstCap = regexp.MustCompile("(.)([A-Z][a-z]+)")
 var matchAllCap = regexp.MustCompile("([a-z0-9])([A-Z])")
+var mssqlNotNullRegex = regexp.MustCompile(`(?i)\bNOT\s+NULL\b`)
+var mssqlNullRegex = regexp.MustCompile(`(?i)\bNULL\b`)
+var mssqlPrimaryKeyRegex = regexp.MustCompile(`(?i)\bPRIMARY\s+KEY\b`)
+var mssqlUniqueRegex = regexp.MustCompile(`(?i)\bUNIQUE\b`)
+var mssqlIdentityRegex = regexp.MustCompile(`(?i)\bIDENTITY\s*\([^)]*\)`)
 
 func toSnakeCase(str string) string {
 	snake := matchFirstCap.ReplaceAllString(str, "${1}_${2}")
