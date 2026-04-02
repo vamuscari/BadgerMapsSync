@@ -7,6 +7,8 @@ import (
 	"badgermaps/app/push"
 	"badgermaps/database"
 	"badgermaps/events"
+	"badgermaps/utils"
+	"errors"
 	"fmt"
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -30,6 +32,103 @@ func NewGuiPresenter(a *app.App, v GuiView) *GuiPresenter {
 	return &GuiPresenter{app: a, view: v}
 }
 
+func ratioProgress(current, total int) float64 {
+	if total <= 0 {
+		return 0
+	}
+	if current <= 0 {
+		return 0
+	}
+	if current >= total {
+		return 1
+	}
+	return float64(current) / float64(total)
+}
+
+func (p *GuiPresenter) runPullGroupSync() error {
+	totalMajorSteps := 4.0
+	majorStepWeight := 1.0 / totalMajorSteps
+
+	p.app.Events.Dispatch(events.Infof("presenter", "Pulling accounts..."))
+	accountsCallback := func(current, total int) {
+		progress := ratioProgress(current, total) * majorStepWeight
+		p.view.SetProgress(progress)
+	}
+	if err := pull.PullGroupAccounts(p.app, 0, accountsCallback); err != nil {
+		p.app.Events.Dispatch(events.Errorf("presenter", "Error pulling accounts: %v", err))
+		return err
+	}
+	p.view.SetProgress(majorStepWeight)
+
+	p.app.Events.Dispatch(events.Infof("presenter", "Pulling checkins..."))
+	checkinsCallback := func(current, total int) {
+		progress := majorStepWeight + ratioProgress(current, total)*majorStepWeight
+		p.view.SetProgress(progress)
+	}
+	if err := pull.PullGroupCheckins(p.app, checkinsCallback); err != nil {
+		p.app.Events.Dispatch(events.Errorf("presenter", "Error pulling checkins: %v", err))
+		return err
+	}
+	p.view.SetProgress(2 * majorStepWeight)
+
+	p.app.Events.Dispatch(events.Infof("presenter", "Pulling routes..."))
+	routesCallback := func(current, total int) {
+		progress := 2*majorStepWeight + ratioProgress(current, total)*majorStepWeight
+		p.view.SetProgress(progress)
+	}
+	if err := pull.PullGroupRoutes(p.app, routesCallback); err != nil {
+		p.app.Events.Dispatch(events.Errorf("presenter", "Error pulling routes: %v", err))
+		return err
+	}
+	p.view.SetProgress(3 * majorStepWeight)
+
+	p.app.Events.Dispatch(events.Infof("presenter", "Pulling user profile..."))
+	profileCallback := func(current, total int) {
+		progress := 3*majorStepWeight + ratioProgress(current, total)*majorStepWeight
+		p.view.SetProgress(progress)
+	}
+	if _, err := pull.PullProfile(p.app, profileCallback); err != nil {
+		p.app.Events.Dispatch(events.Errorf("presenter", "Error pulling user profile: %v", err))
+		return err
+	}
+	p.view.SetProgress(1)
+
+	p.app.Events.Dispatch(events.Infof("presenter", "Finished pulling all data."))
+	return nil
+}
+
+func (p *GuiPresenter) runPushAllSync() error {
+	var runErr error
+
+	if err := push.RunPushAccounts(p.app); err != nil {
+		p.app.Events.Dispatch(events.Errorf("presenter", "ERROR during account push: %v", err))
+		runErr = errors.Join(runErr, fmt.Errorf("account push failed: %w", err))
+	}
+	if err := push.RunPushCheckins(p.app); err != nil {
+		p.app.Events.Dispatch(events.Errorf("presenter", "ERROR during check-in push: %v", err))
+		runErr = errors.Join(runErr, fmt.Errorf("check-in push failed: %w", err))
+	}
+
+	return runErr
+}
+
+// RunFullSyncBlocking executes full pull + push sequentially and returns only when complete.
+func (p *GuiPresenter) RunFullSyncBlocking() error {
+	p.view.ShowProgressBar("Running Full Sync...")
+	p.view.SetProgress(0)
+	defer p.view.HideProgressBar()
+
+	if err := p.runPullGroupSync(); err != nil {
+		return fmt.Errorf("full sync pull stage failed: %w", err)
+	}
+
+	if err := p.runPushAllSync(); err != nil {
+		return fmt.Errorf("full sync push stage failed: %w", err)
+	}
+
+	return nil
+}
+
 // --- Pull Handlers ---
 
 // HandlePullGroup initiates a full data pull for all data types.
@@ -41,59 +140,10 @@ func (p *GuiPresenter) HandlePullGroup() {
 
 	go func() {
 		defer p.view.HideProgressBar()
-
-		totalMajorSteps := 4.0
-		majorStepWeight := 1.0 / totalMajorSteps
-
-		p.app.Events.Dispatch(events.Infof("presenter", "Pulling accounts..."))
-		accountsCallback := func(current, total int) {
-			progress := (float64(current) / float64(total)) * majorStepWeight
-			p.view.SetProgress(progress)
-		}
-		if err := pull.PullGroupAccounts(p.app, 0, accountsCallback); err != nil {
-			p.app.Events.Dispatch(events.Errorf("presenter", "Error pulling accounts: %v", err))
+		if err := p.runPullGroupSync(); err != nil {
 			p.view.ShowToast("Error: The data pull failed.")
 			return
 		}
-		p.view.SetProgress(majorStepWeight)
-
-		p.app.Events.Dispatch(events.Infof("presenter", "Pulling checkins..."))
-		checkinsCallback := func(current, total int) {
-			progress := majorStepWeight + (float64(current)/float64(total))*majorStepWeight
-			p.view.SetProgress(progress)
-		}
-		if err := pull.PullGroupCheckins(p.app, checkinsCallback); err != nil {
-			p.app.Events.Dispatch(events.Errorf("presenter", "Error pulling checkins: %v", err))
-			p.view.ShowToast("Error: The data pull failed.")
-			return
-		}
-		p.view.SetProgress(2 * majorStepWeight)
-
-		p.app.Events.Dispatch(events.Infof("presenter", "Pulling routes..."))
-		routesCallback := func(current, total int) {
-			progress := 2*majorStepWeight + (float64(current)/float64(total))*majorStepWeight
-			p.view.SetProgress(progress)
-		}
-		if err := pull.PullGroupRoutes(p.app, routesCallback); err != nil {
-			p.app.Events.Dispatch(events.Errorf("presenter", "Error pulling routes: %v", err))
-			p.view.ShowToast("Error: The data pull failed.")
-			return
-		}
-		p.view.SetProgress(3 * majorStepWeight)
-
-		p.app.Events.Dispatch(events.Infof("presenter", "Pulling user profile..."))
-		profileCallback := func(current, total int) {
-			progress := 3*majorStepWeight + (float64(current)/float64(total))*majorStepWeight
-			p.view.SetProgress(progress)
-		}
-		if _, err := pull.PullProfile(p.app, profileCallback); err != nil {
-			p.app.Events.Dispatch(events.Errorf("presenter", "Error pulling user profile: %v", err))
-			p.view.ShowToast("Error: The data pull failed.")
-			return
-		}
-		p.view.SetProgress(4 * majorStepWeight)
-
-		p.app.Events.Dispatch(events.Infof("presenter", "Finished pulling all data."))
 		p.view.ShowToast("Success: Full data pull complete.")
 	}()
 }
@@ -458,14 +508,13 @@ func (p *GuiPresenter) HandlePushAll() {
 	p.app.Events.Dispatch(events.Debugf("presenter", "HandlePushAll called"))
 	p.app.Events.Dispatch(events.Infof("presenter", "Starting push for all changes..."))
 	go func() {
-		if err := push.RunPushAccounts(p.app); err != nil {
-			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR during account push: %v", err))
-		}
-		if err := push.RunPushCheckins(p.app); err != nil {
-			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR during check-in push: %v", err))
-		}
+		err := p.runPushAllSync()
 		fyne.Do(func() {
-			p.view.ShowToast("Success: All pending changes pushed.")
+			if err != nil {
+				p.view.ShowToast("Error: Failed to push one or more pending changes.")
+			} else {
+				p.view.ShowToast("Success: All pending changes pushed.")
+			}
 			p.view.RefreshPushTab()
 		})
 	}()
@@ -536,6 +585,13 @@ func (p *GuiPresenter) HandleSaveConfig(
 	}
 
 	// Write the accumulated viper config to file
+	if strings.TrimSpace(p.app.ConfigFile) == "" {
+		if path, ok, err := p.app.GetConfigFilePath(); err == nil && ok && strings.TrimSpace(path) != "" {
+			p.app.ConfigFile = path
+		} else {
+			p.app.ConfigFile = utils.GetConfigDirFile("config.yaml")
+		}
+	}
 	if err := p.app.SaveConfig(); err != nil {
 		p.app.Events.Dispatch(events.Errorf("presenter", "ERROR saving config file: %v", err))
 		p.view.ShowToast("Error: Failed to save configuration.")
@@ -575,7 +631,9 @@ func (p *GuiPresenter) HandleTestAPIConnection(apiKey, baseURL string) {
 
 		if !apiClient.IsConnected() {
 			p.app.Events.Dispatch(events.Errorf("presenter", "API connection failed"))
-			p.app.API.SetConnected(false)
+			if p.app.API != nil {
+				p.app.API.SetConnected(false)
+			}
 			p.app.Events.Dispatch(events.Event{Type: "connection.status.changed"})
 			return
 		}
@@ -617,14 +675,18 @@ func (p *GuiPresenter) HandleTestDBConnection(dbType, dbPath, dbHost, dbPortStr,
 			}
 		default:
 			p.app.Events.Dispatch(events.Errorf("presenter", "Unknown database type for testing: %s", dbType))
-			p.app.DB.SetConnected(false)
+			if p.app.DB != nil {
+				p.app.DB.SetConnected(false)
+			}
 			p.app.Events.Dispatch(events.Event{Type: "connection.status.changed"})
 			return
 		}
 
 		if err := db.Connect(); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "Failed to create connection: %v", err))
-			p.app.DB.SetConnected(false)
+			if p.app.DB != nil {
+				p.app.DB.SetConnected(false)
+			}
 			p.app.Events.Dispatch(events.Event{Type: "connection.status.changed"})
 			return
 		}
@@ -632,13 +694,17 @@ func (p *GuiPresenter) HandleTestDBConnection(dbType, dbPath, dbHost, dbPortStr,
 
 		if err := db.TestConnection(); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "Connection failed: %v", err))
-			p.app.DB.SetConnected(false)
+			if p.app.DB != nil {
+				p.app.DB.SetConnected(false)
+			}
 			p.app.Events.Dispatch(events.Event{Type: "connection.status.changed"})
 			return
 		}
 
 		p.app.Events.Dispatch(events.Infof("presenter", "Connection successful!"))
-		p.app.DB.SetConnected(true)
+		if p.app.DB != nil {
+			p.app.DB.SetConnected(true)
+		}
 		p.app.Events.Dispatch(events.Event{Type: "connection.status.changed"})
 	}()
 }

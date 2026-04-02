@@ -1008,7 +1008,9 @@ func (ui *Gui) setRightPaneContent(content fyne.CanvasObject) {
 
 // ShowDetails updates the right-hand pane to show the provided details object.
 func (ui *Gui) ShowDetails(details fyne.CanvasObject) {
-	ui.setDetails(details, true)
+	fyne.Do(func() {
+		ui.setDetails(details, true)
+	})
 }
 
 func (ui *Gui) updateRightPaneToggle() {
@@ -1135,13 +1137,26 @@ func (ui *Gui) createPushTab() fyne.CanvasObject {
 
 func (ui *Gui) refreshPushTab() {
 	if ui.tabs != nil {
+		refreshed := false
 		for _, tab := range ui.tabs.Items {
 			if tab.Text == "Push" {
 				tab.Content = ui.createPushTab()
+				refreshed = true
 				break
 			}
 		}
-		ui.tabs.Refresh()
+		if !refreshed {
+			for _, tab := range ui.tabs.Items {
+				if tab.Text == "Sync Center" && ui.syncCenter != nil {
+					tab.Content = ui.syncCenter.CreateContent()
+					refreshed = true
+					break
+				}
+			}
+		}
+		if refreshed {
+			ui.tabs.Refresh()
+		}
 	}
 }
 
@@ -3032,14 +3047,32 @@ func (ui *Gui) createConfigTab() fyne.CanvasObject {
 func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 	// API Settings
 	apiKeyEntry := widget.NewPasswordEntry()
-	apiKeyEntry.SetText(ui.app.API.APIKey)
 	baseURLEntry := widget.NewEntry()
-	baseURLEntry.SetText(ui.app.API.BaseURL)
+	apiKey := ""
+	baseURL := ""
+	apiConnected := false
+	if ui.app != nil {
+		if ui.app.API != nil {
+			apiKey = ui.app.API.APIKey
+			baseURL = ui.app.API.BaseURL
+			apiConnected = ui.app.API.IsConnected()
+		}
+		if ui.app.Config != nil {
+			if apiKey == "" {
+				apiKey = ui.app.Config.API.APIKey
+			}
+			if baseURL == "" {
+				baseURL = ui.app.Config.API.BaseURL
+			}
+		}
+	}
+	apiKeyEntry.SetText(apiKey)
+	baseURLEntry.SetText(baseURL)
 
 	apiIcon := theme.HelpIcon()
-	if ui.app.API.IsConnected() {
+	if apiConnected {
 		apiIcon = theme.ConfirmIcon()
-	} else if ui.app.API.APIKey != "" { // If key exists but not connected, show error
+	} else if strings.TrimSpace(apiKey) != "" { // If key exists but not connected, show error
 		apiIcon = theme.ErrorIcon()
 	}
 
@@ -3087,28 +3120,55 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 	})
 
 	// Populate form with current config
-	switch config := ui.app.DB.(type) {
-	case *database.SQLiteConfig:
-		dbPathEntry.SetText(config.Path)
-	case *database.PostgreSQLConfig:
-		dbHostEntry.SetText(config.Host)
-		dbPortEntry.SetText(fmt.Sprintf("%d", config.Port))
-		dbUserEntry.SetText(config.Username)
-		dbPassEntry.SetText(config.Password)
-		dbNameEntry.SetText(config.Database)
-	case *database.MSSQLConfig:
-		dbHostEntry.SetText(config.Host)
-		dbPortEntry.SetText(fmt.Sprintf("%d", config.Port))
-		dbUserEntry.SetText(config.Username)
-		dbPassEntry.SetText(config.Password)
-		dbNameEntry.SetText(config.Database)
+	dbTypeValue := "sqlite3"
+	if ui.app != nil && ui.app.Config != nil {
+		if strings.TrimSpace(ui.app.Config.DB.Type) != "" {
+			dbTypeValue = ui.app.Config.DB.Type
+		}
+		dbPathEntry.SetText(ui.app.Config.DB.Path)
+		dbHostEntry.SetText(ui.app.Config.DB.Host)
+		if ui.app.Config.DB.Port > 0 {
+			dbPortEntry.SetText(fmt.Sprintf("%d", ui.app.Config.DB.Port))
+		}
+		dbUserEntry.SetText(ui.app.Config.DB.Username)
+		dbPassEntry.SetText(ui.app.Config.DB.Password)
+		dbNameEntry.SetText(ui.app.Config.DB.Database)
 	}
-	dbTypeSelect.SetSelected(ui.app.DB.GetType())
+	if ui.app != nil && ui.app.DB != nil {
+		switch config := ui.app.DB.(type) {
+		case *database.SQLiteConfig:
+			dbPathEntry.SetText(config.Path)
+			dbTypeValue = "sqlite3"
+		case *database.PostgreSQLConfig:
+			dbHostEntry.SetText(config.Host)
+			dbPortEntry.SetText(fmt.Sprintf("%d", config.Port))
+			dbUserEntry.SetText(config.Username)
+			dbPassEntry.SetText(config.Password)
+			dbNameEntry.SetText(config.Database)
+			dbTypeValue = "postgres"
+		case *database.MSSQLConfig:
+			dbHostEntry.SetText(config.Host)
+			dbPortEntry.SetText(fmt.Sprintf("%d", config.Port))
+			dbUserEntry.SetText(config.Username)
+			dbPassEntry.SetText(config.Password)
+			dbNameEntry.SetText(config.Database)
+			dbTypeValue = "mssql"
+		default:
+			if t := strings.TrimSpace(ui.app.DB.GetType()); t != "" {
+				dbTypeValue = t
+			}
+		}
+	}
+	if strings.TrimSpace(dbTypeValue) == "" {
+		dbTypeValue = "sqlite3"
+	}
+	dbTypeSelect.SetSelected(dbTypeValue)
 
 	dbIcon := theme.HelpIcon()
-	if ui.app.DB.IsConnected() {
+	dbConnected := ui.app != nil && ui.app.DB != nil && ui.app.DB.IsConnected()
+	if dbConnected {
 		dbIcon = theme.ConfirmIcon()
-	} else if ui.app.DB.GetType() != "" {
+	} else if strings.TrimSpace(dbTypeValue) != "" {
 		dbIcon = theme.ErrorIcon()
 	}
 
@@ -3309,34 +3369,36 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 
 // ShowToast displays a transient popup message in the bottom right of the window.
 func (ui *Gui) ShowToast(content string) {
-	if !ui.toastMutex.TryLock() {
-		return // Don't show a new toast if one is already visible
-	}
+	fyne.Do(func() {
+		if ui == nil || ui.window == nil || ui.window.Canvas() == nil {
+			return
+		}
 
-	toastContent := container.NewPadded(widget.NewLabel(content))
-	popup := widget.NewPopUp(toastContent, ui.window.Canvas())
+		if !ui.toastMutex.TryLock() {
+			return // Don't show a new toast if one is already visible
+		}
 
-	// Position the toast at the bottom right
-	go func() {
-		// We need a short delay to allow the popup to be sized
-		time.Sleep(10 * time.Millisecond)
-		fyne.Do(func() {
-			winSize := ui.window.Canvas().Size()
-			popupSize := popup.MinSize()
-			popup.Move(fyne.NewPos(winSize.Width-popupSize.Width-theme.Padding(), winSize.Height-popupSize.Height-theme.Padding()))
-		})
-	}()
+		toastContent := container.NewPadded(widget.NewLabel(content))
+		popup := widget.NewPopUp(toastContent, ui.window.Canvas())
+		popup.Show()
+		popup.Resize(popup.MinSize())
 
-	popup.Show()
+		winSize := ui.window.Canvas().Size()
+		popupSize := popup.Size()
+		popup.Move(fyne.NewPos(
+			winSize.Width-popupSize.Width-theme.Padding(),
+			winSize.Height-popupSize.Height-theme.Padding(),
+		))
 
-	// Hide the popup after a short duration
-	go func() {
-		time.Sleep(3 * time.Second)
-		fyne.Do(func() {
-			popup.Hide()
-			ui.toastMutex.Unlock()
-		})
-	}()
+		// Hide the popup after a short duration
+		go func() {
+			time.Sleep(3 * time.Second)
+			fyne.Do(func() {
+				popup.Hide()
+				ui.toastMutex.Unlock()
+			})
+		}()
+	})
 }
 
 func (ui *Gui) ShowProgressBar(title string) {

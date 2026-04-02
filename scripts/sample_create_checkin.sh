@@ -10,15 +10,18 @@ if [[ -z "${API_KEY}" ]]; then
   exit 1
 fi
 
-ISO_TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+CHECKIN_TIMEZONE="${CHECKIN_TIMEZONE:-${TZ:-America/Los_Angeles}}"
+LOCAL_TIMESTAMP="$(TZ="${CHECKIN_TIMEZONE}" date +"%Y-%m-%d %H:%M:%S %Z")"
+ISO_UTC_TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 curl -sS -X POST "${BASE_URL%/}/appointments/" \
   -H "Authorization: Token ${API_KEY}" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   --data-urlencode "customer=${ACCOUNT_ID}" \
-  --data-urlencode "comments=Met with Gainesville office to review pickup process (${ISO_TIMESTAMP})" \
+  --data-urlencode "comments=Met with Gainesville office to review pickup process (PST: ${LOCAL_TIMESTAMP}; utc: ${ISO_UTC_TIMESTAMP})" \
   --data-urlencode "type=Onboarding" \
-  --data-urlencode "log_datetime=${ISO_TIMESTAMP}" \
   --data-urlencode "extra_fields[Log Type]=Meeting" \
   --data-urlencode "extra_fields[Meeting Notes]=Discussed case volume and scheduled follow-up." |
   jq .
+
+# --data-urlencode "log_datetime=${ISO_UTC_TIMESTAMP}" \

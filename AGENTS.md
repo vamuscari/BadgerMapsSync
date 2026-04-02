@@ -14,5 +14,11 @@ Target Go 1.22 features and format every change with `gofmt` (or `goimports`). G
 ## Testing Guidelines
 Rely on Go's `testing` package with table-driven cases where scenarios multiply. Name entry points `Test<Subject>` and arrange helpers with `_test.go` suffixes. When adding features, include regression coverage and run `go test -cover ./...` before sending patches. Prefer deterministic fixtures and exercise event emissions where behavior depends on them.
 
+## Documentation & README Policy
+- Do not include screen resizing or other test-only topics in `README.md`.
+- Keep `README.md` focused on how to use the app via both the GUI and the CLI (installation, running, core commands, and basic workflows).
+- Place specific, detailed, or deep-dive topics in the `docs/` folder as dedicated documents, and link to them from the README when helpful.
+- Prefer concise, task-oriented docs; keep platform- or feature-specific nuances out of the README and in `docs/`.
+
 ## Commit & Pull Request Guidelines
 Follow the existing Conventional Commit style: `feat:`, `fix:`, `docs:`, and similar prefixes summarize intent. Keep messages in the imperative and reference issue IDs when relevant. Pull requests should describe scope, note affected commands or GUIs, and call out testing evidence (commands run, screenshots for UI). Ensure build artifacts are excluded, and update docs or configuration samples alongside code changes.

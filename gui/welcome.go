@@ -2,7 +2,10 @@ package gui
 
 import (
 	"badgermaps/app"
+	"badgermaps/app/action"
+	"badgermaps/database"
 	"badgermaps/events"
+	"badgermaps/utils"
 	"fmt"
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -22,15 +25,214 @@ type WelcomeScreen struct {
 	app        *app.App
 	presenter  *GuiPresenter
 	onComplete func()
+
+	apiKey     string
+	apiBaseURL string
+
+	dbType string
+	dbPath string
+	dbHost string
+	dbPort string
+	dbUser string
+	dbPass string
+	dbName string
+
+	serverHost       string
+	serverPort       string
+	serverTLSEnabled bool
 }
 
 // NewWelcomeScreen creates a new welcome screen
 func NewWelcomeScreen(a *app.App, presenter *GuiPresenter, onComplete func()) *WelcomeScreen {
-	return &WelcomeScreen{
+	w := &WelcomeScreen{
 		app:        a,
 		presenter:  presenter,
 		onComplete: onComplete,
 	}
+	w.initializeWizardState()
+	return w
+}
+
+func (w *WelcomeScreen) initializeWizardState() {
+	if w.app == nil || w.app.Config == nil {
+		return
+	}
+
+	w.apiKey = strings.TrimSpace(w.app.Config.API.APIKey)
+	w.apiBaseURL = strings.TrimSpace(w.app.Config.API.BaseURL)
+	if w.apiBaseURL == "" {
+		w.apiBaseURL = "https://www.badgermapping.com/api"
+	}
+	if w.app.API != nil {
+		if strings.TrimSpace(w.app.API.APIKey) != "" {
+			w.apiKey = strings.TrimSpace(w.app.API.APIKey)
+		}
+		if strings.TrimSpace(w.app.API.BaseURL) != "" {
+			w.apiBaseURL = strings.TrimSpace(w.app.API.BaseURL)
+		}
+	}
+
+	dbConfig := w.app.Config.DB
+	w.dbType = strings.TrimSpace(dbConfig.Type)
+	if w.dbType == "" {
+		w.dbType = "sqlite3"
+	}
+	w.dbPath = strings.TrimSpace(dbConfig.Path)
+	w.dbHost = strings.TrimSpace(dbConfig.Host)
+	if dbConfig.Port > 0 {
+		w.dbPort = strconv.Itoa(dbConfig.Port)
+	}
+	w.dbUser = strings.TrimSpace(dbConfig.Username)
+	w.dbPass = dbConfig.Password
+	w.dbName = strings.TrimSpace(dbConfig.Database)
+
+	if w.dbPath == "" {
+		w.dbPath = "badgermaps.db"
+	}
+	if w.dbHost == "" {
+		w.dbHost = "localhost"
+	}
+	if w.dbType == "postgres" && w.dbPort == "" {
+		w.dbPort = "5432"
+	}
+	if w.dbType == "mssql" && w.dbPort == "" {
+		w.dbPort = "1433"
+	}
+	if w.dbName == "" {
+		w.dbName = "badgermaps"
+	}
+
+	serverConfig := w.app.Config.Server
+	w.serverHost = strings.TrimSpace(serverConfig.Host)
+	if w.serverHost == "" {
+		w.serverHost = "0.0.0.0"
+	}
+	if serverConfig.Port > 0 {
+		w.serverPort = strconv.Itoa(serverConfig.Port)
+	} else {
+		w.serverPort = "8080"
+	}
+	w.serverTLSEnabled = serverConfig.TLSEnabled
+}
+
+func (w *WelcomeScreen) applyWizardConfiguration() error {
+	if w.app == nil || w.app.Config == nil {
+		return fmt.Errorf("application state is unavailable")
+	}
+
+	trimmedAPIKey := strings.TrimSpace(w.apiKey)
+	trimmedBaseURL := strings.TrimSpace(w.apiBaseURL)
+	trimmedDBType := strings.TrimSpace(w.dbType)
+	trimmedDBPath := strings.TrimSpace(w.dbPath)
+	trimmedDBHost := strings.TrimSpace(w.dbHost)
+	trimmedDBPort := strings.TrimSpace(w.dbPort)
+	trimmedDBUser := strings.TrimSpace(w.dbUser)
+	trimmedDBName := strings.TrimSpace(w.dbName)
+	trimmedServerHost := strings.TrimSpace(w.serverHost)
+	trimmedServerPort := strings.TrimSpace(w.serverPort)
+
+	if err := validateAPIKey(trimmedAPIKey); err != nil {
+		return fmt.Errorf("invalid API key: %w", err)
+	}
+	if trimmedBaseURL == "" {
+		return fmt.Errorf("API base URL is required")
+	}
+	if _, err := url.ParseRequestURI(trimmedBaseURL); err != nil {
+		return fmt.Errorf("invalid API base URL: %w", err)
+	}
+
+	if trimmedDBType == "" {
+		return fmt.Errorf("database type is required")
+	}
+	switch trimmedDBType {
+	case "sqlite3":
+		if trimmedDBPath == "" {
+			return fmt.Errorf("database file path is required")
+		}
+	case "postgres", "mssql":
+		if err := validateDatabaseHost(trimmedDBHost); err != nil {
+			return fmt.Errorf("invalid database host: %w", err)
+		}
+		if err := validateDatabasePort(trimmedDBPort); err != nil {
+			return fmt.Errorf("invalid database port: %w", err)
+		}
+		if err := validateDatabaseName(trimmedDBName); err != nil {
+			return fmt.Errorf("invalid database name: %w", err)
+		}
+	default:
+		return fmt.Errorf("unsupported database type: %s", trimmedDBType)
+	}
+
+	if err := validateDatabaseHost(trimmedServerHost); err != nil {
+		return fmt.Errorf("invalid server host: %w", err)
+	}
+	if err := validateDatabasePort(trimmedServerPort); err != nil {
+		return fmt.Errorf("invalid server port: %w", err)
+	}
+	serverPort, _ := strconv.Atoi(trimmedServerPort)
+
+	w.app.Config.API.APIKey = trimmedAPIKey
+	w.app.Config.API.BaseURL = trimmedBaseURL
+
+	w.app.Config.DB = appDefaultDBConfig(trimmedDBType, trimmedDBPath, trimmedDBHost, trimmedDBPort, trimmedDBUser, w.dbPass, trimmedDBName)
+
+	w.app.Config.Server.Host = trimmedServerHost
+	w.app.Config.Server.Port = serverPort
+	w.app.Config.Server.TLSEnabled = w.serverTLSEnabled
+	w.app.State.ServerHost = trimmedServerHost
+	w.app.State.ServerPort = serverPort
+	w.app.State.TLSEnabled = w.serverTLSEnabled
+
+	if strings.TrimSpace(w.app.ConfigFile) == "" {
+		if path, ok, err := w.app.GetConfigFilePath(); err == nil && ok && strings.TrimSpace(path) != "" {
+			w.app.ConfigFile = path
+		} else {
+			w.app.ConfigFile = utils.GetConfigDirFile("config.yaml")
+		}
+	}
+
+	if err := w.app.SaveConfig(); err != nil {
+		return fmt.Errorf("failed to save setup configuration: %w", err)
+	}
+
+	// Apply wizard settings to runtime objects without blocking UI on live connection attempts.
+	if w.app.API != nil {
+		w.app.API.APIKey = w.app.Config.API.APIKey
+		w.app.API.BaseURL = w.app.Config.API.BaseURL
+		w.app.API.SetConnected(false)
+	}
+	if w.app.DB != nil {
+		w.app.DB.SetConnected(false)
+	}
+	w.app.ActionExecutor = action.NewExecutor(w.app.DB, w.app.API)
+
+	w.app.Events.Dispatch(events.Event{Type: "connection.status.changed"})
+	return nil
+}
+
+func appDefaultDBConfig(dbType, dbPath, dbHost, dbPort, dbUser, dbPass, dbName string) database.DBConfig {
+	port, _ := strconv.Atoi(dbPort)
+	cfg := database.DBConfig{
+		Type: dbType,
+	}
+	switch dbType {
+	case "sqlite3":
+		cfg.Path = dbPath
+	case "postgres":
+		cfg.Host = dbHost
+		cfg.Port = port
+		cfg.Username = dbUser
+		cfg.Password = dbPass
+		cfg.Database = dbName
+		cfg.SSLMode = "disable"
+	case "mssql":
+		cfg.Host = dbHost
+		cfg.Port = port
+		cfg.Username = dbUser
+		cfg.Password = dbPass
+		cfg.Database = dbName
+	}
+	return cfg
 }
 
 // CreateContent builds the welcome screen content
@@ -158,6 +360,13 @@ func (w *WelcomeScreen) createSetupWizard() fyne.CanvasObject {
 
 	nextBtn = widget.NewButtonWithIcon("Next", theme.NavigateNextIcon(), func() {
 		if currentStep == len(steps)-1 {
+			if err := w.applyWizardConfiguration(); err != nil {
+				w.app.Events.Dispatch(events.Errorf("setup", "failed to finalize setup: %v", err))
+				if w.presenter != nil && w.presenter.view != nil {
+					w.presenter.view.ShowToast(fmt.Sprintf("Error: %v", err))
+				}
+				return
+			}
 			w.onComplete()
 		} else {
 			// Validate current step before proceeding
@@ -236,14 +445,12 @@ func (w *WelcomeScreen) createAPIStep() fyne.CanvasObject {
 
 	apiKeyEntry := widget.NewPasswordEntry()
 	apiKeyEntry.SetPlaceHolder("Enter your BadgerMaps API key")
-	if w.app.API != nil {
-		apiKeyEntry.SetText(w.app.API.APIKey)
-	}
+	apiKeyEntry.SetText(w.apiKey)
 
 	baseURLEntry := widget.NewEntry()
 	baseURLEntry.SetPlaceHolder("https://www.badgermapping.com/api")
-	if w.app.API != nil && w.app.API.BaseURL != "" {
-		baseURLEntry.SetText(w.app.API.BaseURL)
+	if strings.TrimSpace(w.apiBaseURL) != "" {
+		baseURLEntry.SetText(w.apiBaseURL)
 	} else {
 		baseURLEntry.SetText("https://www.badgermapping.com/api")
 	}
@@ -254,6 +461,7 @@ func (w *WelcomeScreen) createAPIStep() fyne.CanvasObject {
 
 	// Add real-time validation
 	apiKeyEntry.OnChanged = func(text string) {
+		w.apiKey = strings.TrimSpace(text)
 		if err := validateAPIKey(text); err != nil {
 			validationLabel.SetText("Warning: " + err.Error())
 		} else {
@@ -263,6 +471,7 @@ func (w *WelcomeScreen) createAPIStep() fyne.CanvasObject {
 	}
 
 	baseURLEntry.OnChanged = func(text string) {
+		w.apiBaseURL = strings.TrimSpace(text)
 		if text != "" {
 			if _, err := url.Parse(text); err != nil {
 				validationLabel.SetText("Warning: Invalid URL format")
@@ -293,10 +502,12 @@ func (w *WelcomeScreen) createAPIStep() fyne.CanvasObject {
 
 		statusLabel.SetText("Testing connection...")
 		statusLabel.Refresh()
+		w.apiKey = strings.TrimSpace(apiKeyEntry.Text)
+		w.apiBaseURL = strings.TrimSpace(baseURLEntry.Text)
 
 		go func() {
-			apiKey := apiKeyEntry.Text
-			baseURL := baseURLEntry.Text
+			apiKey := strings.TrimSpace(apiKeyEntry.Text)
+			baseURL := strings.TrimSpace(baseURLEntry.Text)
 
 			// Log connection attempt without exposing credentials
 			w.app.Events.Dispatch(events.Infof("setup", "Testing API connection to %s with key %s",
@@ -358,6 +569,7 @@ func (w *WelcomeScreen) createDatabaseStep() fyne.CanvasObject {
 	configContainer := container.NewMax()
 
 	updateConfig := func(selectedType string) {
+		w.dbType = selectedType
 		var content fyne.CanvasObject
 
 		switch selectedType {
@@ -398,8 +610,14 @@ func (w *WelcomeScreen) createDatabaseStep() fyne.CanvasObject {
 			}),
 		))
 
-	// Initialize with SQLite
-	updateConfig("sqlite3")
+	// Initialize with currently selected type
+	initialType := w.dbType
+	switch initialType {
+	case "sqlite3", "postgres", "mssql":
+	default:
+		initialType = "sqlite3"
+	}
+	updateConfig(initialType)
 
 	return container.NewVBox(
 		container.NewPadded(title),
@@ -426,7 +644,14 @@ func (w *WelcomeScreen) createDBOptionCard(title, description string, icon fyne.
 func (w *WelcomeScreen) createSQLiteConfig() fyne.CanvasObject {
 	pathEntry := widget.NewEntry()
 	pathEntry.SetPlaceHolder("badgermaps.db")
-	pathEntry.SetText("badgermaps.db")
+	if strings.TrimSpace(w.dbPath) != "" {
+		pathEntry.SetText(w.dbPath)
+	} else {
+		pathEntry.SetText("badgermaps.db")
+	}
+	pathEntry.OnChanged = func(text string) {
+		w.dbPath = strings.TrimSpace(text)
+	}
 
 	form := widget.NewForm(
 		widget.NewFormItem("Database File", pathEntry),
@@ -447,27 +672,42 @@ func (w *WelcomeScreen) createSQLiteConfig() fyne.CanvasObject {
 func (w *WelcomeScreen) createPostgresConfig() fyne.CanvasObject {
 	hostEntry := widget.NewEntry()
 	hostEntry.SetPlaceHolder("localhost")
-	hostEntry.SetText("localhost")
+	if strings.TrimSpace(w.dbHost) != "" {
+		hostEntry.SetText(w.dbHost)
+	} else {
+		hostEntry.SetText("localhost")
+	}
 
 	portEntry := widget.NewEntry()
 	portEntry.SetPlaceHolder("5432")
-	portEntry.SetText("5432")
+	if strings.TrimSpace(w.dbPort) != "" {
+		portEntry.SetText(w.dbPort)
+	} else {
+		portEntry.SetText("5432")
+	}
 
 	userEntry := widget.NewEntry()
 	userEntry.SetPlaceHolder("postgres")
+	userEntry.SetText(w.dbUser)
 
 	passEntry := widget.NewPasswordEntry()
 	passEntry.SetPlaceHolder("password")
+	passEntry.SetText(w.dbPass)
 
 	dbEntry := widget.NewEntry()
 	dbEntry.SetPlaceHolder("badgermaps")
-	dbEntry.SetText("badgermaps")
+	if strings.TrimSpace(w.dbName) != "" {
+		dbEntry.SetText(w.dbName)
+	} else {
+		dbEntry.SetText("badgermaps")
+	}
 
 	validationLabel := widget.NewLabel("")
 	validationLabel.TextStyle = fyne.TextStyle{Italic: true}
 
 	// Add validation
 	hostEntry.OnChanged = func(text string) {
+		w.dbHost = strings.TrimSpace(text)
 		if err := validateDatabaseHost(text); err != nil {
 			validationLabel.SetText("Warning: " + err.Error())
 		} else {
@@ -477,6 +717,7 @@ func (w *WelcomeScreen) createPostgresConfig() fyne.CanvasObject {
 	}
 
 	portEntry.OnChanged = func(text string) {
+		w.dbPort = strings.TrimSpace(text)
 		if err := validateDatabasePort(text); err != nil {
 			validationLabel.SetText("Warning: " + err.Error())
 		} else {
@@ -486,12 +727,19 @@ func (w *WelcomeScreen) createPostgresConfig() fyne.CanvasObject {
 	}
 
 	dbEntry.OnChanged = func(text string) {
+		w.dbName = strings.TrimSpace(text)
 		if err := validateDatabaseName(text); err != nil {
 			validationLabel.SetText("Warning: " + err.Error())
 		} else {
 			validationLabel.SetText("")
 		}
 		validationLabel.Refresh()
+	}
+	userEntry.OnChanged = func(text string) {
+		w.dbUser = strings.TrimSpace(text)
+	}
+	passEntry.OnChanged = func(text string) {
+		w.dbPass = text
 	}
 
 	form := widget.NewForm(
@@ -513,27 +761,42 @@ func (w *WelcomeScreen) createPostgresConfig() fyne.CanvasObject {
 func (w *WelcomeScreen) createMSSQLConfig() fyne.CanvasObject {
 	hostEntry := widget.NewEntry()
 	hostEntry.SetPlaceHolder("localhost")
-	hostEntry.SetText("localhost")
+	if strings.TrimSpace(w.dbHost) != "" {
+		hostEntry.SetText(w.dbHost)
+	} else {
+		hostEntry.SetText("localhost")
+	}
 
 	portEntry := widget.NewEntry()
 	portEntry.SetPlaceHolder("1433")
-	portEntry.SetText("1433")
+	if strings.TrimSpace(w.dbPort) != "" {
+		portEntry.SetText(w.dbPort)
+	} else {
+		portEntry.SetText("1433")
+	}
 
 	userEntry := widget.NewEntry()
 	userEntry.SetPlaceHolder("sa")
+	userEntry.SetText(w.dbUser)
 
 	passEntry := widget.NewPasswordEntry()
 	passEntry.SetPlaceHolder("password")
+	passEntry.SetText(w.dbPass)
 
 	dbEntry := widget.NewEntry()
 	dbEntry.SetPlaceHolder("badgermaps")
-	dbEntry.SetText("badgermaps")
+	if strings.TrimSpace(w.dbName) != "" {
+		dbEntry.SetText(w.dbName)
+	} else {
+		dbEntry.SetText("badgermaps")
+	}
 
 	validationLabel := widget.NewLabel("")
 	validationLabel.TextStyle = fyne.TextStyle{Italic: true}
 
 	// Add validation
 	hostEntry.OnChanged = func(text string) {
+		w.dbHost = strings.TrimSpace(text)
 		if err := validateDatabaseHost(text); err != nil {
 			validationLabel.SetText("Warning: " + err.Error())
 		} else {
@@ -543,6 +806,7 @@ func (w *WelcomeScreen) createMSSQLConfig() fyne.CanvasObject {
 	}
 
 	portEntry.OnChanged = func(text string) {
+		w.dbPort = strings.TrimSpace(text)
 		if err := validateDatabasePort(text); err != nil {
 			validationLabel.SetText("Warning: " + err.Error())
 		} else {
@@ -552,12 +816,19 @@ func (w *WelcomeScreen) createMSSQLConfig() fyne.CanvasObject {
 	}
 
 	dbEntry.OnChanged = func(text string) {
+		w.dbName = strings.TrimSpace(text)
 		if err := validateDatabaseName(text); err != nil {
 			validationLabel.SetText("Warning: " + err.Error())
 		} else {
 			validationLabel.SetText("")
 		}
 		validationLabel.Refresh()
+	}
+	userEntry.OnChanged = func(text string) {
+		w.dbUser = strings.TrimSpace(text)
+	}
+	passEntry.OnChanged = func(text string) {
+		w.dbPass = text
 	}
 
 	form := widget.NewForm(
@@ -585,13 +856,30 @@ func (w *WelcomeScreen) createServerStep() fyne.CanvasObject {
 
 	hostEntry := widget.NewEntry()
 	hostEntry.SetPlaceHolder("0.0.0.0")
-	hostEntry.SetText("0.0.0.0")
+	if strings.TrimSpace(w.serverHost) != "" {
+		hostEntry.SetText(w.serverHost)
+	} else {
+		hostEntry.SetText("0.0.0.0")
+	}
 
 	portEntry := widget.NewEntry()
 	portEntry.SetPlaceHolder("8080")
-	portEntry.SetText("8080")
+	if strings.TrimSpace(w.serverPort) != "" {
+		portEntry.SetText(w.serverPort)
+	} else {
+		portEntry.SetText("8080")
+	}
 
-	tlsCheck := widget.NewCheck("Enable TLS/HTTPS", func(checked bool) {})
+	tlsCheck := widget.NewCheck("Enable TLS/HTTPS", func(checked bool) {
+		w.serverTLSEnabled = checked
+	})
+	tlsCheck.SetChecked(w.serverTLSEnabled)
+	hostEntry.OnChanged = func(text string) {
+		w.serverHost = strings.TrimSpace(text)
+	}
+	portEntry.OnChanged = func(text string) {
+		w.serverPort = strings.TrimSpace(text)
+	}
 
 	form := widget.NewForm(
 		widget.NewFormItem("Host", hostEntry),
@@ -701,25 +989,51 @@ func (w *WelcomeScreen) validateStep(step int) bool {
 	// Add validation logic for each step
 	switch step {
 	case 1: // API Configuration
-		if w.app.API == nil || w.app.API.APIKey == "" {
-			w.app.Events.Dispatch(events.Warningf("setup", "API key is required"))
+		trimmedAPIKey := strings.TrimSpace(w.apiKey)
+		trimmedBaseURL := strings.TrimSpace(w.apiBaseURL)
+		if err := validateAPIKey(trimmedAPIKey); err != nil {
+			w.app.Events.Dispatch(events.Warningf("setup", "Invalid API key: %v", err))
 			return false
 		}
-		// Validate API key format (basic check)
-		if len(w.app.API.APIKey) < 10 {
-			w.app.Events.Dispatch(events.Warningf("setup", "API key appears to be invalid"))
+		if trimmedBaseURL == "" {
+			w.app.Events.Dispatch(events.Warningf("setup", "API base URL is required"))
 			return false
 		}
-		// Validate base URL
-		if w.app.API.BaseURL != "" {
-			if _, err := url.Parse(w.app.API.BaseURL); err != nil {
-				w.app.Events.Dispatch(events.Warningf("setup", "Invalid API base URL: %v", err))
-				return false
-			}
+		if _, err := url.ParseRequestURI(trimmedBaseURL); err != nil {
+			w.app.Events.Dispatch(events.Warningf("setup", "Invalid API base URL: %v", err))
+			return false
 		}
 	case 2: // Database Setup
-		if w.app.DB == nil || w.app.DB.GetType() == "" {
+		switch strings.TrimSpace(w.dbType) {
+		case "sqlite3":
+			if strings.TrimSpace(w.dbPath) == "" {
+				w.app.Events.Dispatch(events.Warningf("setup", "Database file path is required"))
+				return false
+			}
+		case "postgres", "mssql":
+			if err := validateDatabaseHost(strings.TrimSpace(w.dbHost)); err != nil {
+				w.app.Events.Dispatch(events.Warningf("setup", "Invalid database host: %v", err))
+				return false
+			}
+			if err := validateDatabasePort(strings.TrimSpace(w.dbPort)); err != nil {
+				w.app.Events.Dispatch(events.Warningf("setup", "Invalid database port: %v", err))
+				return false
+			}
+			if err := validateDatabaseName(strings.TrimSpace(w.dbName)); err != nil {
+				w.app.Events.Dispatch(events.Warningf("setup", "Invalid database name: %v", err))
+				return false
+			}
+		default:
 			w.app.Events.Dispatch(events.Warningf("setup", "Database configuration is required"))
+			return false
+		}
+	case 3: // Server Settings
+		if err := validateDatabaseHost(strings.TrimSpace(w.serverHost)); err != nil {
+			w.app.Events.Dispatch(events.Warningf("setup", "Invalid server host: %v", err))
+			return false
+		}
+		if err := validateDatabasePort(strings.TrimSpace(w.serverPort)); err != nil {
+			w.app.Events.Dispatch(events.Warningf("setup", "Invalid server port: %v", err))
 			return false
 		}
 	}

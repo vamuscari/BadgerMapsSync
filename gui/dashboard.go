@@ -499,14 +499,18 @@ func (d *SmartDashboard) getPendingChangesCount() PendingChangesCount {
 		return count
 	}
 
-	// Count pending account changes
-	if accountChanges := d.getTableRowCount("AccountsPendingChanges"); accountChanges >= 0 {
-		count.Accounts = accountChanges
+	accountChanges, err := database.GetPendingAccountChanges(d.ui.app.DB)
+	if err != nil {
+		d.ui.app.Events.Dispatch(events.Debugf("dashboard", "Error loading pending account changes: %v", err))
+	} else {
+		count.Accounts = len(accountChanges)
 	}
 
-	// Count pending checkin changes
-	if checkinChanges := d.getTableRowCount("AccountCheckinsPendingChanges"); checkinChanges >= 0 {
-		count.Checkins = checkinChanges
+	checkinChanges, err := database.GetPendingCheckinChanges(d.ui.app.DB)
+	if err != nil {
+		d.ui.app.Events.Dispatch(events.Debugf("dashboard", "Error loading pending check-in changes: %v", err))
+	} else {
+		count.Checkins = len(checkinChanges)
 	}
 
 	count.Total = count.Accounts + count.Checkins

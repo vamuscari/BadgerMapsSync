@@ -15,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
-	"time"
 )
 
 const (
@@ -27,8 +26,6 @@ const (
 
 	scopeAll    = "All"
 	scopeSingle = "Single"
-
-	fullSyncFollowUpDelay = 1500 * time.Millisecond
 )
 
 type omniSuggestion struct {
@@ -726,9 +723,12 @@ func (sc *SyncCenter) runFullSync() {
 
 	go func() {
 		defer atomic.StoreInt32(&sc.syncGate, 0)
-		sc.presenter.HandlePullGroup()
-		time.Sleep(fullSyncFollowUpDelay)
-		sc.presenter.HandlePushAll()
+		if err := sc.presenter.RunFullSyncBlocking(); err != nil {
+			sc.ui.app.Events.Dispatch(events.Errorf("sync_center", "full sync failed: %v", err))
+			sc.ui.ShowToast("Error: Full sync failed.")
+			return
+		}
+		sc.ui.ShowToast("Success: Full sync complete.")
 	}()
 }
 
