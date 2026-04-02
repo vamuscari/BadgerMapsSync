@@ -2,6 +2,8 @@ package server
 
 import (
 	"badgermaps/app/state"
+	"badgermaps/utils"
+	"path/filepath"
 	"strings"
 )
 
@@ -27,4 +29,15 @@ func pidFilePath(s *state.State) string {
 		}
 	}
 	return ".badgermaps.pid"
+}
+
+func schedulerConfigDir(s *state.State) string {
+	if configPath := resolveConfigPathFromState(s); configPath != "" {
+		return filepath.Dir(strings.TrimSpace(configPath))
+	}
+	return utils.GetUserDefaultConfigDir()
+}
+
+func runtimeActivityPath(s *state.State) string {
+	return filepath.Join(schedulerConfigDir(s), "server_activity.json")
 }

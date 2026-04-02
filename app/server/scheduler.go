@@ -7,12 +7,12 @@ import (
 	"badgermaps/app/state"
 	"badgermaps/database"
 	"badgermaps/events"
-	"badgermaps/utils"
+	"context"
+	"crypto/sha1"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -22,11 +22,14 @@ import (
 type SyncType string
 
 const (
+	SyncTypeNone     SyncType = "none"
 	SyncTypeAccounts SyncType = "accounts"
 	SyncTypeCheckins SyncType = "checkins"
 	SyncTypeRoutes   SyncType = "routes"
 	SyncTypeFull     SyncType = "full"
+	SyncTypePull     SyncType = "pull"
 	SyncTypePush     SyncType = "push"
+	SyncTypePullPush SyncType = "pull_push"
 )
 
 type ScheduledJob struct {
@@ -52,7 +55,13 @@ type SyncExecutor interface {
 	PullAccounts() error
 	PullCheckins() error
 	PullRoutes() error
+	PullProfile() error
 	PushAll() error
+	PushAccounts() error
+	PushCheckins() error
+	PullAccount(int) error
+	PullCheckin(int) error
+	PullRoute(int) error
 }
 
 type Scheduler struct {
@@ -65,7 +74,9 @@ type Scheduler struct {
 	events       *events.EventDispatcher
 	auditLogger  *audit.AuditLogger
 	syncExecutor SyncExecutor
+	syncQueue    *SyncJobCoordinator
 	actionExec   *action.Executor
+	legacyCron   []CronJob
 	running      bool
 	stopChan     chan struct{}
 }
@@ -77,6 +88,8 @@ func NewScheduler(
 	events *events.EventDispatcher,
 	auditLogger *audit.AuditLogger,
 	syncExecutor SyncExecutor,
+	syncQueue *SyncJobCoordinator,
+	legacyCronJobs []CronJob,
 ) *Scheduler {
 	// Create cron with seconds field support
 	parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
@@ -90,7 +103,9 @@ func NewScheduler(
 		events:       events,
 		auditLogger:  auditLogger,
 		syncExecutor: syncExecutor,
+		syncQueue:    syncQueue,
 		actionExec:   action.NewExecutor(db, api),
+		legacyCron:   append([]CronJob(nil), legacyCronJobs...),
 		stopChan:     make(chan struct{}),
 	}
 }
@@ -107,6 +122,10 @@ func (s *Scheduler) Start() error {
 	// Load jobs from configuration
 	if err := s.loadJobs(); err != nil {
 		return fmt.Errorf("failed to load scheduled jobs: %w", err)
+	}
+
+	if err := s.importLegacyCronJobs(); err != nil {
+		return fmt.Errorf("failed to import legacy cron jobs: %w", err)
 	}
 
 	// Start cron scheduler
@@ -300,117 +319,202 @@ func (s *Scheduler) UpdateJob(jobID string, updates *ScheduledJob) error {
 	return nil
 }
 
-// executeJob executes a scheduled job
+// executeJob queues a scheduled job for serialized execution.
 func (s *Scheduler) executeJob(jobID string) {
 	s.mu.RLock()
 	job, exists := s.jobs[jobID]
 	s.mu.RUnlock()
-
 	if !exists {
 		return
 	}
 
+	s.events.Dispatch(events.Event{
+		Type:   "scheduler.job.queued",
+		Source: "scheduler",
+		Payload: events.GenericPayload{
+			Type: "scheduler.job.queued",
+			Data: map[string]interface{}{
+				"job_id":    job.ID,
+				"job_name":  job.Name,
+				"sync_type": string(job.SyncType),
+			},
+		},
+	})
+
+	if s.syncQueue == nil {
+		go s.runScheduledJob(jobID)
+		return
+	}
+
+	_, err := s.syncQueue.Submit(SyncJobRequest{
+		Name:   job.Name,
+		Source: "scheduler",
+		Mode:   s.syncModeForJob(job.SyncType),
+		Run: func(_ context.Context) error {
+			return s.runScheduledJob(jobID)
+		},
+	})
+	if err != nil {
+		s.events.Dispatch(events.Errorf("scheduler", "Failed to queue scheduled job %s: %v", job.Name, err))
+		s.mu.Lock()
+		if target, ok := s.jobs[jobID]; ok {
+			target.LastError = fmt.Sprintf("queue failure: %v", err)
+			target.ErrorCount++
+			s.saveJobs()
+		}
+		s.mu.Unlock()
+	}
+}
+
+func (s *Scheduler) runScheduledJob(jobID string) error {
+	s.mu.Lock()
+	job, exists := s.jobs[jobID]
+	if !exists {
+		s.mu.Unlock()
+		return fmt.Errorf("job not found: %s", jobID)
+	}
 	startTime := time.Now()
 	job.LastRun = &startTime
 	job.RunCount++
+	jobName := job.Name
+	syncType := job.SyncType
+	retryOnError := job.RetryOnError
+	maxRetries := job.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 1
+	}
+	s.mu.Unlock()
 
-	s.events.Dispatch(events.Infof("scheduler", "Executing scheduled job: %s", job.Name))
+	s.events.Dispatch(events.Event{
+		Type:   "scheduler.job.start",
+		Source: "scheduler",
+		Payload: events.GenericPayload{
+			Type: "scheduler.job.start",
+			Data: map[string]interface{}{
+				"job_id":    jobID,
+				"job_name":  jobName,
+				"sync_type": string(syncType),
+			},
+		},
+	})
+	s.events.Dispatch(events.Infof("scheduler", "Executing scheduled job: %s", jobName))
 
 	if s.auditLogger != nil {
 		s.auditLogger.Log(&audit.AuditEntry{
 			OperationType: audit.OpScheduledJob,
 			Source:        "Scheduler",
 			Action:        "EXECUTE",
-			Resource:      job.Name,
-			ResourceID:    job.ID,
-			Success:       false, // Will update after execution
+			Resource:      jobName,
+			ResourceID:    jobID,
+			Success:       false,
 			Level:         audit.LevelInfo,
 			Metadata: map[string]interface{}{
-				"sync_type": string(job.SyncType),
+				"sync_type": string(syncType),
 			},
 		})
 	}
 
-	// Execute based on sync type
-	var err error
+	var runErr error
 	retries := 0
-	maxRetries := job.MaxRetries
-	if maxRetries <= 0 {
-		maxRetries = 1
-	}
-
 	for retries < maxRetries {
-		err = s.executeSyncType(job)
-
-		if err == nil {
+		runErr = s.executeSyncType(syncType)
+		if runErr == nil {
 			break
 		}
-
 		retries++
-		if job.RetryOnError && retries < maxRetries {
-			waitTime := time.Duration(retries*retries) * time.Second // Exponential backoff
+		if retryOnError && retries < maxRetries {
+			waitTime := time.Duration(retries*retries) * time.Second
 			s.events.Dispatch(events.Warningf("scheduler", "Job %s failed, retrying in %v (attempt %d/%d)",
-				job.Name, waitTime, retries+1, maxRetries))
+				jobName, waitTime, retries+1, maxRetries))
 			time.Sleep(waitTime)
 		}
 	}
 
-	// Update job status
 	duration := time.Since(startTime)
-
 	s.mu.Lock()
-	if err != nil {
-		job.LastError = err.Error()
-		job.ErrorCount++
-		s.events.Dispatch(events.Errorf("scheduler", "Scheduled job failed: %s - %v", job.Name, err))
-
-		if s.auditLogger != nil {
-			s.auditLogger.LogSync(string(job.SyncType), 0, false, duration, err)
+	if target, ok := s.jobs[jobID]; ok {
+		if runErr != nil {
+			target.LastError = runErr.Error()
+			target.ErrorCount++
+		} else {
+			now := time.Now()
+			target.LastSuccess = &now
+			target.LastError = ""
 		}
-	} else {
-		now := time.Now()
-		job.LastSuccess = &now
-		job.LastError = ""
-		s.events.Dispatch(events.Infof("scheduler", "✓ Scheduled job completed: %s (duration: %v)", job.Name, duration))
 
-		if s.auditLogger != nil {
-			s.auditLogger.LogSync(string(job.SyncType), 0, true, duration, nil)
+		if target.Enabled && target.cronID > 0 {
+			entry := s.cron.Entry(target.cronID)
+			nextRun := entry.Next
+			target.NextRun = &nextRun
 		}
+		s.saveJobs()
 	}
-
-	// Calculate next run time
-	if job.Enabled && job.cronID > 0 {
-		entry := s.cron.Entry(job.cronID)
-		nextRun := entry.Next
-		job.NextRun = &nextRun
-	}
-
-	s.saveJobs()
 	s.mu.Unlock()
 
-	// Execute post-sync actions
-	if err == nil && len(job.Actions) > 0 {
+	if runErr != nil {
+		s.events.Dispatch(events.Event{
+			Type:   "scheduler.job.error",
+			Source: "scheduler",
+			Payload: events.GenericPayload{
+				Type: "scheduler.job.error",
+				Data: map[string]interface{}{
+					"job_id":    jobID,
+					"job_name":  jobName,
+					"sync_type": string(syncType),
+					"error":     runErr.Error(),
+				},
+			},
+		})
+		s.events.Dispatch(events.Errorf("scheduler", "Scheduled job failed: %s - %v", jobName, runErr))
+		if s.auditLogger != nil {
+			s.auditLogger.LogSync(string(syncType), 0, false, duration, runErr)
+		}
+		return runErr
+	}
+
+	s.events.Dispatch(events.Event{
+		Type:   "scheduler.job.complete",
+		Source: "scheduler",
+		Payload: events.GenericPayload{
+			Type: "scheduler.job.complete",
+			Data: map[string]interface{}{
+				"job_id":    jobID,
+				"job_name":  jobName,
+				"sync_type": string(syncType),
+			},
+		},
+	})
+	s.events.Dispatch(events.Infof("scheduler", "✓ Scheduled job completed: %s (duration: %v)", jobName, duration))
+	if s.auditLogger != nil {
+		s.auditLogger.LogSync(string(syncType), 0, true, duration, nil)
+	}
+
+	if len(job.Actions) > 0 {
 		for _, actionConfig := range job.Actions {
 			action, err := action.NewActionFromConfig(actionConfig)
 			if err != nil {
 				s.events.Dispatch(events.Errorf("scheduler", "Failed to create action: %v", err))
 				continue
 			}
-
 			if err := action.Execute(s.actionExec); err != nil {
 				s.events.Dispatch(events.Errorf("scheduler", "Failed to execute action: %v", err))
 			}
 		}
 	}
+
+	return nil
 }
 
 // executeSyncType executes the specific sync operation
-func (s *Scheduler) executeSyncType(job *ScheduledJob) error {
+func (s *Scheduler) executeSyncType(syncType SyncType) error {
 	if s.syncExecutor == nil {
 		return fmt.Errorf("sync executor not configured")
 	}
 
-	switch job.SyncType {
+	switch syncType {
+	case SyncTypeNone:
+		return nil
+
 	case SyncTypeAccounts:
 		return s.syncExecutor.PullAccounts()
 
@@ -420,7 +524,7 @@ func (s *Scheduler) executeSyncType(job *ScheduledJob) error {
 	case SyncTypeRoutes:
 		return s.syncExecutor.PullRoutes()
 
-	case SyncTypeFull:
+	case SyncTypeFull, SyncTypePull:
 		if err := s.syncExecutor.PullAccounts(); err != nil {
 			return fmt.Errorf("failed to pull accounts: %w", err)
 		}
@@ -430,13 +534,22 @@ func (s *Scheduler) executeSyncType(job *ScheduledJob) error {
 		if err := s.syncExecutor.PullRoutes(); err != nil {
 			return fmt.Errorf("failed to pull routes: %w", err)
 		}
+		if err := s.syncExecutor.PullProfile(); err != nil {
+			return fmt.Errorf("failed to pull profile: %w", err)
+		}
 		return nil
 
 	case SyncTypePush:
 		return s.syncExecutor.PushAll()
 
+	case SyncTypePullPush:
+		if err := s.executeSyncType(SyncTypePull); err != nil {
+			return err
+		}
+		return s.executeSyncType(SyncTypePush)
+
 	default:
-		return fmt.Errorf("unknown sync type: %s", job.SyncType)
+		return fmt.Errorf("unknown sync type: %s", syncType)
 	}
 }
 
@@ -475,9 +588,7 @@ func (s *Scheduler) RunJobNow(jobID string) error {
 		return fmt.Errorf("job not found: %s", jobID)
 	}
 
-	// Execute in background
 	go s.executeJob(jobID)
-
 	return nil
 }
 
@@ -512,11 +623,111 @@ func (s *Scheduler) updateNextRunTimes() {
 	}
 }
 
-func schedulerConfigDir(s *state.State) string {
-	if configPath := resolveConfigPathFromState(s); configPath != "" {
-		return filepath.Dir(strings.TrimSpace(configPath))
+func (s *Scheduler) syncModeForJob(syncType SyncType) SyncMode {
+	switch syncType {
+	case SyncTypePull, SyncTypeFull:
+		return SyncModePull
+	case SyncTypePush:
+		return SyncModePush
+	case SyncTypePullPush:
+		return SyncModePullPush
+	case SyncTypeAccounts:
+		return SyncModePullAccounts
+	case SyncTypeCheckins:
+		return SyncModePullCheckins
+	case SyncTypeRoutes:
+		return SyncModePullRoutes
+	case SyncTypeNone:
+		return SyncModeNone
+	default:
+		return SyncModeNone
 	}
-	return utils.GetUserDefaultConfigDir()
+}
+
+func (s *Scheduler) importLegacyCronJobs() error {
+	if len(s.legacyCron) == 0 {
+		return nil
+	}
+
+	imported := 0
+	for _, legacy := range s.legacyCron {
+		legacyID := legacySchedulerJobID(legacy)
+		if _, exists := s.jobs[legacyID]; exists {
+			continue
+		}
+
+		legacyJob := &ScheduledJob{
+			ID:       legacyID,
+			Name:     fmt.Sprintf("legacy:%s", legacy.Name),
+			Schedule: legacy.Schedule,
+			SyncType: SyncTypeNone,
+			Enabled:  true,
+			Actions:  []action.ActionConfig{legacy.Action},
+		}
+
+		if err := s.addLoadedJob(legacyJob); err != nil {
+			return fmt.Errorf("failed importing legacy job %s: %w", legacy.Name, err)
+		}
+		imported++
+	}
+
+	if imported > 0 {
+		if err := s.saveJobs(); err != nil {
+			return fmt.Errorf("failed saving imported legacy jobs: %w", err)
+		}
+		s.events.Dispatch(events.Infof("scheduler", "Imported %d legacy cron job(s)", imported))
+	}
+	return nil
+}
+
+func legacySchedulerJobID(job CronJob) string {
+	payload, err := json.Marshal(job)
+	if err != nil {
+		payload = []byte(fmt.Sprintf("%s|%s|%v", job.Name, job.Schedule, job.Action))
+	}
+	sum := sha1.Sum(payload)
+	return fmt.Sprintf("legacy_%x", sum[:8])
+}
+
+func (s *Scheduler) addLoadedJob(job *ScheduledJob) error {
+	if job.ID == "" {
+		job.ID = fmt.Sprintf("job_%d", time.Now().UnixNano())
+	}
+	job.cronID = 0
+	s.jobs[job.ID] = job
+
+	if !job.Enabled {
+		return nil
+	}
+
+	schedule, err := cron.ParseStandard(job.Schedule)
+	if err != nil {
+		return fmt.Errorf("invalid schedule for job %s: %w", job.Name, err)
+	}
+
+	var nextRun time.Time
+	if job.Timezone != "" {
+		if loc, tzErr := time.LoadLocation(job.Timezone); tzErr == nil {
+			nextRun = schedule.Next(time.Now().In(loc))
+		} else {
+			nextRun = schedule.Next(time.Now())
+		}
+	} else {
+		nextRun = schedule.Next(time.Now())
+	}
+	job.NextRun = &nextRun
+
+	entryID, err := s.cron.AddFunc(job.Schedule, func(jobID string) func() {
+		return func() {
+			s.executeJob(jobID)
+		}
+	}(job.ID))
+	if err != nil {
+		return fmt.Errorf("failed to schedule job %s: %w", job.Name, err)
+	}
+	job.cronID = entryID
+
+	return nil
 }
 
 // loadJobs loads scheduled jobs from configuration
@@ -542,49 +753,10 @@ func (s *Scheduler) loadJobs() error {
 		return fmt.Errorf("failed to unmarshal jobs: %w", err)
 	}
 
-	// Add each job to scheduler
 	for id, job := range loadedJobs {
-		job.ID = id // Ensure ID is set
-		// Reset runtime fields
-		job.cronID = 0
-
-		// Add job without saving (to avoid rewriting file)
-		s.jobs[id] = job
-
-		// Schedule if enabled
-		if job.Enabled {
-			schedule, err := cron.ParseStandard(job.Schedule)
-			if err != nil {
-				s.events.Dispatch(events.Errorf("scheduler", "Failed to parse schedule for job %s: %v", job.Name, err))
-				continue
-			}
-
-			// Calculate next run time
-			var nextRun time.Time
-			if job.Timezone != "" {
-				loc, err := time.LoadLocation(job.Timezone)
-				if err == nil {
-					nextRun = schedule.Next(time.Now().In(loc))
-				} else {
-					nextRun = schedule.Next(time.Now())
-				}
-			} else {
-				nextRun = schedule.Next(time.Now())
-			}
-			job.NextRun = &nextRun
-
-			// Add to cron
-			entryID, err := s.cron.AddFunc(job.Schedule, func(jobID string) func() {
-				return func() {
-					s.executeJob(jobID)
-				}
-			}(job.ID))
-
-			if err != nil {
-				s.events.Dispatch(events.Errorf("scheduler", "Failed to schedule job %s: %v", job.Name, err))
-				continue
-			}
-			job.cronID = entryID
+		job.ID = id
+		if err := s.addLoadedJob(job); err != nil {
+			s.events.Dispatch(events.Errorf("scheduler", "Failed to load job %s: %v", job.Name, err))
 		}
 	}
 

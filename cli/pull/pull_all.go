@@ -3,6 +3,8 @@ package pull
 import (
 	"badgermaps/app"
 	"badgermaps/app/pull"
+	appserver "badgermaps/app/server"
+	"badgermaps/app/syncproxy"
 	"badgermaps/events"
 	"fmt"
 	"log"
@@ -32,85 +34,80 @@ func PullAllCmd(a *app.App) *cobra.Command {
 }
 
 func runPullGroup(a *app.App, top int) {
-	// Validate prerequisites before attempting to pull.
-	// Without these checks, the pull command would silently fail when API calls return errors
-	// due to missing credentials or database connection, making it difficult for users to
-	// understand why the command isn't working.
-	if a.API == nil || a.API.APIKey == "" {
-		fmt.Fprintf(os.Stderr, "Error: API key is not configured. Please run 'badgermaps config' to set up your API credentials.\n")
-		os.Exit(1)
-	}
+	localRun := func() error {
+		// Validate prerequisites before attempting local pull.
+		if a.API == nil || a.API.APIKey == "" {
+			return fmt.Errorf("api key is not configured. please run 'badgermaps config' to set up your API credentials")
+		}
 
-	if a.DB == nil {
-		fmt.Fprintf(os.Stderr, "Error: Database is not configured. Please run 'badgermaps config' to set up your database.\n")
-		os.Exit(1)
-	}
+		if a.DB == nil {
+			return fmt.Errorf("database is not configured. please run 'badgermaps config' to set up your database")
+		}
 
-	if !a.DB.IsConnected() {
-		fmt.Fprintf(os.Stderr, "Error: Database is not connected. Please check your database configuration.\n")
-		os.Exit(1)
-	}
+		if !a.DB.IsConnected() {
+			return fmt.Errorf("database is not connected. please check your database configuration")
+		}
 
-	log.SetOutput(os.Stderr) // Configure logger to write to stderr
+		log.SetOutput(os.Stderr)
 
-	pullListener := func(e events.Event) {
-		switch e.Type {
-		case "pull.group.start":
-			bar = progressbar.NewOptions(-1,
-				progressbar.OptionSetDescription(fmt.Sprintf("Starting pull for %s...", e.Source)),
-				progressbar.OptionSetWriter(os.Stderr),
-				progressbar.OptionSpinnerType(14),
-				progressbar.OptionEnableColorCodes(true),
-			)
-		case "pull.ids_fetched":
-			payload := e.Payload.(events.ResourceIDsFetchedPayload)
-			if bar != nil {
-				bar.ChangeMax(payload.Count)
-				bar.Describe(fmt.Sprintf("Found %d %s to pull.", payload.Count, e.Source))
-			}
-		case "pull.store.success":
-			if bar != nil {
-				bar.Add(1)
-			}
-		case "pull.group.error":
-			payload := e.Payload.(events.ErrorPayload)
-			if bar != nil {
-				bar.Clear()
-			}
-			a.Events.Dispatch(events.Errorf("pull", "An error occurred during pull: %v", payload.Error))
-		case "pull.group.complete":
-			if bar != nil {
-				bar.Finish()
-				a.Events.Dispatch(events.Infof("pull", "✔ Pull for %s complete.", e.Source))
+		pullListener := func(e events.Event) {
+			switch e.Type {
+			case "pull.group.start":
+				bar = progressbar.NewOptions(-1,
+					progressbar.OptionSetDescription(fmt.Sprintf("Starting pull for %s...", e.Source)),
+					progressbar.OptionSetWriter(os.Stderr),
+					progressbar.OptionSpinnerType(14),
+					progressbar.OptionEnableColorCodes(true),
+				)
+			case "pull.ids_fetched":
+				payload := e.Payload.(events.ResourceIDsFetchedPayload)
+				if bar != nil {
+					bar.ChangeMax(payload.Count)
+					bar.Describe(fmt.Sprintf("Found %d %s to pull.", payload.Count, e.Source))
+				}
+			case "pull.store.success":
+				if bar != nil {
+					bar.Add(1)
+				}
+			case "pull.group.error":
+				payload := e.Payload.(events.ErrorPayload)
+				if bar != nil {
+					bar.Clear()
+				}
+				a.Events.Dispatch(events.Errorf("pull", "An error occurred during pull: %v", payload.Error))
+			case "pull.group.complete":
+				if bar != nil {
+					bar.Finish()
+					a.Events.Dispatch(events.Infof("pull", "✔ Pull for %s complete.", e.Source))
+				}
 			}
 		}
+
+		a.Events.Subscribe("pull.*", pullListener)
+		a.Events.Dispatch(events.Infof("pull", "Starting data pull from BadgerMaps API..."))
+
+		if err := pull.PullGroupAccounts(a, top, nil); err != nil {
+			return fmt.Errorf("failed to pull accounts: %w", err)
+		}
+
+		if err := pull.PullGroupCheckins(a, nil); err != nil {
+			return fmt.Errorf("failed to pull checkins: %w", err)
+		}
+
+		if err := pull.PullGroupRoutes(a, nil); err != nil {
+			return fmt.Errorf("failed to pull routes: %w", err)
+		}
+
+		if _, err := pull.PullProfile(a, nil); err != nil {
+			return fmt.Errorf("failed to pull user profile: %w", err)
+		}
+
+		a.Events.Dispatch(events.Infof("pull", "✔ All data pulled successfully!"))
+		return nil
 	}
 
-	// Subscribe the listener to all relevant events
-	a.Events.Subscribe("pull.*", pullListener)
-
-	// --- Execute Pull Operations ---
-	a.Events.Dispatch(events.Infof("pull", "Starting data pull from BadgerMaps API..."))
-
-	if err := pull.PullGroupAccounts(a, top, nil); err != nil {
-		a.Events.Dispatch(events.Errorf("pull", "Failed to pull accounts: %v", err))
+	if err := syncproxy.RunWithServerRouting(a, appserver.SyncModePull, "cli.pull.all", top, localRun); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-
-	if err := pull.PullGroupCheckins(a, nil); err != nil {
-		a.Events.Dispatch(events.Errorf("pull", "Failed to pull checkins: %v", err))
-		os.Exit(1)
-	}
-
-	if err := pull.PullGroupRoutes(a, nil); err != nil {
-		a.Events.Dispatch(events.Errorf("pull", "Failed to pull routes: %v", err))
-		os.Exit(1)
-	}
-
-	if _, err := pull.PullProfile(a, nil); err != nil {
-		a.Events.Dispatch(events.Errorf("pull", "Failed to pull user profile: %v", err))
-		os.Exit(1)
-	}
-
-	a.Events.Dispatch(events.Infof("pull", "✔ All data pulled successfully!"))
 }

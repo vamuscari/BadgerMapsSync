@@ -4,6 +4,8 @@ import (
 	"badgermaps/api/models"
 	"badgermaps/app"
 	"badgermaps/app/pull"
+	"badgermaps/app/push"
+	appserver "badgermaps/app/server"
 	"badgermaps/database"
 	"badgermaps/events"
 	"bytes"
@@ -25,7 +27,8 @@ import (
 
 // CliPresenter handles the presentation logic for the server command.
 type CliPresenter struct {
-	App *app.App
+	App       *app.App
+	syncQueue *appserver.SyncJobCoordinator
 }
 
 // NewCliPresenter creates a new presenter for the server command.
@@ -74,10 +77,27 @@ func (p *CliPresenter) RunServer(config *ServerConfig) {
 
 // RunServerWithContext runs the server until context cancellation or a fatal server error.
 func (p *CliPresenter) RunServerWithContext(ctx context.Context, config *ServerConfig) error {
-	if err := p.App.Server.Start(p.App.Config.CronJobs, p.App); err != nil {
-		return fmt.Errorf("failed to schedule cron jobs: %w", err)
+	syncQueue := appserver.NewSyncJobCoordinator(p.App.State, p.App.Events)
+	p.syncQueue = syncQueue
+	defer func() {
+		p.syncQueue = nil
+		syncQueue.Stop()
+	}()
+
+	scheduler := appserver.NewScheduler(
+		p.App.State,
+		p.App.DB,
+		p.App.API,
+		p.App.Events,
+		nil,
+		&schedulerSyncExecutor{presenter: p},
+		syncQueue,
+		p.App.Config.CronJobs,
+	)
+	if err := scheduler.Start(); err != nil {
+		return fmt.Errorf("failed to start scheduler: %w", err)
 	}
-	defer p.App.Server.StopCronJobs()
+	defer scheduler.Stop()
 
 	mux := http.NewServeMux()
 
@@ -115,6 +135,10 @@ func (p *CliPresenter) RunServerWithContext(ctx context.Context, config *ServerC
 	if !enabledWebhooks[app.WebhookAccountCreate] && !enabledWebhooks[app.WebhookCheckin] {
 		p.App.Events.Dispatch(events.Warningf("server", "All webhooks are disabled; server will only serve /health"))
 	}
+
+	mux.Handle("/internal/jobs/sync", p.withLocalOnly(http.HandlerFunc(p.HandleInternalSyncJob)))
+	mux.Handle("/internal/jobs/", p.withLocalOnly(http.HandlerFunc(p.HandleInternalSyncJobStatus)))
+	mux.Handle("/internal/activity", p.withLocalOnly(http.HandlerFunc(p.HandleInternalActivity)))
 
 	if p.App.Config.WebhookCatchAll {
 		catchAllHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -179,6 +203,112 @@ func normalizeServerHost(host string) string {
 	return host
 }
 
+type schedulerSyncExecutor struct {
+	presenter *CliPresenter
+}
+
+func (e *schedulerSyncExecutor) PullAccounts() error {
+	return e.presenter.runSyncMode(appserver.SyncModePullAccounts, 0)
+}
+
+func (e *schedulerSyncExecutor) PullCheckins() error {
+	return e.presenter.runSyncMode(appserver.SyncModePullCheckins, 0)
+}
+
+func (e *schedulerSyncExecutor) PullRoutes() error {
+	return e.presenter.runSyncMode(appserver.SyncModePullRoutes, 0)
+}
+
+func (e *schedulerSyncExecutor) PullProfile() error {
+	return e.presenter.runSyncMode(appserver.SyncModePullProfile, 0)
+}
+
+func (e *schedulerSyncExecutor) PushAll() error {
+	return e.presenter.runSyncMode(appserver.SyncModePush, 0)
+}
+
+func (e *schedulerSyncExecutor) PushAccounts() error {
+	return e.presenter.runSyncMode(appserver.SyncModePushAccounts, 0)
+}
+
+func (e *schedulerSyncExecutor) PushCheckins() error {
+	return e.presenter.runSyncMode(appserver.SyncModePushCheckins, 0)
+}
+
+func (e *schedulerSyncExecutor) PullAccount(id int) error {
+	return e.presenter.runSyncMode(appserver.SyncModePullAccount, id)
+}
+
+func (e *schedulerSyncExecutor) PullCheckin(id int) error {
+	return e.presenter.runSyncMode(appserver.SyncModePullCheckin, id)
+}
+
+func (e *schedulerSyncExecutor) PullRoute(id int) error {
+	return e.presenter.runSyncMode(appserver.SyncModePullRoute, id)
+}
+
+func (p *CliPresenter) runSyncMode(mode appserver.SyncMode, resourceID int) error {
+	switch mode {
+	case appserver.SyncModeNone:
+		return nil
+	case appserver.SyncModePull:
+		if err := pull.PullGroupAccounts(p.App, resourceID, nil); err != nil {
+			return err
+		}
+		if err := pull.PullGroupCheckins(p.App, nil); err != nil {
+			return err
+		}
+		if err := pull.PullGroupRoutes(p.App, nil); err != nil {
+			return err
+		}
+		_, err := pull.PullProfile(p.App, nil)
+		return err
+	case appserver.SyncModePullPush:
+		if err := p.runSyncMode(appserver.SyncModePull, 0); err != nil {
+			return err
+		}
+		return p.runSyncMode(appserver.SyncModePush, 0)
+	case appserver.SyncModePullAccounts:
+		return pull.PullGroupAccounts(p.App, 0, nil)
+	case appserver.SyncModePullCheckins:
+		return pull.PullGroupCheckins(p.App, nil)
+	case appserver.SyncModePullRoutes:
+		return pull.PullGroupRoutes(p.App, nil)
+	case appserver.SyncModePullProfile:
+		_, err := pull.PullProfile(p.App, nil)
+		return err
+	case appserver.SyncModePush:
+		if err := push.RunPushAccounts(p.App); err != nil {
+			return err
+		}
+		return push.RunPushCheckins(p.App)
+	case appserver.SyncModePushAccounts:
+		return push.RunPushAccounts(p.App)
+	case appserver.SyncModePushCheckins:
+		return push.RunPushCheckins(p.App)
+	case appserver.SyncModePullAccount:
+		if resourceID <= 0 {
+			return fmt.Errorf("resource id is required for mode %s", mode)
+		}
+		_, err := pull.PullAccount(p.App, resourceID)
+		return err
+	case appserver.SyncModePullCheckin:
+		if resourceID <= 0 {
+			return fmt.Errorf("resource id is required for mode %s", mode)
+		}
+		_, err := pull.PullCheckin(p.App, resourceID)
+		return err
+	case appserver.SyncModePullRoute:
+		if resourceID <= 0 {
+			return fmt.Errorf("resource id is required for mode %s", mode)
+		}
+		_, err := pull.PullRoute(p.App, resourceID)
+		return err
+	default:
+		return fmt.Errorf("unsupported sync mode: %s", mode)
+	}
+}
+
 func (p *CliPresenter) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
 	if p.App.DB != nil && p.App.DB.IsConnected() {
 		w.WriteHeader(http.StatusOK)
@@ -186,6 +316,143 @@ func (p *CliPresenter) HandleHealthCheck(w http.ResponseWriter, r *http.Request)
 	} else {
 		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
 	}
+}
+
+func (p *CliPresenter) HandleInternalSyncJob(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if p.syncQueue == nil {
+		http.Error(w, "Sync queue unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req appserver.SyncJobSubmitRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("invalid request payload: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	mode, err := appserver.ParseSyncMode(req.Mode)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	source := strings.TrimSpace(req.Source)
+	if source == "" {
+		source = "manual"
+	}
+
+	job, err := p.syncQueue.Submit(appserver.SyncJobRequest{
+		Name:   req.Name,
+		Source: source,
+		Mode:   mode,
+		Run: func(_ context.Context) error {
+			return p.runSyncMode(mode, req.ResourceID)
+		},
+	})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to queue sync job: %v", err), http.StatusServiceUnavailable)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(job)
+}
+
+func (p *CliPresenter) HandleInternalSyncJobStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if p.syncQueue == nil {
+		http.Error(w, "Sync queue unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	jobID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/internal/jobs/"))
+	if jobID == "" {
+		http.Error(w, "job id is required", http.StatusBadRequest)
+		return
+	}
+
+	job, exists := p.syncQueue.GetJob(jobID)
+	if !exists {
+		http.Error(w, "job not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(job)
+}
+
+func (p *CliPresenter) HandleInternalActivity(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var activity appserver.RuntimeActivity
+	if p.syncQueue != nil {
+		activity = p.syncQueue.GetActivity()
+	} else {
+		var err error
+		activity, err = appserver.ReadRuntimeActivity(p.App.State)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("activity unavailable: %v", err), http.StatusServiceUnavailable)
+			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(activity)
+}
+
+func (p *CliPresenter) withLocalOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isLocalRequest(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isLocalRequest(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err != nil {
+		host = strings.TrimSpace(r.RemoteAddr)
+	}
+
+	host = strings.Trim(host, "[]")
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() {
+		return true
+	}
+
+	addresses, err := net.InterfaceAddrs()
+	if err != nil {
+		return false
+	}
+	for _, addr := range addresses {
+		switch value := addr.(type) {
+		case *net.IPNet:
+			if value.IP.Equal(ip) {
+				return true
+			}
+		case *net.IPAddr:
+			if value.IP.Equal(ip) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (p *CliPresenter) HandleReplayWebhook(id int) {

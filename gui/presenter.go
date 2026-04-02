@@ -5,6 +5,8 @@ import (
 	"badgermaps/app"
 	"badgermaps/app/pull"
 	"badgermaps/app/push"
+	appserver "badgermaps/app/server"
+	"badgermaps/app/syncproxy"
 	"badgermaps/database"
 	"badgermaps/events"
 	"badgermaps/utils"
@@ -46,70 +48,86 @@ func ratioProgress(current, total int) float64 {
 }
 
 func (p *GuiPresenter) runPullGroupSync() error {
-	totalMajorSteps := 4.0
-	majorStepWeight := 1.0 / totalMajorSteps
+	localRun := func() error {
+		totalMajorSteps := 4.0
+		majorStepWeight := 1.0 / totalMajorSteps
 
-	p.app.Events.Dispatch(events.Infof("presenter", "Pulling accounts..."))
-	accountsCallback := func(current, total int) {
-		progress := ratioProgress(current, total) * majorStepWeight
-		p.view.SetProgress(progress)
-	}
-	if err := pull.PullGroupAccounts(p.app, 0, accountsCallback); err != nil {
-		p.app.Events.Dispatch(events.Errorf("presenter", "Error pulling accounts: %v", err))
-		return err
-	}
-	p.view.SetProgress(majorStepWeight)
+		p.app.Events.Dispatch(events.Infof("presenter", "Pulling accounts..."))
+		accountsCallback := func(current, total int) {
+			progress := ratioProgress(current, total) * majorStepWeight
+			p.view.SetProgress(progress)
+		}
+		if err := pull.PullGroupAccounts(p.app, 0, accountsCallback); err != nil {
+			p.app.Events.Dispatch(events.Errorf("presenter", "Error pulling accounts: %v", err))
+			return err
+		}
+		p.view.SetProgress(majorStepWeight)
 
-	p.app.Events.Dispatch(events.Infof("presenter", "Pulling checkins..."))
-	checkinsCallback := func(current, total int) {
-		progress := majorStepWeight + ratioProgress(current, total)*majorStepWeight
-		p.view.SetProgress(progress)
-	}
-	if err := pull.PullGroupCheckins(p.app, checkinsCallback); err != nil {
-		p.app.Events.Dispatch(events.Errorf("presenter", "Error pulling checkins: %v", err))
-		return err
-	}
-	p.view.SetProgress(2 * majorStepWeight)
+		p.app.Events.Dispatch(events.Infof("presenter", "Pulling checkins..."))
+		checkinsCallback := func(current, total int) {
+			progress := majorStepWeight + ratioProgress(current, total)*majorStepWeight
+			p.view.SetProgress(progress)
+		}
+		if err := pull.PullGroupCheckins(p.app, checkinsCallback); err != nil {
+			p.app.Events.Dispatch(events.Errorf("presenter", "Error pulling checkins: %v", err))
+			return err
+		}
+		p.view.SetProgress(2 * majorStepWeight)
 
-	p.app.Events.Dispatch(events.Infof("presenter", "Pulling routes..."))
-	routesCallback := func(current, total int) {
-		progress := 2*majorStepWeight + ratioProgress(current, total)*majorStepWeight
-		p.view.SetProgress(progress)
-	}
-	if err := pull.PullGroupRoutes(p.app, routesCallback); err != nil {
-		p.app.Events.Dispatch(events.Errorf("presenter", "Error pulling routes: %v", err))
-		return err
-	}
-	p.view.SetProgress(3 * majorStepWeight)
+		p.app.Events.Dispatch(events.Infof("presenter", "Pulling routes..."))
+		routesCallback := func(current, total int) {
+			progress := 2*majorStepWeight + ratioProgress(current, total)*majorStepWeight
+			p.view.SetProgress(progress)
+		}
+		if err := pull.PullGroupRoutes(p.app, routesCallback); err != nil {
+			p.app.Events.Dispatch(events.Errorf("presenter", "Error pulling routes: %v", err))
+			return err
+		}
+		p.view.SetProgress(3 * majorStepWeight)
 
-	p.app.Events.Dispatch(events.Infof("presenter", "Pulling user profile..."))
-	profileCallback := func(current, total int) {
-		progress := 3*majorStepWeight + ratioProgress(current, total)*majorStepWeight
-		p.view.SetProgress(progress)
-	}
-	if _, err := pull.PullProfile(p.app, profileCallback); err != nil {
-		p.app.Events.Dispatch(events.Errorf("presenter", "Error pulling user profile: %v", err))
-		return err
-	}
-	p.view.SetProgress(1)
+		p.app.Events.Dispatch(events.Infof("presenter", "Pulling user profile..."))
+		profileCallback := func(current, total int) {
+			progress := 3*majorStepWeight + ratioProgress(current, total)*majorStepWeight
+			p.view.SetProgress(progress)
+		}
+		if _, err := pull.PullProfile(p.app, profileCallback); err != nil {
+			p.app.Events.Dispatch(events.Errorf("presenter", "Error pulling user profile: %v", err))
+			return err
+		}
+		p.view.SetProgress(1)
 
-	p.app.Events.Dispatch(events.Infof("presenter", "Finished pulling all data."))
-	return nil
+		p.app.Events.Dispatch(events.Infof("presenter", "Finished pulling all data."))
+		return nil
+	}
+
+	err := syncproxy.RunWithServerRouting(p.app, appserver.SyncModePull, "gui.pull.all", 0, localRun)
+	if err == nil {
+		p.view.SetProgress(1)
+	}
+	return err
 }
 
 func (p *GuiPresenter) runPushAllSync() error {
-	var runErr error
+	return syncproxy.RunWithServerRouting(
+		p.app,
+		appserver.SyncModePush,
+		"gui.push.all",
+		0,
+		func() error {
+			var runErr error
 
-	if err := push.RunPushAccounts(p.app); err != nil {
-		p.app.Events.Dispatch(events.Errorf("presenter", "ERROR during account push: %v", err))
-		runErr = errors.Join(runErr, fmt.Errorf("account push failed: %w", err))
-	}
-	if err := push.RunPushCheckins(p.app); err != nil {
-		p.app.Events.Dispatch(events.Errorf("presenter", "ERROR during check-in push: %v", err))
-		runErr = errors.Join(runErr, fmt.Errorf("check-in push failed: %w", err))
-	}
+			if err := push.RunPushAccounts(p.app); err != nil {
+				p.app.Events.Dispatch(events.Errorf("presenter", "ERROR during account push: %v", err))
+				runErr = errors.Join(runErr, fmt.Errorf("account push failed: %w", err))
+			}
+			if err := push.RunPushCheckins(p.app); err != nil {
+				p.app.Events.Dispatch(events.Errorf("presenter", "ERROR during check-in push: %v", err))
+				runErr = errors.Join(runErr, fmt.Errorf("check-in push failed: %w", err))
+			}
 
-	return runErr
+			return runErr
+		},
+	)
 }
 
 // RunFullSyncBlocking executes full pull + push sequentially and returns only when complete.
@@ -158,7 +176,16 @@ func (p *GuiPresenter) HandlePullAccount(idStr string) {
 	}
 	p.app.Events.Dispatch(events.Infof("presenter", "Starting pull for account ID: %d...", id))
 	go func() {
-		if _, err := pull.PullAccount(p.app, id); err != nil {
+		if err := syncproxy.RunWithServerRouting(
+			p.app,
+			appserver.SyncModePullAccount,
+			"gui.pull.account",
+			id,
+			func() error {
+				_, err := pull.PullAccount(p.app, id)
+				return err
+			},
+		); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
 			p.view.ShowToast(fmt.Sprintf("Error: Failed to pull account %d.", id))
 			return
@@ -330,7 +357,15 @@ func (p *GuiPresenter) HandlePullAccounts() {
 		callback := func(current, total int) {
 			p.view.SetProgress(float64(current) / float64(total))
 		}
-		if err := pull.PullGroupAccounts(p.app, 0, callback); err != nil {
+		if err := syncproxy.RunWithServerRouting(
+			p.app,
+			appserver.SyncModePullAccounts,
+			"gui.pull.accounts",
+			0,
+			func() error {
+				return pull.PullGroupAccounts(p.app, 0, callback)
+			},
+		); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
 			p.view.ShowToast("Error: Failed to pull all accounts.")
 			return
@@ -350,7 +385,16 @@ func (p *GuiPresenter) HandlePullCheckin(idStr string) {
 	}
 	p.app.Events.Dispatch(events.Infof("presenter", "Starting pull for check-in ID: %d...", id))
 	go func() {
-		if _, err := pull.PullCheckin(p.app, id); err != nil {
+		if err := syncproxy.RunWithServerRouting(
+			p.app,
+			appserver.SyncModePullCheckin,
+			"gui.pull.checkin",
+			id,
+			func() error {
+				_, err := pull.PullCheckin(p.app, id)
+				return err
+			},
+		); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
 			p.view.ShowToast(fmt.Sprintf("Error: Failed to pull check-in %d.", id))
 			return
@@ -370,7 +414,15 @@ func (p *GuiPresenter) HandlePullCheckins() {
 		callback := func(current, total int) {
 			p.view.SetProgress(float64(current) / float64(total))
 		}
-		if err := pull.PullGroupCheckins(p.app, callback); err != nil {
+		if err := syncproxy.RunWithServerRouting(
+			p.app,
+			appserver.SyncModePullCheckins,
+			"gui.pull.checkins",
+			0,
+			func() error {
+				return pull.PullGroupCheckins(p.app, callback)
+			},
+		); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
 			p.view.ShowToast("Error: Failed to pull all check-ins.")
 			return
@@ -405,7 +457,16 @@ func (p *GuiPresenter) HandlePullRoute(idStr string) {
 	}
 	p.app.Events.Dispatch(events.Infof("presenter", "Starting pull for route ID: %d...", id))
 	go func() {
-		if _, err := pull.PullRoute(p.app, id); err != nil {
+		if err := syncproxy.RunWithServerRouting(
+			p.app,
+			appserver.SyncModePullRoute,
+			"gui.pull.route",
+			id,
+			func() error {
+				_, err := pull.PullRoute(p.app, id)
+				return err
+			},
+		); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
 			p.view.ShowToast(fmt.Sprintf("Error: Failed to pull route %d.", id))
 			return
@@ -425,7 +486,15 @@ func (p *GuiPresenter) HandlePullRoutes() {
 		callback := func(current, total int) {
 			p.view.SetProgress(float64(current) / float64(total))
 		}
-		if err := pull.PullGroupRoutes(p.app, callback); err != nil {
+		if err := syncproxy.RunWithServerRouting(
+			p.app,
+			appserver.SyncModePullRoutes,
+			"gui.pull.routes",
+			0,
+			func() error {
+				return pull.PullGroupRoutes(p.app, callback)
+			},
+		); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
 			p.view.ShowToast("Error: Failed to pull all routes.")
 			return
@@ -443,17 +512,24 @@ func (p *GuiPresenter) HandlePullProfile() {
 	p.view.SetProgress(0)
 	go func() {
 		defer p.view.HideProgressBar()
-		if p.app.DB == nil || p.app.DB.GetDB() == nil {
-			if err := p.app.ReloadDB(); err != nil {
-				p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: Failed to connect to database: %v", err))
-				p.view.ShowToast("Error: Failed to connect to database.")
-				return
-			}
-		}
 		callback := func(current, total int) {
 			p.view.SetProgress(float64(current) / float64(total))
 		}
-		if _, err := pull.PullProfile(p.app, callback); err != nil {
+		if err := syncproxy.RunWithServerRouting(
+			p.app,
+			appserver.SyncModePullProfile,
+			"gui.pull.profile",
+			0,
+			func() error {
+				if p.app.DB == nil || p.app.DB.GetDB() == nil {
+					if err := p.app.ReloadDB(); err != nil {
+						return fmt.Errorf("failed to connect to database: %w", err)
+					}
+				}
+				_, err := pull.PullProfile(p.app, callback)
+				return err
+			},
+		); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
 			p.view.ShowToast("Error: Failed to pull user profile.")
 			return
@@ -470,7 +546,15 @@ func (p *GuiPresenter) HandlePushAccounts() {
 	p.app.Events.Dispatch(events.Debugf("presenter", "HandlePushAccounts called"))
 	p.app.Events.Dispatch(events.Infof("presenter", "Starting push for account changes..."))
 	go func() {
-		if err := push.RunPushAccounts(p.app); err != nil {
+		if err := syncproxy.RunWithServerRouting(
+			p.app,
+			appserver.SyncModePushAccounts,
+			"gui.push.accounts",
+			0,
+			func() error {
+				return push.RunPushAccounts(p.app)
+			},
+		); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
 			fyne.Do(func() {
 				p.view.ShowToast("Error: Failed to push account changes.")
@@ -489,7 +573,15 @@ func (p *GuiPresenter) HandlePushCheckins() {
 	p.app.Events.Dispatch(events.Debugf("presenter", "HandlePushCheckins called"))
 	p.app.Events.Dispatch(events.Infof("presenter", "Starting push for check-in changes..."))
 	go func() {
-		if err := push.RunPushCheckins(p.app); err != nil {
+		if err := syncproxy.RunWithServerRouting(
+			p.app,
+			appserver.SyncModePushCheckins,
+			"gui.push.checkins",
+			0,
+			func() error {
+				return push.RunPushCheckins(p.app)
+			},
+		); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
 			fyne.Do(func() {
 				p.view.ShowToast("Error: Failed to push check-in changes.")

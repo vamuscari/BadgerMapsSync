@@ -3,6 +3,8 @@ package pull
 import (
 	"badgermaps/app"
 	"badgermaps/app/pull"
+	appserver "badgermaps/app/server"
+	"badgermaps/app/syncproxy"
 	"badgermaps/events"
 	"fmt"
 	"os"
@@ -40,11 +42,28 @@ func (p *CliPresenter) HandlePullAccount(accountID int, opts ResponseSaveOptions
 	p.App.Events.Subscribe("pull.complete", listener)
 	p.App.Events.Subscribe("pull.error", listener)
 
-	account, err := pull.PullAccount(p.App, accountID)
-	if err != nil {
-		return err
+	localRun := func() error {
+		account, err := pull.PullAccount(p.App, accountID)
+		if err != nil {
+			return err
+		}
+		return p.saveResponse("account", strconv.Itoa(accountID), account, opts)
 	}
-	return p.saveResponse("account", strconv.Itoa(accountID), account, opts)
+
+	if opts.enabled() {
+		if _, running := p.App.Server.GetServerStatus(); running {
+			return fmt.Errorf("response saving is not supported while server is active; stop the server or run without --save-response/--response-file")
+		}
+		return localRun()
+	}
+
+	return syncproxy.RunWithServerRouting(
+		p.App,
+		appserver.SyncModePullAccount,
+		"cli.pull.account",
+		accountID,
+		localRun,
+	)
 }
 
 // HandlePullAccounts orchestrates pulling all accounts.
@@ -90,7 +109,15 @@ func (p *CliPresenter) HandlePullAccounts() error {
 	// Subscribe the listener to all relevant events
 	p.App.Events.Subscribe("pull.*", pullListener)
 
-	err := pull.PullGroupAccounts(p.App, 0, nil)
+	err := syncproxy.RunWithServerRouting(
+		p.App,
+		appserver.SyncModePullAccounts,
+		"cli.pull.accounts",
+		0,
+		func() error {
+			return pull.PullGroupAccounts(p.App, 0, nil)
+		},
+	)
 	if bar != nil && !bar.IsFinished() {
 		bar.Finish()
 	}
@@ -115,11 +142,28 @@ func (p *CliPresenter) HandlePullCheckin(checkinID int, opts ResponseSaveOptions
 	p.App.Events.Subscribe("pull.complete", listener)
 	p.App.Events.Subscribe("pull.error", listener)
 
-	checkin, err := pull.PullCheckin(p.App, checkinID)
-	if err != nil {
-		return err
+	localRun := func() error {
+		checkin, err := pull.PullCheckin(p.App, checkinID)
+		if err != nil {
+			return err
+		}
+		return p.saveResponse("checkin", strconv.Itoa(checkinID), checkin, opts)
 	}
-	return p.saveResponse("checkin", strconv.Itoa(checkinID), checkin, opts)
+
+	if opts.enabled() {
+		if _, running := p.App.Server.GetServerStatus(); running {
+			return fmt.Errorf("response saving is not supported while server is active; stop the server or run without --save-response/--response-file")
+		}
+		return localRun()
+	}
+
+	return syncproxy.RunWithServerRouting(
+		p.App,
+		appserver.SyncModePullCheckin,
+		"cli.pull.checkin",
+		checkinID,
+		localRun,
+	)
 }
 
 // HandlePullCheckins orchestrates pulling all checkins.
@@ -165,7 +209,15 @@ func (p *CliPresenter) HandlePullCheckins() error {
 	// Subscribe the listener to all relevant events
 	p.App.Events.Subscribe("pull.*", pullListener)
 
-	err := pull.PullGroupCheckins(p.App, nil)
+	err := syncproxy.RunWithServerRouting(
+		p.App,
+		appserver.SyncModePullCheckins,
+		"cli.pull.checkins",
+		0,
+		func() error {
+			return pull.PullGroupCheckins(p.App, nil)
+		},
+	)
 	if bar != nil && !bar.IsFinished() {
 		bar.Finish()
 	}
@@ -190,11 +242,28 @@ func (p *CliPresenter) HandlePullRoute(routeID int, opts ResponseSaveOptions) er
 	p.App.Events.Subscribe("pull.complete", listener)
 	p.App.Events.Subscribe("pull.error", listener)
 
-	route, err := pull.PullRoute(p.App, routeID)
-	if err != nil {
-		return err
+	localRun := func() error {
+		route, err := pull.PullRoute(p.App, routeID)
+		if err != nil {
+			return err
+		}
+		return p.saveResponse("route", strconv.Itoa(routeID), route, opts)
 	}
-	return p.saveResponse("route", strconv.Itoa(routeID), route, opts)
+
+	if opts.enabled() {
+		if _, running := p.App.Server.GetServerStatus(); running {
+			return fmt.Errorf("response saving is not supported while server is active; stop the server or run without --save-response/--response-file")
+		}
+		return localRun()
+	}
+
+	return syncproxy.RunWithServerRouting(
+		p.App,
+		appserver.SyncModePullRoute,
+		"cli.pull.route",
+		routeID,
+		localRun,
+	)
 }
 
 // HandlePullRoutes orchestrates pulling all routes.
@@ -240,7 +309,15 @@ func (p *CliPresenter) HandlePullRoutes() error {
 	// Subscribe the listener to all relevant events
 	p.App.Events.Subscribe("pull.*", pullListener)
 
-	err := pull.PullGroupRoutes(p.App, nil)
+	err := syncproxy.RunWithServerRouting(
+		p.App,
+		appserver.SyncModePullRoutes,
+		"cli.pull.routes",
+		0,
+		func() error {
+			return pull.PullGroupRoutes(p.App, nil)
+		},
+	)
 	if bar != nil && !bar.IsFinished() {
 		bar.Finish()
 	}
@@ -265,14 +342,31 @@ func (p *CliPresenter) HandlePullProfile(opts ResponseSaveOptions) error {
 	p.App.Events.Subscribe("pull.complete", listener)
 	p.App.Events.Subscribe("pull.error", listener)
 
-	profile, err := pull.PullProfile(p.App, nil)
-	if err != nil {
-		return err
+	localRun := func() error {
+		profile, err := pull.PullProfile(p.App, nil)
+		if err != nil {
+			return err
+		}
+
+		identifier := "profile"
+		if profile != nil && profile.ProfileId.Valid {
+			identifier = fmt.Sprintf("%d", profile.ProfileId.Int64)
+		}
+		return p.saveResponse("profile", identifier, profile, opts)
 	}
 
-	identifier := "profile"
-	if profile != nil && profile.ProfileId.Valid {
-		identifier = fmt.Sprintf("%d", profile.ProfileId.Int64)
+	if opts.enabled() {
+		if _, running := p.App.Server.GetServerStatus(); running {
+			return fmt.Errorf("response saving is not supported while server is active; stop the server or run without --save-response/--response-file")
+		}
+		return localRun()
 	}
-	return p.saveResponse("profile", identifier, profile, opts)
+
+	return syncproxy.RunWithServerRouting(
+		p.App,
+		appserver.SyncModePullProfile,
+		"cli.pull.profile",
+		0,
+		localRun,
+	)
 }

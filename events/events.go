@@ -58,6 +58,19 @@ type LogPayload struct {
 
 func (p LogPayload) EventType() EventType { return "log" }
 
+// GenericPayload provides an event type plus arbitrary key/value data.
+type GenericPayload struct {
+	Type EventType
+	Data map[string]interface{}
+}
+
+func (p GenericPayload) EventType() EventType {
+	if p.Type == "" {
+		return "generic"
+	}
+	return p.Type
+}
+
 // PullStartPayload is for when a pull operation begins.
 type PullStartPayload struct {
 	ResourceID interface{}

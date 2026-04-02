@@ -3,6 +3,8 @@ package push
 import (
 	"badgermaps/app"
 	"badgermaps/app/push"
+	appserver "badgermaps/app/server"
+	"badgermaps/app/syncproxy"
 	"badgermaps/database"
 	"badgermaps/events"
 	"fmt"
@@ -120,7 +122,15 @@ func (p *CliPresenter) HandlePushAccounts() error {
 
 	p.App.Events.Subscribe("push.*", pushListener)
 
-	return push.RunPushAccounts(p.App)
+	return syncproxy.RunWithServerRouting(
+		p.App,
+		appserver.SyncModePushAccounts,
+		"cli.push.accounts",
+		0,
+		func() error {
+			return push.RunPushAccounts(p.App)
+		},
+	)
 }
 
 // HandlePushCheckins orchestrates pushing pending check-in changes.
@@ -167,13 +177,29 @@ func (p *CliPresenter) HandlePushCheckins() error {
 
 	p.App.Events.Subscribe("push.*", pushListener)
 
-	return push.RunPushCheckins(p.App)
+	return syncproxy.RunWithServerRouting(
+		p.App,
+		appserver.SyncModePushCheckins,
+		"cli.push.checkins",
+		0,
+		func() error {
+			return push.RunPushCheckins(p.App)
+		},
+	)
 }
 
 // HandlePushAll orchestrates pushing all pending changes.
 func (p *CliPresenter) HandlePushAll() error {
-	if err := p.HandlePushAccounts(); err != nil {
-		return err
-	}
-	return p.HandlePushCheckins()
+	return syncproxy.RunWithServerRouting(
+		p.App,
+		appserver.SyncModePush,
+		"cli.push.all",
+		0,
+		func() error {
+			if err := push.RunPushAccounts(p.App); err != nil {
+				return err
+			}
+			return push.RunPushCheckins(p.App)
+		},
+	)
 }
