@@ -14,6 +14,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"image/color"
+	"net"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -185,9 +186,9 @@ func (w *WelcomeScreen) applyWizardConfiguration() error {
 
 	if strings.TrimSpace(w.app.ConfigFile) == "" {
 		if path, ok, err := w.app.GetConfigFilePath(); err == nil && ok && strings.TrimSpace(path) != "" {
-			w.app.ConfigFile = path
+			w.app.SetConfigFilePath(path)
 		} else {
-			w.app.ConfigFile = utils.GetConfigDirFile("config.yaml")
+			w.app.SetConfigFilePath(utils.GetConfigDirFile("config.yaml"))
 		}
 	}
 
@@ -1074,6 +1075,7 @@ func sanitizeCredentials(text string) string {
 
 // validateDatabaseHost validates database host input
 func validateDatabaseHost(host string) error {
+	host = strings.TrimSpace(host)
 	if host == "" {
 		return fmt.Errorf("host cannot be empty")
 	}
@@ -1081,9 +1083,16 @@ func validateDatabaseHost(host string) error {
 	if strings.ContainsAny(host, "';\"") {
 		return fmt.Errorf("host contains invalid characters")
 	}
-	// Check for valid hostname or IP pattern
-	hostnameRegex := regexp.MustCompile(`^([a-zA-Z0-9\-\.]+|localhost|\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$`)
-	if !hostnameRegex.MatchString(host) {
+
+	// Accept IPv4/IPv6 addresses, including bracketed IPv6 literals.
+	ipCandidate := strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+	if ip := net.ParseIP(ipCandidate); ip != nil {
+		return nil
+	}
+
+	// Check for a valid hostname (including localhost).
+	hostnameRegex := regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?|localhost)$`)
+	if !hostnameRegex.MatchString(ipCandidate) {
 		return fmt.Errorf("invalid hostname or IP address")
 	}
 	return nil

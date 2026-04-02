@@ -7,6 +7,7 @@ import (
 	"badgermaps/database"
 	"bytes"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -126,6 +127,36 @@ func TestHandleReplayWebhook(t *testing.T) {
 	}
 	if fullName != "Test Account" {
 		t.Errorf("Expected fullName to be 'Test Account', got '%s'", fullName)
+	}
+}
+
+func TestNormalizeServerHost(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "hostname", in: "localhost", want: "localhost"},
+		{name: "trim spaces", in: "  localhost  ", want: "localhost"},
+		{name: "ipv4", in: "127.0.0.1", want: "127.0.0.1"},
+		{name: "ipv6", in: "::1", want: "::1"},
+		{name: "bracketed ipv6", in: "[::1]", want: "::1"},
+		{name: "invalid bracketed host remains unchanged", in: "[localhost]", want: "[localhost]"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeServerHost(tt.in); got != tt.want {
+				t.Fatalf("normalizeServerHost(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeServerHostBuildsValidBracketedIPv6ListenAddress(t *testing.T) {
+	addr := net.JoinHostPort(normalizeServerHost("[::1]"), "8080")
+	if addr != "[::1]:8080" {
+		t.Fatalf("expected normalized listen address [::1]:8080, got %q", addr)
 	}
 }
 

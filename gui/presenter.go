@@ -587,9 +587,9 @@ func (p *GuiPresenter) HandleSaveConfig(
 	// Write the accumulated viper config to file
 	if strings.TrimSpace(p.app.ConfigFile) == "" {
 		if path, ok, err := p.app.GetConfigFilePath(); err == nil && ok && strings.TrimSpace(path) != "" {
-			p.app.ConfigFile = path
+			p.app.SetConfigFilePath(path)
 		} else {
-			p.app.ConfigFile = utils.GetConfigDirFile("config.yaml")
+			p.app.SetConfigFilePath(utils.GetConfigDirFile("config.yaml"))
 		}
 	}
 	if err := p.app.SaveConfig(); err != nil {

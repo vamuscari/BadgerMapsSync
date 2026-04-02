@@ -9,12 +9,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -59,10 +63,22 @@ func (p *CliPresenter) HandleServerStatus() {
 
 // RunServer runs the server in the foreground.
 func (p *CliPresenter) RunServer(config *ServerConfig) {
-	if err := p.App.Server.Start(p.App.Config.CronJobs, p.App); err != nil {
-		p.App.Events.Dispatch(events.Errorf("server", "Failed to schedule cron jobs: %v", err))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := p.RunServerWithContext(ctx, config); err != nil {
+		p.App.Events.Dispatch(events.Errorf("server", "Failed to run server: %v", err))
 		os.Exit(1)
 	}
+}
+
+// RunServerWithContext runs the server until context cancellation or a fatal server error.
+func (p *CliPresenter) RunServerWithContext(ctx context.Context, config *ServerConfig) error {
+	if err := p.App.Server.Start(p.App.Config.CronJobs, p.App); err != nil {
+		return fmt.Errorf("failed to schedule cron jobs: %w", err)
+	}
+	defer p.App.Server.StopCronJobs()
+
 	mux := http.NewServeMux()
 
 	logRequests := config.LogRequests
@@ -109,12 +125,10 @@ func (p *CliPresenter) RunServer(config *ServerConfig) {
 	}
 
 	mux.HandleFunc("/health", p.HandleHealthCheck)
-	addr := fmt.Sprintf("%s:%d", config.Host, config.Port)
+	addr := net.JoinHostPort(normalizeServerHost(config.Host), strconv.Itoa(config.Port))
 	server := &http.Server{Addr: addr, Handler: mux}
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-
+	serverErr := make(chan error, 1)
 	go func() {
 		p.App.Events.Dispatch(events.Infof("server", "Starting server on %s", addr))
 		var err error
@@ -125,18 +139,44 @@ func (p *CliPresenter) RunServer(config *ServerConfig) {
 			err = server.ListenAndServe()
 		}
 		if err != nil && err != http.ErrServerClosed {
-			p.App.Events.Dispatch(events.Errorf("server", "Server error: %v", err))
+			serverErr <- err
+			return
 		}
+		serverErr <- nil
 	}()
 
-	<-stop
+	select {
+	case <-ctx.Done():
+	case err := <-serverErr:
+		if err != nil {
+			return fmt.Errorf("server error: %w", err)
+		}
+		return nil
+	}
+
 	p.App.Events.Dispatch(events.Infof("server", "Shutting down server..."))
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := server.Shutdown(ctx); err != nil {
-		p.App.Events.Dispatch(events.Errorf("server", "Server shutdown error: %v", err))
+	if err := server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.Canceled) {
+		return fmt.Errorf("server shutdown error: %w", err)
+	}
+
+	if err := <-serverErr; err != nil {
+		return fmt.Errorf("server error: %w", err)
 	}
 	p.App.Events.Dispatch(events.Infof("server", "Server stopped"))
+	return nil
+}
+
+func normalizeServerHost(host string) string {
+	host = strings.TrimSpace(host)
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		candidate := strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+		if ip := net.ParseIP(candidate); ip != nil {
+			return candidate
+		}
+	}
+	return host
 }
 
 func (p *CliPresenter) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {

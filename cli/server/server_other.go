@@ -17,7 +17,7 @@ func init() {
 	IsWindowsService = func() bool {
 		return false
 	}
-	RunWindowsService = func() {
+	RunWindowsService = func(a *app.App) {
 		// This should never be called on non-windows systems
 	}
 }

@@ -142,6 +142,26 @@ func NewApp() *App {
 	return a
 }
 
+// SetConfigFilePath updates the active config path and aligns runtime files with it.
+func (a *App) SetConfigFilePath(path string) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return
+	}
+	if absPath, err := filepath.Abs(trimmed); err == nil {
+		trimmed = absPath
+	}
+
+	a.ConfigFile = trimmed
+
+	if a.State != nil {
+		if a.State.ConfigFile != nil {
+			*a.State.ConfigFile = trimmed
+		}
+		a.State.PIDFile = filepath.Join(filepath.Dir(trimmed), ".badgermaps.pid")
+	}
+}
+
 func (a *App) InitLogging() error {
 	logPath := a.State.LogFile
 	if logPath == "" {
@@ -185,7 +205,7 @@ func (a *App) LoadConfig() error {
 	}
 
 	if ok {
-		a.ConfigFile = path
+		a.SetConfigFilePath(path)
 		// Load from YAML file
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -705,7 +725,7 @@ func (a *App) InteractiveSetup() bool {
 	// This ensures we save to the detected config location rather than always
 	// overwriting it with the default user config directory path.
 	if a.ConfigFile == "" {
-		a.ConfigFile = utils.GetConfigDirFile("config.yaml")
+		a.SetConfigFilePath(utils.GetConfigDirFile("config.yaml"))
 	}
 
 	// API Settings

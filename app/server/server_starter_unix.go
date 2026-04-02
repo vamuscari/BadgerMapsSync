@@ -5,9 +5,9 @@ package server
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"syscall"
 )
@@ -23,7 +23,7 @@ func (sm *ServerManager) StartServer() error {
 		return err
 	}
 
-	cmd := exec.Command(executable, "server")
+	cmd := exec.Command(executable, serverCommandArgs(sm.state)...)
 	// This is the key for Unix: creating a new session detaches the child
 	// from the parent, so it won't be killed when the parent exits.
 	cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -36,7 +36,12 @@ func (sm *ServerManager) StartServer() error {
 
 	// Write the PID to the file
 	pid := cmd.Process.Pid
-	if err := ioutil.WriteFile(sm.state.PIDFile, []byte(strconv.Itoa(pid)), 0644); err != nil {
+	pidFile := pidFilePath(sm.state)
+	if err := os.MkdirAll(filepath.Dir(pidFile), 0755); err != nil {
+		cmd.Process.Kill()
+		return fmt.Errorf("failed to create PID directory: %w", err)
+	}
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0644); err != nil {
 		// Try to kill the process we just started if we can't save the PID
 		cmd.Process.Kill()
 		return fmt.Errorf("failed to write PID file: %w", err)

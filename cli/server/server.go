@@ -12,7 +12,7 @@ var (
 	App               *app.App
 	ServerCmdFunc     func(a *app.App, serverCmd *cobra.Command)
 	IsWindowsService  func() bool
-	RunWindowsService func()
+	RunWindowsService func(a *app.App)
 )
 
 // ServerCmd creates the parent 'server' command
@@ -26,7 +26,7 @@ func ServerCmd(a *app.App) *cobra.Command {
 		Long:  `Start, stop, and configure the webhook server. When run without subcommands, it starts the server in the foreground.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if IsWindowsService() {
-				RunWindowsService()
+				RunWindowsService(App)
 				return
 			}
 

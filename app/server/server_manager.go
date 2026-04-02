@@ -4,10 +4,9 @@ import (
 	"badgermaps/app/action"
 	"badgermaps/app/state"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strconv"
-	"syscall"
+	"strings"
 
 	"github.com/robfig/cron/v3"
 )
@@ -47,40 +46,41 @@ func (sm *ServerManager) Start(cronJobs []CronJob, actionExecutor ActionExecutor
 	return nil
 }
 
+// StopCronJobs stops any in-process cron scheduler owned by this manager.
+func (sm *ServerManager) StopCronJobs() {
+	if sm.cron != nil {
+		sm.cron.Stop()
+		sm.cron = nil
+	}
+}
+
 // GetServerStatus checks if the server process is running.
 // It returns the PID and a boolean indicating if it's running.
 func (sm *ServerManager) GetServerStatus() (int, bool) {
-	pidData, err := ioutil.ReadFile(sm.state.PIDFile)
+	pidFile := pidFilePath(sm.state)
+	pidData, err := os.ReadFile(pidFile)
 	if err != nil {
 		return 0, false // PID file doesn't exist
 	}
 
-	pid, err := strconv.Atoi(string(pidData))
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidData)))
 	if err != nil {
 		return 0, false // Invalid PID file content
 	}
 
-	// Check if the process actually exists
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return pid, false // Process not found
-	}
-
-	// On UNIX-like systems, sending signal 0 is a standard way to check for existence
-	err = process.Signal(syscall.Signal(0))
-	return pid, err == nil
+	return pid, processRunning(pid)
 }
 
 // StopServer stops the running server process.
 func (sm *ServerManager) StopServer() error {
-	if sm.cron != nil {
-		sm.cron.Stop()
-	}
+	sm.StopCronJobs()
+
+	pidFile := pidFilePath(sm.state)
 	pid, running := sm.GetServerStatus()
 	if !running {
 		// If we have a PID but the process isn't running, clean up the stale PID file.
 		if pid > 0 {
-			os.Remove(sm.state.PIDFile)
+			os.Remove(pidFile)
 		}
 		return fmt.Errorf("server is not running")
 	}
@@ -91,13 +91,10 @@ func (sm *ServerManager) StopServer() error {
 	}
 
 	// Ask the process to terminate gracefully
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		// If graceful shutdown fails, force kill it
-		if err := process.Kill(); err != nil {
-			return fmt.Errorf("failed to kill process: %w", err)
-		}
+	if err := terminateProcess(process); err != nil {
+		return fmt.Errorf("failed to terminate process: %w", err)
 	}
 
 	// Clean up the PID file
-	return os.Remove(sm.state.PIDFile)
+	return os.Remove(pidFile)
 }

@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# This script cross-compiles the application for macOS, Linux, and Windows
+# This script packages the application for macOS and Windows
 # using the Fyne CLI, and places the binaries in the build directory.
 # It assumes you have the necessary cross-compilation toolchains installed.
 # For Windows: mingw-w64 (e.g., `brew install mingw-w64`)
-# For Linux: a Linux GCC toolchain (e.g., `brew install x86_64-unknown-linux-gnu`)
+# Linux packaging is documented below as an optional commented workflow.
 
 export CGO_ENABLED=1
 

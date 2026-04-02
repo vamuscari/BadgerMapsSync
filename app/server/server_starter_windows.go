@@ -5,9 +5,9 @@ package server
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"syscall"
 )
@@ -23,7 +23,7 @@ func (sm *ServerManager) StartServer() error {
 		return err
 	}
 
-	cmd := exec.Command(executable, "server")
+	cmd := exec.Command(executable, serverCommandArgs(sm.state)...)
 	// This is the key for Windows: create a new console process.
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: 0x08000000, // CREATE_NEW_CONSOLE
@@ -34,7 +34,12 @@ func (sm *ServerManager) StartServer() error {
 	}
 
 	pid := cmd.Process.Pid
-	if err := ioutil.WriteFile(sm.state.PIDFile, []byte(strconv.Itoa(pid)), 0644); err != nil {
+	pidFile := pidFilePath(sm.state)
+	if err := os.MkdirAll(filepath.Dir(pidFile), 0755); err != nil {
+		cmd.Process.Kill()
+		return fmt.Errorf("failed to create PID directory: %w", err)
+	}
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0644); err != nil {
 		cmd.Process.Kill()
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}

@@ -7,10 +7,12 @@ import (
 	"badgermaps/app/state"
 	"badgermaps/database"
 	"badgermaps/events"
+	"badgermaps/utils"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -510,13 +512,16 @@ func (s *Scheduler) updateNextRunTimes() {
 	}
 }
 
+func schedulerConfigDir(s *state.State) string {
+	if configPath := resolveConfigPathFromState(s); configPath != "" {
+		return filepath.Dir(strings.TrimSpace(configPath))
+	}
+	return utils.GetUserDefaultConfigDir()
+}
+
 // loadJobs loads scheduled jobs from configuration
 func (s *Scheduler) loadJobs() error {
-	// Get jobs file path from state
-	configDir := "."
-	if s.state.ConfigFile != nil && *s.state.ConfigFile != "" {
-		configDir = filepath.Dir(*s.state.ConfigFile)
-	}
+	configDir := schedulerConfigDir(s.state)
 	jobsFile := filepath.Join(configDir, "scheduled_jobs.json")
 
 	// Check if file exists
@@ -589,11 +594,7 @@ func (s *Scheduler) loadJobs() error {
 
 // saveJobs saves scheduled jobs to configuration
 func (s *Scheduler) saveJobs() error {
-	// Get jobs file path from state
-	configDir := "."
-	if s.state.ConfigFile != nil && *s.state.ConfigFile != "" {
-		configDir = filepath.Dir(*s.state.ConfigFile)
-	}
+	configDir := schedulerConfigDir(s.state)
 	jobsFile := filepath.Join(configDir, "scheduled_jobs.json")
 
 	// Create a copy of jobs without runtime fields
@@ -609,6 +610,10 @@ func (s *Scheduler) saveJobs() error {
 	data, err := json.MarshalIndent(jobsToSave, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal jobs: %w", err)
+	}
+
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("failed to create jobs directory: %w", err)
 	}
 
 	// Write to file

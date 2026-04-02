@@ -4,8 +4,12 @@
 package server
 
 import (
+	"badgermaps/app"
+	"context"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/windows/svc"
@@ -23,22 +27,52 @@ const (
 var elog debug.Log
 
 // badgerMapsService is the struct that will implement the svc.Handler interface.
-type badgerMapsService struct{}
+type badgerMapsService struct {
+	app       *app.App
+	presenter *CliPresenter
+}
 
 // Execute is the main entry point for the service.
 func (s *badgerMapsService) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (ssec bool, errno uint32) {
 	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown
 	changes <- svc.Status{State: svc.StartPending}
 
-	// This is where we would start our actual server logic.
-	// For this example, we'll just run a ticker.
-	// In the real implementation, this would start the runServer() http server.
+	if s.app == nil || s.presenter == nil {
+		elog.Error(1, "Service initialization failed: app context is unavailable")
+		changes <- svc.Status{State: svc.StopPending}
+		return false, 1
+	}
+
+	config := &ServerConfig{
+		Host:        s.app.State.ServerHost,
+		Port:        s.app.State.ServerPort,
+		TLSEnabled:  s.app.State.TLSEnabled,
+		TLSCert:     s.app.State.TLSCert,
+		TLSKey:      s.app.State.TLSKey,
+		LogRequests: s.app.State.ServerLogRequests,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	serverDone := make(chan error, 1)
+	go func() {
+		serverDone <- s.presenter.RunServerWithContext(ctx, config)
+	}()
+
 	elog.Info(1, fmt.Sprintf("Service '%s' started successfully.", serviceName))
 	changes <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
+
+	var runErr error
+	serverExited := false
 
 loop:
 	for {
 		select {
+		case err := <-serverDone:
+			serverExited = true
+			runErr = err
+			break loop
 		case c := <-r:
 			switch c.Cmd {
 			case svc.Interrogate:
@@ -47,6 +81,7 @@ loop:
 				changes <- c.CurrentStatus
 			case svc.Stop, svc.Shutdown:
 				elog.Info(1, fmt.Sprintf("Service '%s' stopping.", serviceName))
+				cancel()
 				break loop
 			default:
 				elog.Error(1, fmt.Sprintf("unexpected control request #%d", c))
@@ -55,11 +90,26 @@ loop:
 	}
 
 	changes <- svc.Status{State: svc.StopPending}
+
+	if !serverExited {
+		select {
+		case err := <-serverDone:
+			runErr = err
+		case <-time.After(10 * time.Second):
+			runErr = fmt.Errorf("timed out waiting for server shutdown")
+		}
+	}
+
+	if runErr != nil && !errors.Is(runErr, context.Canceled) {
+		elog.Error(1, fmt.Sprintf("Service '%s' stopped with error: %v", serviceName, runErr))
+		return false, 1
+	}
+
 	return
 }
 
 // runService is called by the main function if the program is not running interactively.
-func runService() {
+func runService(a *app.App) {
 	var err error
 	elog, err = eventlog.Open(serviceName)
 	if err != nil {
@@ -67,8 +117,17 @@ func runService() {
 	}
 	defer elog.Close()
 
+	if a == nil {
+		elog.Error(1, fmt.Sprintf("Service '%s' failed to start: app context is nil", serviceName))
+		return
+	}
+
 	elog.Info(1, fmt.Sprintf("Starting service '%s'.", serviceName))
-	if err = svc.Run(serviceName, &badgerMapsService{}); err != nil {
+	handler := &badgerMapsService{
+		app:       a,
+		presenter: NewCliPresenter(a),
+	}
+	if err = svc.Run(serviceName, handler); err != nil {
 		elog.Error(1, fmt.Sprintf("Service '%s' failed: %v", serviceName, err))
 		return
 	}
@@ -81,6 +140,14 @@ func installService() error {
 	if err != nil {
 		return err
 	}
+
+	serviceArgs := []string{"server"}
+	if App != nil && App.State != nil && App.State.ConfigFile != nil {
+		if configPath := strings.TrimSpace(*App.State.ConfigFile); configPath != "" {
+			serviceArgs = append(serviceArgs, "--config", configPath)
+		}
+	}
+
 	m, err := mgr.Connect()
 	if err != nil {
 		return err
@@ -95,7 +162,7 @@ func installService() error {
 		DisplayName: serviceDisplayName,
 		Description: serviceDescription,
 		StartType:   mgr.StartAutomatic,
-	}, "server") // The last argument "server" is passed to the executable on start
+	}, serviceArgs...) // Subcommand and optional config path passed to executable on service start.
 	if err != nil {
 		return err
 	}
