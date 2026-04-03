@@ -27,6 +27,7 @@ const (
 	defaultActivityRetryDelay  = 1 * time.Second
 	defaultActivityStaleWindow = 20 * time.Second
 	defaultInternalRequestPath = "/internal/jobs/sync"
+	defaultScheduledJobRunPath = "/internal/scheduled-jobs/run"
 )
 
 type healthStatusError struct {
@@ -182,6 +183,77 @@ func FetchServerJobsSnapshot(a *app.App) (*appserver.SyncJobListResponse, error)
 		snapshot.Jobs = []*appserver.SyncJob{}
 	}
 	return &snapshot, nil
+}
+
+func RunScheduledJobNow(a *app.App, jobID string) error {
+	trimmedID := strings.TrimSpace(jobID)
+	if trimmedID == "" {
+		return fmt.Errorf("job id is required")
+	}
+	if a == nil {
+		return fmt.Errorf("server context unavailable")
+	}
+
+	running := false
+	if a.Server != nil {
+		_, running = a.Server.GetServerStatus()
+	}
+	if running {
+		return runScheduledJobNowRemote(a, trimmedID)
+	}
+	return runScheduledJobNowLocal(a, trimmedID)
+}
+
+func runScheduledJobNowRemote(a *app.App, jobID string) error {
+	baseURL := serverBaseURL(a)
+	client := newInternalHTTPClient(baseURL)
+
+	payload := appserver.ScheduledJobRunRequest{JobID: jobID}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal scheduled job request: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, baseURL+defaultScheduledJobRunPath, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create scheduled job request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to submit scheduled job: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to submit scheduled job (%d): %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	a.Events.Dispatch(events.Infof("server.proxy", "Scheduled job %s submitted to active server", jobID))
+	return nil
+}
+
+func runScheduledJobNowLocal(a *app.App, jobID string) error {
+	queue := a.EnsureSyncCoordinator()
+	scheduler := appserver.NewScheduler(
+		a.State,
+		a.DB,
+		a.API,
+		a.Events,
+		nil,
+		schedulerLocalSyncExecutor{app: a},
+		queue,
+		a.Config.WorkflowProfiles,
+		a.Config.Server.Timezone,
+	)
+	if err := scheduler.QueueStoredJobNow(jobID); err != nil {
+		return err
+	}
+
+	a.Events.Dispatch(events.Infof("server.proxy", "Scheduled job %s queued locally", jobID))
+	return nil
 }
 
 func runAsRemoteJob(
@@ -369,6 +441,50 @@ func resolveWorkflowForMode(a *app.App, mode appserver.SyncMode) (string, []apps
 		return "", nil, err
 	}
 	return "", steps, nil
+}
+
+type schedulerLocalSyncExecutor struct {
+	app *app.App
+}
+
+func (e schedulerLocalSyncExecutor) PullAccounts() error {
+	return runLocalSyncMode(e.app, appserver.SyncModePullAccounts, 0)
+}
+
+func (e schedulerLocalSyncExecutor) PullCheckins() error {
+	return runLocalSyncMode(e.app, appserver.SyncModePullCheckins, 0)
+}
+
+func (e schedulerLocalSyncExecutor) PullRoutes() error {
+	return runLocalSyncMode(e.app, appserver.SyncModePullRoutes, 0)
+}
+
+func (e schedulerLocalSyncExecutor) PullProfile() error {
+	return runLocalSyncMode(e.app, appserver.SyncModePullProfile, 0)
+}
+
+func (e schedulerLocalSyncExecutor) PushAll() error {
+	return runLocalSyncMode(e.app, appserver.SyncModePush, 0)
+}
+
+func (e schedulerLocalSyncExecutor) PushAccounts() error {
+	return runLocalSyncMode(e.app, appserver.SyncModePushAccounts, 0)
+}
+
+func (e schedulerLocalSyncExecutor) PushCheckins() error {
+	return runLocalSyncMode(e.app, appserver.SyncModePushCheckins, 0)
+}
+
+func (e schedulerLocalSyncExecutor) PullAccount(resourceID int) error {
+	return runLocalSyncMode(e.app, appserver.SyncModePullAccount, resourceID)
+}
+
+func (e schedulerLocalSyncExecutor) PullCheckin(resourceID int) error {
+	return runLocalSyncMode(e.app, appserver.SyncModePullCheckin, resourceID)
+}
+
+func (e schedulerLocalSyncExecutor) PullRoute(resourceID int) error {
+	return runLocalSyncMode(e.app, appserver.SyncModePullRoute, resourceID)
 }
 
 func runLocalSyncMode(a *app.App, mode appserver.SyncMode, resourceID int) error {

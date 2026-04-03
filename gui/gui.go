@@ -31,6 +31,8 @@ import (
 // SecondaryButton is a custom button that can be styled with a secondary color
 type SecondaryButton struct {
 	widget.Button
+	TextColor       color.Color
+	VerticalPadding float32
 }
 
 // NewSecondaryButton creates a new SecondaryButton
@@ -39,6 +41,7 @@ func NewSecondaryButton(label string, icon fyne.Resource, tapped func()) *Second
 	b.Text = label
 	b.Icon = icon
 	b.OnTapped = tapped
+	b.VerticalPadding = theme.Padding()
 	b.ExtendBaseWidget(b)
 	return b
 }
@@ -49,7 +52,7 @@ func (b *SecondaryButton) CreateRenderer() fyne.WidgetRenderer {
 	background.CornerRadius = theme.InputRadiusSize()
 	r := &secondaryButtonRenderer{
 		button:     b,
-		label:      widget.NewLabel(b.Text),
+		label:      canvas.NewText(b.Text, theme.ForegroundColor()),
 		icon:       widget.NewIcon(b.Icon),
 		background: background,
 	}
@@ -59,7 +62,7 @@ func (b *SecondaryButton) CreateRenderer() fyne.WidgetRenderer {
 
 type secondaryButtonRenderer struct {
 	button     *SecondaryButton
-	label      *widget.Label
+	label      *canvas.Text
 	icon       *widget.Icon
 	background *canvas.Rectangle
 	objects    []fyne.CanvasObject
@@ -67,38 +70,58 @@ type secondaryButtonRenderer struct {
 
 func (r *secondaryButtonRenderer) Layout(size fyne.Size) {
 	r.background.Resize(size)
-	padding := theme.Padding()
+	hPadding := theme.Padding()
+	vPadding := r.button.VerticalPadding
+	if vPadding < 0 {
+		vPadding = 0
+	}
 	labelSize := r.label.MinSize()
 	if r.button.Icon != nil {
 		iconSize := theme.IconInlineSize()
-		totalWidth := iconSize + padding + labelSize.Width
+		totalWidth := iconSize + hPadding + labelSize.Width
 		if totalWidth > size.Width {
 			totalWidth = size.Width
 		}
 		startX := (size.Width - totalWidth) / 2
-		iconY := (size.Height - iconSize) / 2
+		contentTop := vPadding
+		contentHeight := size.Height - (vPadding * 2)
+		if contentHeight <= 0 {
+			contentTop = 0
+			contentHeight = size.Height
+		}
+		iconY := contentTop + (contentHeight-iconSize)/2
 		r.icon.Resize(fyne.NewSize(iconSize, iconSize))
 		r.icon.Move(fyne.NewPos(startX, iconY))
-		r.label.Move(fyne.NewPos(startX+iconSize+padding, (size.Height-labelSize.Height)/2))
+		r.label.Move(fyne.NewPos(startX+iconSize+hPadding, contentTop+(contentHeight-labelSize.Height)/2))
 	} else {
-		r.label.Move(fyne.NewPos((size.Width-labelSize.Width)/2, (size.Height-labelSize.Height)/2))
+		contentTop := vPadding
+		contentHeight := size.Height - (vPadding * 2)
+		if contentHeight <= 0 {
+			contentTop = 0
+			contentHeight = size.Height
+		}
+		r.label.Move(fyne.NewPos((size.Width-labelSize.Width)/2, contentTop+(contentHeight-labelSize.Height)/2))
 	}
 }
 
 func (r *secondaryButtonRenderer) MinSize() fyne.Size {
 	iconSize := theme.IconInlineSize()
-	padding := theme.Padding()
+	hPadding := theme.Padding()
+	vPadding := r.button.VerticalPadding
+	if vPadding < 0 {
+		vPadding = 0
+	}
 	min := r.label.MinSize()
 	if r.button.Icon != nil {
-		min.Width += iconSize + padding
+		min.Width += iconSize + hPadding
 	}
-	min.Width += padding * 2
-	min.Height += padding * 2
+	min.Width += hPadding * 2
+	min.Height += vPadding * 2
 	return min
 }
 
 func (r *secondaryButtonRenderer) Refresh() {
-	r.label.SetText(r.button.Text)
+	r.label.Text = r.button.Text
 	if r.button.Icon != nil {
 		r.icon.SetResource(r.button.Icon)
 		r.icon.Show()
@@ -109,9 +132,16 @@ func (r *secondaryButtonRenderer) Refresh() {
 	if r.button.Disabled() {
 		r.background.FillColor = theme.DisabledButtonColor()
 	}
+	if r.button.Disabled() {
+		r.label.Color = theme.DisabledColor()
+	} else if r.button.TextColor != nil {
+		r.label.Color = r.button.TextColor
+	} else {
+		r.label.Color = theme.ForegroundColor()
+	}
 	r.background.CornerRadius = theme.InputRadiusSize()
 	r.background.Refresh()
-	r.label.Refresh()
+	canvas.Refresh(r.label)
 	r.icon.Refresh()
 }
 
@@ -346,8 +376,21 @@ func (ui *Gui) themeColor(name fyne.ThemeColorName) color.Color {
 }
 
 func (ui *Gui) newSectionCard(title, subtitle string, content ...fyne.CanvasObject) fyne.CanvasObject {
+	return ui.newSectionCardWithBackground(title, subtitle, nil, content...)
+}
+
+func (ui *Gui) newSectionCardWithBackground(title, subtitle string, backgroundColor color.Color, content ...fyne.CanvasObject) fyne.CanvasObject {
+	return ui.newSectionCardWithHeaderControls(title, subtitle, nil, backgroundColor, content...)
+}
+
+func (ui *Gui) newSectionCardWithHeaderControls(title, subtitle string, headerControls fyne.CanvasObject, backgroundColor color.Color, content ...fyne.CanvasObject) fyne.CanvasObject {
 	titleLabel := widget.NewLabelWithStyle(title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	body := container.NewVBox(titleLabel)
+	header := container.NewHBox(titleLabel)
+	if headerControls != nil {
+		header = container.NewHBox(titleLabel, layout.NewSpacer(), headerControls)
+	}
+
+	body := container.NewVBox(header)
 	if subtitle != "" {
 		subtitleLabel := widget.NewLabel(subtitle)
 		subtitleLabel.Alignment = fyne.TextAlignLeading
@@ -362,7 +405,10 @@ func (ui *Gui) newSectionCard(title, subtitle string, content ...fyne.CanvasObje
 			}
 		}
 	}
-	background := canvas.NewRectangle(ui.themeColor(StatusCardBackgroundColorName))
+	if backgroundColor == nil {
+		backgroundColor = ui.themeColor(StatusCardBackgroundColorName)
+	}
+	background := canvas.NewRectangle(backgroundColor)
 	background.CornerRadius = theme.Padding()
 	background.StrokeColor = ui.themeColor(StatusCardBorderColorName)
 	background.StrokeWidth = 1
@@ -371,6 +417,99 @@ func (ui *Gui) newSectionCard(title, subtitle string, content ...fyne.CanvasObje
 		background,
 		container.NewPadded(body),
 	)
+}
+
+func (ui *Gui) newScheduledJobItemCard(title, subtitle string, controls fyne.CanvasObject, details fyne.CanvasObject, backgroundColor color.Color) fyne.CanvasObject {
+	titleLabel := widget.NewLabelWithStyle(title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+
+	headerLeft := container.NewVBox(titleLabel)
+	if strings.TrimSpace(subtitle) != "" {
+		subtitleLabel := widget.NewLabel(subtitle)
+		subtitleLabel.Alignment = fyne.TextAlignLeading
+		subtitleLabel.Wrapping = fyne.TextWrapWord
+		headerLeft.Add(subtitleLabel)
+	}
+
+	var rightHeader fyne.CanvasObject = layout.NewSpacer()
+	if controls != nil {
+		rightHeader = controls
+	}
+
+	header := container.NewBorder(
+		nil,
+		nil,
+		nil,
+		rightHeader,
+		headerLeft,
+	)
+
+	body := container.NewVBox(header)
+	if details != nil {
+		body.Add(widget.NewSeparator())
+		body.Add(details)
+	}
+
+	if backgroundColor == nil {
+		backgroundColor = ui.themeColor(StatusCardBackgroundColorName)
+	}
+	background := canvas.NewRectangle(backgroundColor)
+	background.CornerRadius = theme.Padding()
+	background.StrokeColor = ui.themeColor(StatusCardBorderColorName)
+	background.StrokeWidth = 1
+
+	return container.NewStack(
+		background,
+		container.NewPadded(body),
+	)
+}
+
+func (ui *Gui) syncCenterCardBackground(index int) color.Color {
+	baseColor := ui.themeColor(StatusCardBackgroundColorName)
+	if baseColor == nil {
+		baseColor = theme.ButtonColor()
+	}
+	baseRGBA := color.NRGBAModel.Convert(baseColor).(color.NRGBA)
+
+	var variantOffsets [][3]int
+	if ui != nil && ui.fyneApp != nil && ui.fyneApp.Settings().ThemeVariant() == theme.VariantLight {
+		// Light mode needs stronger negative offsets so nested cards stand out on pale surfaces.
+		variantOffsets = [][3]int{
+			{0, 0, 0},       // Section background
+			{-6, -6, -8},    // Empty-state/alternate
+			{-24, -22, -18}, // Job cards
+			{-12, -10, -8},
+			{-20, -18, -14},
+			{-10, -8, -6},
+		}
+	} else {
+		// Dark mode uses gentle hue offsets to avoid flat monochrome surfaces.
+		variantOffsets = [][3]int{
+			{10, 4, -2},
+			{4, 10, -2},
+			{-2, 6, 10},
+			{8, -2, 6},
+			{-4, 4, 8},
+			{6, 6, -4},
+		}
+	}
+
+	offset := variantOffsets[index%len(variantOffsets)]
+	return color.NRGBA{
+		R: clampColorChannel(int(baseRGBA.R) + offset[0]),
+		G: clampColorChannel(int(baseRGBA.G) + offset[1]),
+		B: clampColorChannel(int(baseRGBA.B) + offset[2]),
+		A: baseRGBA.A,
+	}
+}
+
+func clampColorChannel(value int) uint8 {
+	if value < 0 {
+		return 0
+	}
+	if value > 255 {
+		return 255
+	}
+	return uint8(value)
 }
 
 // CreateContent exposes the internal createContent for programmatic consumers (e.g., screenshot generator)
@@ -510,6 +649,23 @@ func Launch(a *app.App, icon fyne.Resource) {
 	}
 	a.Events.Subscribe("connection.status.changed", connectionListener)
 
+	// Update Home dashboard server status in place when the server starts/stops.
+	serverStatusListener := func(e events.Event) {
+		fyne.Do(func() {
+			if ui.smartDashboard != nil {
+				ui.smartDashboard.RefreshDashboard()
+			}
+			if ui.syncCenter != nil {
+				ui.syncCenter.RefreshServerStatusLabel()
+			}
+		})
+	}
+	a.Events.Subscribe("server.status.changed", serverStatusListener)
+
+	serverStatusWatcherStop := make(chan struct{})
+	startServerStatusWatcher(a, serverStatusWatcherStop)
+	defer close(serverStatusWatcherStop)
+
 	// Optional launch scaling for screenshots or HiDPI preview
 	baseW, baseH := float32(1000), float32(600)
 	scale := float32(1.0)
@@ -592,17 +748,13 @@ func (ui *Gui) createMainContent() fyne.CanvasObject {
 		explorerContent = ui.createDisabledTabView(configTab)
 	}
 
-	syncTab := container.NewTabItemWithIcon("Sync Center", theme.DownloadIcon(), syncContent)
+	syncTab := container.NewTabItemWithIcon("Sync Center", theme.HistoryIcon(), syncContent)
 	explorerTab := container.NewTabItemWithIcon("Explorer", theme.FolderIcon(), explorerContent)
-	jobsTab := container.NewTabItemWithIcon("Jobs", theme.HistoryIcon(), ui.createJobsTab())
-	serverTab := container.NewTabItemWithIcon("Server", theme.ComputerIcon(), ui.createServerTab())
 
 	tabs := []*container.TabItem{
 		homeTab,
 		syncTab,
 		explorerTab,
-		jobsTab,
-		serverTab,
 		configTab,
 	}
 
@@ -923,29 +1075,43 @@ func (ui *Gui) RefreshHomeTab() {
 }
 
 func (ui *Gui) refreshActionsTab() {
-	ui.refreshJobsTab()
+	ui.refreshSyncCenterTab()
 }
 
 func (ui *Gui) RefreshActionsTab() {
-	ui.RefreshJobsTab()
+	ui.RefreshSyncCenterTab()
 }
 
-func (ui *Gui) refreshJobsTab() {
+func (ui *Gui) refreshSyncCenterTab() {
 	if ui.tabs == nil {
 		return
 	}
+
+	var configTabItem *container.TabItem
 	for _, tab := range ui.tabs.Items {
-		if tab.Text == "Jobs" {
-			tab.Content = ui.createJobsTab()
+		if tab.Text == "Configuration" {
+			configTabItem = tab
+			break
+		}
+	}
+
+	syncContent := ui.createDisabledTabView(configTabItem)
+	if ui.app.API != nil && ui.app.API.IsConnected() && ui.app.DB != nil && ui.app.DB.IsConnected() {
+		syncContent = ui.syncCenter.CreateContent()
+	}
+
+	for _, tab := range ui.tabs.Items {
+		if tab.Text == "Sync Center" {
+			tab.Content = syncContent
 			ui.tabs.Refresh()
 			return
 		}
 	}
 }
 
-func (ui *Gui) RefreshJobsTab() {
+func (ui *Gui) RefreshSyncCenterTab() {
 	fyne.Do(func() {
-		ui.refreshJobsTab()
+		ui.refreshSyncCenterTab()
 	})
 }
 
@@ -980,6 +1146,7 @@ func (ui *Gui) selectRightPaneSection(section rightPaneSection) {
 	case rightPaneSectionJobs:
 		ui.terminalVisible = false
 		ui.setRightPaneContent(ui.ensureRightPaneJobsView())
+		ui.refreshRightPaneJobs()
 	default:
 		ui.terminalVisible = false
 		if ui.detailsView != nil {
@@ -1014,16 +1181,11 @@ func (ui *Gui) ensureRightPaneJobsView() fyne.CanvasObject {
 	ui.rightPaneJobsActivity = widget.NewLabel("Server jobs will appear here once the server is active.")
 	ui.rightPaneJobsActivity.Wrapping = fyne.TextWrapWord
 
-	refreshButton := widget.NewButtonWithIcon("Refresh Job List", theme.ViewRefreshIcon(), func() {
-		ui.refreshRightPaneJobs()
-	})
-
 	ui.rightPaneJobsView = ui.newSectionCard(
 		"Jobs",
 		"View active and queued server sync jobs.",
 		ui.rightPaneJobsActivity,
 		jobsListContainer,
-		container.NewCenter(refreshButton),
 	)
 
 	ui.refreshRightPaneJobs()
@@ -1041,6 +1203,7 @@ func (ui *Gui) refreshRightPaneJobs() {
 	if err != nil {
 		ui.rightPaneJobsActivity.SetText(fmt.Sprintf("Unable to load server jobs: %v (display TZ: %s)", err, timezoneLabel))
 		ui.rightPaneJobsLines = []string{"Start the server to view active and queued jobs."}
+		ui.rightPaneJobsList.SetItemHeight(0, rightPaneJobsItemHeight(ui.rightPaneJobsLines[0]))
 		ui.rightPaneJobsList.Refresh()
 		return
 	}
@@ -1049,15 +1212,19 @@ func (ui *Gui) refreshRightPaneJobs() {
 	filtered := filterActiveAndQueuedJobs(snapshot.Jobs)
 	if len(filtered) == 0 {
 		ui.rightPaneJobsLines = []string{"No active or queued jobs."}
+		ui.rightPaneJobsList.SetItemHeight(0, rightPaneJobsItemHeight(ui.rightPaneJobsLines[0]))
 		ui.rightPaneJobsList.Refresh()
 		return
 	}
 
 	lines := make([]string, 0, len(filtered))
 	for _, job := range filtered {
-		lines = append(lines, formatServerJobLine(job, displayLoc))
+		lines = append(lines, formatServerJobDisplayLine(formatServerJobLine(job, displayLoc)))
 	}
 	ui.rightPaneJobsLines = lines
+	for idx, line := range ui.rightPaneJobsLines {
+		ui.rightPaneJobsList.SetItemHeight(idx, rightPaneJobsItemHeight(line))
+	}
 	ui.rightPaneJobsList.Refresh()
 }
 
@@ -1147,6 +1314,9 @@ func (ui *Gui) showRightPane() {
 	ui.rightPaneOverlay.Refresh()
 	ui.rightPaneVisible = true
 	ui.updateRightPaneToggle()
+	if ui.rightPaneSection == rightPaneSectionJobs {
+		ui.refreshRightPaneJobs()
+	}
 	ui.manageRightPaneJobsAutoRefresh()
 }
 
@@ -1303,28 +1473,7 @@ func (ui *Gui) createPushTab() fyne.CanvasObject {
 }
 
 func (ui *Gui) refreshPushTab() {
-	if ui.tabs != nil {
-		refreshed := false
-		for _, tab := range ui.tabs.Items {
-			if tab.Text == "Push" {
-				tab.Content = ui.createPushTab()
-				refreshed = true
-				break
-			}
-		}
-		if !refreshed {
-			for _, tab := range ui.tabs.Items {
-				if tab.Text == "Sync Center" && ui.syncCenter != nil {
-					tab.Content = ui.syncCenter.CreateContent()
-					refreshed = true
-					break
-				}
-			}
-		}
-		if refreshed {
-			ui.tabs.Refresh()
-		}
-	}
+	ui.refreshSyncCenterTab()
 }
 
 func (ui *Gui) RefreshPushTab() {
@@ -1448,23 +1597,27 @@ func (ui *Gui) createActionsTab() fyne.CanvasObject {
 	return ui.newSectionCard("Actions", "Deprecated", notice)
 }
 
-func (ui *Gui) createJobsTab() fyne.CanvasObject {
+func (ui *Gui) createScheduledJobsSection() fyne.CanvasObject {
 	jobsContent := container.NewVBox()
+	sectionBackground := ui.syncCenterCardBackground(0)
+	emptyStateBackground := ui.syncCenterCardBackground(1)
 
 	jobs, err := ui.app.ListScheduledJobs()
 	if err != nil {
 		errorLabel := widget.NewLabel(fmt.Sprintf("Unable to load scheduled jobs: %v", err))
 		errorLabel.Wrapping = fyne.TextWrapWord
-		jobsContent.Add(ui.newSectionCard("Jobs", "Failed to load jobs", errorLabel))
+		jobsContent.Add(ui.newSectionCardWithBackground("Jobs", "Failed to load jobs", emptyStateBackground, errorLabel))
 	} else {
 		if len(jobs) == 0 {
-			jobsContent.Add(ui.newSectionCard(
+			jobsContent.Add(ui.newSectionCardWithBackground(
 				"Jobs",
 				"No scheduled jobs configured yet.",
+				emptyStateBackground,
 				widget.NewLabel("Use the button below to add scheduled pull/push automation."),
 			))
 		}
 
+		jobCardBackground := ui.syncCenterCardBackground(2)
 		for _, job := range jobs {
 			jb := job
 			stateLabel := "Active"
@@ -1487,15 +1640,10 @@ func (ui *Gui) createJobsTab() fyne.CanvasObject {
 			} else {
 				stepsText = "(no steps)"
 			}
-			profileLabel := strings.TrimSpace(jb.WorkflowProfile)
-			if profileLabel == "" {
-				profileLabel = "(custom)"
-			}
-
 			summary := widget.NewLabel(fmt.Sprintf(
-				"Schedule: %s\nWorkflow Profile: %s\nSteps (%d):\n%s\nRetries: %d (retry_on_error=%t)\nTimezone: %s\nState: %s",
+				"ID: %s\nSchedule: %s\nSteps (%d):\n%s\nRetries: %d (retry_on_error=%t)\nTimezone: %s\nState: %s",
+				jb.ID,
 				jb.Schedule,
-				profileLabel,
 				len(jb.Steps),
 				stepsText,
 				jb.MaxRetries,
@@ -1508,41 +1656,106 @@ func (ui *Gui) createJobsTab() fyne.CanvasObject {
 			pauseIcon := theme.MediaPauseIcon()
 			pauseVerb := "Paused"
 			nextEnabled := false
+			pauseTooltip := "Pause job"
 			if !jb.Enabled {
 				pauseIcon = theme.MediaPlayIcon()
 				pauseVerb = "Resumed"
 				nextEnabled = true
+				pauseTooltip = "Resume job"
 			}
 
-			toolbar := widget.NewToolbar(
-				widget.NewToolbarAction(pauseIcon, func() {
-					if err := ui.app.SetScheduledJobEnabled(jb.ID, nextEnabled); err != nil {
-						ui.app.Events.Dispatch(events.Errorf("gui", "Error updating job state: %v", err))
+			hoverHint := widget.NewLabel(" ")
+			hintHeight := hoverHint.MinSize().Height
+			if hintHeight < theme.TextSize()+theme.Padding() {
+				hintHeight = theme.TextSize() + theme.Padding()
+			}
+			hoverHintSlot := container.NewGridWrap(fyne.NewSize(96, hintHeight), hoverHint)
+			setHoverHint := func(text string) {
+				if strings.TrimSpace(text) == "" {
+					hoverHint.SetText(" ")
+					return
+				}
+				hoverHint.SetText(text)
+			}
+
+			pauseButton := newTooltipIconButton(pauseIcon, pauseTooltip, setHoverHint, func() {
+				applyJobEnabled := func() error {
+					return ui.app.SetScheduledJobEnabled(jb.ID, nextEnabled)
+				}
+
+				if err := applyJobEnabled(); err != nil {
+					if strings.Contains(err.Error(), "stop the server first") {
+						actionVerb := strings.ToLower(pauseVerb)
+						dialog.ShowConfirm(
+							"Stop Server First",
+							fmt.Sprintf("The server is active. Stop it now and %s job '%s'?", actionVerb, jb.Name),
+							func(confirm bool) {
+								if !confirm {
+									return
+								}
+
+								if stopErr := ui.app.Server.StopServer(); stopErr != nil {
+									ui.app.Events.Dispatch(events.Errorf("gui", "Error stopping server before job update: %v", stopErr))
+									ui.ShowToast(fmt.Sprintf("Error: %v", stopErr))
+									return
+								}
+								ui.app.Events.Dispatch(events.Event{Type: "server.status.changed", Source: "gui"})
+
+								if retryErr := applyJobEnabled(); retryErr != nil {
+									ui.app.Events.Dispatch(events.Errorf("gui", "Error updating job state after stop: %v", retryErr))
+									ui.ShowToast(fmt.Sprintf("Error: %v", retryErr))
+									return
+								}
+								ui.ShowToast(fmt.Sprintf("%s job '%s'.", pauseVerb, jb.Name))
+								ui.refreshSyncCenterTab()
+							},
+							ui.window,
+						)
+						return
+					}
+
+					ui.app.Events.Dispatch(events.Errorf("gui", "Error updating job state: %v", err))
+					ui.ShowToast(fmt.Sprintf("Error: %v", err))
+					return
+				}
+				ui.ShowToast(fmt.Sprintf("%s job '%s'. Restart server if already running.", pauseVerb, jb.Name))
+				ui.refreshSyncCenterTab()
+			})
+
+			runNowButton := newTooltipIconButton(theme.MediaSkipNextIcon(), "Run job now", setHoverHint, func() {
+				if ui.presenter == nil {
+					ui.ShowToast("Error: Unable to run job right now.")
+					return
+				}
+				ui.presenter.HandleRunScheduledJob(jb.ID, jb.Name)
+			})
+
+			editButton := newTooltipIconButton(theme.DocumentCreateIcon(), "Edit job", setHoverHint, func() {
+				ui.createJobPopup(jb)
+			})
+
+			deleteButton := newTooltipIconButton(theme.DeleteIcon(), "Delete job", setHoverHint, func() {
+				dialog.ShowConfirm("Delete Job", "Delete this scheduled job?", func(confirm bool) {
+					if !confirm {
+						return
+					}
+					if err := ui.app.DeleteScheduledJob(jb.ID); err != nil {
+						ui.app.Events.Dispatch(events.Errorf("gui", "Error deleting job: %v", err))
 						ui.ShowToast(fmt.Sprintf("Error: %v", err))
 						return
 					}
-					ui.ShowToast(fmt.Sprintf("%s job '%s'. Restart server if already running.", pauseVerb, jb.Name))
-					ui.refreshJobsTab()
-				}),
-				widget.NewToolbarSeparator(),
-				widget.NewToolbarAction(theme.DocumentCreateIcon(), func() {
-					ui.createJobPopup(jb)
-				}),
-				widget.NewToolbarSeparator(),
-				widget.NewToolbarAction(theme.DeleteIcon(), func() {
-					dialog.ShowConfirm("Delete Job", "Delete this scheduled job?", func(confirm bool) {
-						if !confirm {
-							return
-						}
-						if err := ui.app.DeleteScheduledJob(jb.ID); err != nil {
-							ui.app.Events.Dispatch(events.Errorf("gui", "Error deleting job: %v", err))
-							ui.ShowToast(fmt.Sprintf("Error: %v", err))
-							return
-						}
-						ui.ShowToast(fmt.Sprintf("Deleted job '%s'.", jb.Name))
-						ui.refreshJobsTab()
-					}, ui.window)
-				}),
+					ui.ShowToast(fmt.Sprintf("Deleted job '%s'.", jb.Name))
+					ui.refreshSyncCenterTab()
+				}, ui.window)
+			})
+
+			actionsRow := container.NewHBox(
+				hoverHintSlot,
+				NewSpacer(fyne.NewSize(theme.Padding(), 0)),
+				pauseButton,
+				runNowButton,
+				editButton,
+				deleteButton,
 			)
 
 			title := jb.Name
@@ -1553,39 +1766,53 @@ func (ui *Gui) createJobsTab() fyne.CanvasObject {
 				title = fmt.Sprintf("[Paused] %s", title)
 			}
 
-			jobsContent.Add(ui.newSectionCard(
+			jobsContent.Add(ui.newScheduledJobItemCard(
 				title,
-				fmt.Sprintf("ID: %s", jb.ID),
-				container.NewBorder(nil, nil, nil, toolbar, summary),
+				"",
+				actionsRow,
+				summary,
+				jobCardBackground,
 			))
 		}
 	}
 
-	addButton := widget.NewButtonWithIcon("Add Job", theme.ContentAddIcon(), func() {
+	addButton := NewSecondaryButton("Add Job", theme.NewColoredResource(theme.ContentAddIcon(), AddJobAccentColorName), func() {
 		ui.createJobPopup(nil)
 	})
+	addButton.VerticalPadding = theme.Padding() * 0.35
+	addButton.TextColor = ui.themeColor(AddJobAccentColorName)
+	headerControls := container.NewVBox(
+		NewSpacer(fyne.NewSize(0, theme.Padding()*0.25)),
+		container.NewHBox(
+			addButton,
+			NewSpacer(fyne.NewSize(theme.Padding(), 0)),
+		),
+	)
 
 	notice := widget.NewLabel("Stop the server before editing jobs. Changes are written immediately and loaded on next start.")
 	notice.Wrapping = fyne.TextWrapWord
 
-	footer := container.NewVBox(widget.NewSeparator(), notice, addButton)
-	return container.NewBorder(nil, footer, nil, nil, container.NewVScroll(jobsContent))
+	return ui.newSectionCardWithHeaderControls(
+		"Scheduled Jobs",
+		"Manage recurring sync workflows.",
+		headerControls,
+		sectionBackground,
+		container.NewVBox(
+			jobsContent,
+			widget.NewSeparator(),
+			notice,
+		),
+	)
 }
 
 func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 	job := appserver.ScheduledJob{
-		Enabled:         true,
-		MaxRetries:      1,
-		RetryOnError:    false,
-		WorkflowProfile: "pull_all",
+		Enabled:      true,
+		MaxRetries:   1,
+		RetryOnError: false,
 	}
 	if existing != nil {
 		job = *existing
-	}
-	if len(job.Steps) == 0 {
-		if profile, ok := ui.app.Config.WorkflowProfiles[job.WorkflowProfile]; ok {
-			job.Steps = append([]appserver.WorkflowStep(nil), profile.Steps...)
-		}
 	}
 
 	nameEntry := widget.NewEntry()
@@ -1644,7 +1871,8 @@ func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 		updateScheduleEditorVisibility()
 	}
 
-	profileSelect := widget.NewSelect([]string{workflowProfileCustom}, nil)
+	profileSelect := widget.NewSelect([]string{}, nil)
+	profileSelect.PlaceHolder = "Select profile template (optional)"
 
 	enabledCheck := widget.NewCheck("Enabled", nil)
 	enabledCheck.SetChecked(job.Enabled)
@@ -1818,10 +2046,6 @@ func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 			})
 			header := container.NewHBox(stepIndexLabel, layout.NewSpacer(), moveUpBtn, moveDownBtn, deleteBtn)
 
-			idEntry := widget.NewEntry()
-			idEntry.SetText(draft.ID)
-			idEntry.Disable()
-
 			stepNameEntry := widget.NewEntry()
 			stepNameEntry.SetPlaceHolder("Optional name")
 			stepNameEntry.SetText(draft.Name)
@@ -1852,7 +2076,6 @@ func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 			}
 
 			commonForm := widget.NewForm(
-				widget.NewFormItem("ID (auto)", idEntry),
 				widget.NewFormItem("Name", stepNameEntry),
 				widget.NewFormItem("Type", typeSelect),
 			)
@@ -2031,11 +2254,7 @@ func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 		setModeSelection(workflowEditorModeAdvanced)
 	}
 
-	currentProfileSelection := strings.TrimSpace(job.WorkflowProfile)
-	if currentProfileSelection == "" {
-		currentProfileSelection = workflowProfileCustom
-	}
-	profileOptions := sortedWorkflowProfileOptions(ui.app.Config.WorkflowProfiles, currentProfileSelection)
+	profileOptions := sortedWorkflowProfileOptions(ui.app.Config.WorkflowProfiles)
 	profileSelect.Options = profileOptions
 	suppressProfileChange := false
 	profileSelect.OnChanged = func(value string) {
@@ -2044,38 +2263,27 @@ func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 		}
 		selected := strings.TrimSpace(value)
 		if selected == "" {
-			selected = workflowProfileCustom
-		}
-		if selected == currentProfileSelection {
-			return
-		}
-		if selected == workflowProfileCustom {
-			currentProfileSelection = workflowProfileCustom
 			return
 		}
 
-		pendingSelection := selected
 		dialog.ShowConfirm(
-			"Apply Workflow Profile",
-			fmt.Sprintf("Replace current workflow steps with profile '%s'?", pendingSelection),
+			"Insert Workflow Template",
+			fmt.Sprintf("Replace current workflow steps with template '%s'?", selected),
 			func(confirm bool) {
-				nextProfile, nextSteps, replaced, applyErr := applyWorkflowProfileTemplateSelection(
-					currentProfileSelection,
-					pendingSelection,
+				nextSteps, replaced, applyErr := applyWorkflowProfileTemplateSelection(
+					selected,
 					canonicalSteps,
 					ui.app.Config.WorkflowProfiles,
 					confirm,
 				)
 				if applyErr != nil {
-					ui.ShowToast(fmt.Sprintf("Error applying profile: %v", applyErr))
-					nextProfile = currentProfileSelection
+					ui.ShowToast(fmt.Sprintf("Error applying template: %v", applyErr))
 				}
 
 				if !replaced {
 					suppressProfileChange = true
-					profileSelect.SetSelected(nextProfile)
+					profileSelect.ClearSelected()
 					suppressProfileChange = false
-					currentProfileSelection = nextProfile
 					return
 				}
 
@@ -2096,9 +2304,8 @@ func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 					builderCompatibilityWarning.Show()
 					setModeSelection(workflowEditorModeAdvanced)
 				}
-				currentProfileSelection = nextProfile
 				suppressProfileChange = true
-				profileSelect.SetSelected(currentProfileSelection)
+				profileSelect.ClearSelected()
 				suppressProfileChange = false
 				setEditorStatus("")
 			},
@@ -2106,9 +2313,7 @@ func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 		)
 	}
 
-	suppressProfileChange = true
-	profileSelect.SetSelected(currentProfileSelection)
-	suppressProfileChange = false
+	profileSelect.Refresh()
 
 	renderBuilderPanel()
 	setModeSelection(currentEditorMode)
@@ -2118,7 +2323,7 @@ func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 		widget.NewFormItem("Schedule Mode", scheduleModeSelector),
 		widget.NewFormItem("Schedule Editor", scheduleEditorContainer),
 		widget.NewFormItem("", scheduleHelp),
-		widget.NewFormItem("Workflow Profile Template", profileSelect),
+		widget.NewFormItem("Workflow Template Insert (optional)", profileSelect),
 		widget.NewFormItem("Workflow Steps", editorContainer),
 		widget.NewFormItem("Timezone Override (optional)", timezoneEntry),
 		widget.NewFormItem("", widget.NewLabel("Leave blank to inherit the global server timezone (or OS local if unset).")),
@@ -2182,10 +2387,6 @@ func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 		updated := job
 		updated.Name = name
 		updated.Schedule = schedule
-		updated.WorkflowProfile = strings.TrimSpace(currentProfileSelection)
-		if updated.WorkflowProfile == workflowProfileCustom {
-			updated.WorkflowProfile = ""
-		}
 		updated.Steps = cloneWorkflowSteps(canonicalSteps)
 		updated.Timezone = strings.TrimSpace(timezoneEntry.Text)
 		updated.Enabled = enabledCheck.Checked
@@ -2198,7 +2399,7 @@ func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 			return
 		}
 		ui.ShowToast("Job saved. Restart server if already running.")
-		ui.refreshJobsTab()
+		ui.refreshSyncCenterTab()
 	}, ui.window)
 
 	d.Resize(fyne.NewSize(560, 700))
@@ -3565,21 +3766,6 @@ func (ui *Gui) OpenConfigTab() bool {
 	return false
 }
 
-func (ui *Gui) OpenServerTab() bool {
-	if ui.tabs == nil {
-		return false
-	}
-
-	for idx, tab := range ui.tabs.Items {
-		if tab.Text == "Server" {
-			ui.tabs.SelectIndex(idx)
-			return true
-		}
-	}
-
-	return false
-}
-
 func defaultExplorerQuery(tableName string) (ExplorerQueryOptions, bool) {
 	switch tableName {
 	case "AccountsPendingChanges", "AccountCheckinsPendingChanges":
@@ -3706,228 +3892,21 @@ func (ui *Gui) buildSyncAutomationCard() fyne.CanvasObject {
 	)
 }
 
-// createServerTab creates the content for the "Server" tab
-func (ui *Gui) createServerTab() fyne.CanvasObject {
-	statusValue := canvas.NewText("Unknown", ui.themeColor(StatusNegativeColorName))
-	statusValue.TextStyle = fyne.TextStyle{Bold: true}
-	statusValue.TextSize = theme.TextSize()
-	toggleServerButton := widget.NewButtonWithIcon("", nil, nil)
-	toggleServerButton.Importance = widget.HighImportance
-
-	webhooks := ui.app.Config.Server.Webhooks
-	if webhooks == nil {
-		webhooks = map[string]bool{
-			app.WebhookAccountCreate: true,
-			app.WebhookCheckin:       true,
-		}
+func formatServerJobDisplayLine(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return "-"
 	}
+	return strings.ReplaceAll(trimmed, " | ", "\n")
+}
 
-	accountWebhookCheck := widget.NewCheck("Account create webhook", nil)
-	checkinWebhookCheck := widget.NewCheck("Check-in webhook", nil)
-	accountWebhookCheck.SetChecked(webhooks[app.WebhookAccountCreate])
-	checkinWebhookCheck.SetChecked(webhooks[app.WebhookCheckin])
-	webhookStatusLabel := widget.NewLabel("")
-	updateWebhookStatus := func(accountEnabled, checkinEnabled bool) {
-		if !accountEnabled && !checkinEnabled {
-			webhookStatusLabel.SetText("All webhooks disabled; server will only serve /health.")
-			return
-		}
-		webhookStatusLabel.SetText("Select which webhooks the embedded server should handle.")
+func rightPaneJobsItemHeight(line string) float32 {
+	lineCount := strings.Count(line, "\n") + 1
+	if lineCount < 1 {
+		lineCount = 1
 	}
-	updateWebhookStatus(accountWebhookCheck.Checked, checkinWebhookCheck.Checked)
-
-	accountWebhookCheck.OnChanged = func(enabled bool) {
-		currentCheckin := checkinWebhookCheck.Checked
-		updateWebhookStatus(enabled, currentCheckin)
-		ui.presenter.HandleUpdateServerWebhooks(enabled, currentCheckin)
-	}
-	checkinWebhookCheck.OnChanged = func(enabled bool) {
-		currentAccount := accountWebhookCheck.Checked
-		updateWebhookStatus(currentAccount, enabled)
-		ui.presenter.HandleUpdateServerWebhooks(currentAccount, enabled)
-	}
-
-	var refreshServerStatus func()
-	var refreshJobs func()
-	setToggleButton := func(running bool) {
-		if running {
-			toggleServerButton.SetText("Stop Server")
-			toggleServerButton.SetIcon(theme.MediaStopIcon())
-			toggleServerButton.OnTapped = func() {
-				ui.presenter.HandleStopServer()
-				refreshServerStatus()
-			}
-		} else {
-			toggleServerButton.SetText("Start Server")
-			toggleServerButton.SetIcon(theme.MediaPlayIcon())
-			toggleServerButton.OnTapped = func() {
-				ui.presenter.HandleStartServer()
-				refreshServerStatus()
-			}
-		}
-	}
-
-	refreshServerStatus = func() {
-		if pid, running := ui.app.Server.GetServerStatus(); running {
-			statusValue.Text = fmt.Sprintf("Running (PID: %d)", pid)
-			statusValue.Color = ui.themeColor(StatusPositiveColorName)
-			setToggleButton(true)
-		} else {
-			statusValue.Text = "Stopped"
-			statusValue.Color = ui.themeColor(StatusNegativeColorName)
-			setToggleButton(false)
-		}
-		canvas.Refresh(statusValue)
-		if refreshJobs != nil {
-			refreshJobs()
-		}
-	}
-
-	refreshServerStatus()
-
-	statusLabel := widget.NewLabelWithStyle("Server Status:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	serverHeader := container.NewHBox(statusLabel, statusValue)
-
-	jobLines := []string{"No server jobs available."}
-	serverJobsList := widget.NewList(
-		func() int {
-			return len(jobLines)
-		},
-		func() fyne.CanvasObject {
-			label := widget.NewLabel("template")
-			label.Wrapping = fyne.TextWrapWord
-			return label
-		},
-		func(id widget.ListItemID, object fyne.CanvasObject) {
-			object.(*widget.Label).SetText(jobLines[id])
-		},
-	)
-	serverJobsListContainer := container.NewVScroll(serverJobsList)
-	serverJobsListContainer.SetMinSize(fyne.NewSize(0, 220))
-
-	serverJobsActivityLabel := widget.NewLabel("Server jobs will appear here once the server is active.")
-	serverJobsActivityLabel.Wrapping = fyne.TextWrapWord
-
-	refreshJobs = func() {
-		displayLoc := ui.app.ServerTimezoneLocation()
-		timezoneLabel := displayLoc.String()
-		snapshot, err := ui.presenter.FetchServerJobsSnapshot()
-		if err != nil {
-			serverJobsActivityLabel.SetText(fmt.Sprintf("Unable to load server jobs: %v (display TZ: %s)", err, timezoneLabel))
-			jobLines = []string{"Start the server to view active and queued jobs."}
-			serverJobsList.Refresh()
-			return
-		}
-
-		serverJobsActivityLabel.SetText(formatServerActivityLine(snapshot.Activity, displayLoc))
-		if len(snapshot.Jobs) == 0 {
-			jobLines = []string{"No jobs in queue or recent history."}
-			serverJobsList.Refresh()
-			return
-		}
-
-		lines := make([]string, 0, len(snapshot.Jobs))
-		for _, job := range snapshot.Jobs {
-			lines = append(lines, formatServerJobLine(job, displayLoc))
-		}
-		jobLines = lines
-		serverJobsList.Refresh()
-	}
-
-	refreshJobsButton := widget.NewButtonWithIcon("Refresh Job List", theme.ViewRefreshIcon(), refreshJobs)
-	serverJobsCard := ui.newSectionCard(
-		"Server Jobs",
-		"View active, queued, and recent server sync jobs.",
-		serverJobsActivityLabel,
-		serverJobsListContainer,
-		container.NewCenter(refreshJobsButton),
-	)
-	refreshJobs()
-
-	webhookCard := ui.newSectionCard(
-		"Webhook Routing",
-		"Select which webhooks the embedded server should handle.",
-		accountWebhookCheck,
-		checkinWebhookCheck,
-		webhookStatusLabel,
-	)
-
-	// Server configuration form
-	serverHostEntry := widget.NewEntry()
-	serverHostEntry.SetText(ui.app.Config.Server.Host)
-	serverPortEntry := widget.NewEntry()
-	serverPortEntry.SetText(fmt.Sprintf("%d", ui.app.Config.Server.Port))
-	serverTimezoneEntry := widget.NewEntry()
-	serverTimezoneEntry.SetPlaceHolder("Optional, e.g. America/New_York")
-	serverTimezoneEntry.SetText(ui.app.Config.Server.Timezone)
-	tlsCertEntry := widget.NewEntry()
-	tlsCertEntry.SetText(ui.app.Config.Server.TLSCert)
-	tlsKeyEntry := widget.NewEntry()
-	tlsKeyEntry.SetText(ui.app.Config.Server.TLSKey)
-	logRequestsCheck := widget.NewCheck("Log incoming requests", nil)
-	logRequestsCheck.SetChecked(ui.app.Config.Server.LogRequests)
-
-	var serverForm *widget.Form
-	tlsCertFormItem := widget.NewFormItem("TLS Cert Path", tlsCertEntry)
-	tlsKeyFormItem := widget.NewFormItem("TLS Key Path", tlsKeyEntry)
-	tlsEnabledCheck := widget.NewCheck("Enable TLS", func(enabled bool) {
-		if enabled {
-			serverForm.AppendItem(tlsCertFormItem)
-			serverForm.AppendItem(tlsKeyFormItem)
-		} else {
-			var newItems []*widget.FormItem
-			for _, item := range serverForm.Items {
-				if item != tlsCertFormItem && item != tlsKeyFormItem {
-					newItems = append(newItems, item)
-				}
-			}
-			serverForm.Items = newItems
-		}
-		serverForm.Refresh()
-	})
-
-	serverForm = widget.NewForm(
-		widget.NewFormItem("Host", serverHostEntry),
-		widget.NewFormItem("Port", serverPortEntry),
-		widget.NewFormItem("Global Timezone (IANA)", serverTimezoneEntry),
-	)
-
-	tlsEnabledCheck.SetChecked(ui.app.Config.Server.TLSEnabled)
-
-	saveServerButton := NewSecondaryButton("Save Server Settings", theme.DocumentSaveIcon(), func() {
-		ui.presenter.HandleSaveServerConfig(
-			serverHostEntry.Text,
-			serverPortEntry.Text,
-			serverTimezoneEntry.Text,
-			tlsEnabledCheck.Checked,
-			tlsCertEntry.Text,
-			tlsKeyEntry.Text,
-			logRequestsCheck.Checked,
-		)
-	})
-
-	serverSettingsCard := ui.newSectionCard(
-		"Server Configuration",
-		"Configure host, global timezone, TLS, and request logging for the embedded server.",
-		tlsEnabledCheck,
-		serverForm,
-		logRequestsCheck,
-	)
-
-	autoSyncCard := ui.buildSyncAutomationCard()
-
-	scrollContent := container.NewVScroll(container.NewVBox(
-		serverHeader,
-		serverJobsCard,
-		webhookCard,
-		autoSyncCard,
-		serverSettingsCard,
-	))
-
-	buttonGrid := container.NewGridWithColumns(2, saveServerButton, toggleServerButton)
-	footer := container.NewVBox(widget.NewSeparator(), buttonGrid)
-
-	return container.NewBorder(nil, footer, nil, nil, scrollContent)
+	lineHeight := theme.TextSize() + (theme.Padding() * 1.6)
+	return (float32(lineCount) * lineHeight) + (theme.Padding() * 1.5)
 }
 
 func formatServerActivityLine(activity appserver.RuntimeActivity, location *time.Location) string {
@@ -3978,18 +3957,44 @@ func formatServerJobLine(job *appserver.SyncJob, location *time.Location) string
 		return "Unknown job"
 	}
 
+	processRole := "Parent"
+	parentJobID := strings.TrimSpace(job.ParentJobID)
+	if parentJobID != "" {
+		processRole = "Subprocess"
+	}
+
+	jobIdentifier := job.ID
+	if trimmedName := strings.TrimSpace(job.Name); trimmedName != "" {
+		jobIdentifier = fmt.Sprintf("%s (%s)", job.ID, trimmedName)
+	}
+
 	start := formatSyncTimestamp(job.StartedAt, location)
 	end := formatSyncTimestamp(job.CompletedAt, location)
 	line := fmt.Sprintf(
-		"[%s] %s | mode=%s | source=%s | queued=%s | started=%s | completed=%s",
+		"[%s] %s: %s | kind=%s | mode=%s | source=%s | queued=%s | started=%s | completed=%s",
 		strings.ToUpper(string(job.Status)),
-		job.ID,
+		processRole,
+		jobIdentifier,
+		job.Kind,
 		job.Mode,
 		job.Source,
 		formatTimestampInLocation(job.QueuedAt, location, "2006-01-02 15:04:05"),
 		start,
 		end,
 	)
+	if parentJobID != "" {
+		line = fmt.Sprintf("%s | parent=%s", line, parentJobID)
+	}
+	if job.StepIndex > 0 {
+		stepInfo := fmt.Sprintf("%d", job.StepIndex)
+		if job.TotalSteps > 0 {
+			stepInfo = fmt.Sprintf("%d/%d", job.StepIndex, job.TotalSteps)
+		}
+		if trimmedStepID := strings.TrimSpace(job.StepID); trimmedStepID != "" {
+			stepInfo = fmt.Sprintf("%s (%s)", stepInfo, trimmedStepID)
+		}
+		line = fmt.Sprintf("%s | step=%s", line, stepInfo)
+	}
 	if strings.TrimSpace(job.Error) != "" {
 		line = fmt.Sprintf("%s | error=%s", line, job.Error)
 	}
@@ -4208,14 +4213,6 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 	)
 
 	// Sync Preferences
-	conflictStrategyRadio := widget.NewRadioGroup([]string{
-		"Always use local changes",
-		"Always use remote changes",
-		"Use most recent",
-		"Ask every time",
-	}, nil)
-	conflictStrategyRadio.SetSelected("Ask every time")
-
 	maxConcurrent := ui.app.Config.MaxConcurrentRequests
 	if maxConcurrent < 1 {
 		maxConcurrent = 1
@@ -4263,34 +4260,17 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 		maxConcurrentEntry.Disable()
 	}
 
-	batchSizeEntry := widget.NewEntry()
-	batchSizeEntry.SetText("100")
-
-	verboseLoggingCheck := widget.NewCheck("Verbose logging", nil)
-	logRetentionSelect := widget.NewSelect([]string{
-		"7 days",
-		"30 days",
-		"90 days",
-		"Forever",
-	}, nil)
-	logRetentionSelect.SetSelected("30 days")
-
-	saveSyncPrefsBtn := widget.NewButtonWithIcon("Save Sync Preferences", theme.DocumentSaveIcon(), func() {
-		ui.ShowToast("Sync preferences saved (coming soon)")
-	})
+	syncPrefsHint := widget.NewLabel("Controls apply to concurrent sync execution.")
+	syncPrefsHint.Wrapping = fyne.TextWrapWord
 
 	syncPreferencesCard := ui.newSectionCard(
 		"Sync Preferences",
-		"Control conflict handling and logging for manual sync runs.",
+		"Configure supported sync execution settings.",
 		widget.NewForm(
-			widget.NewFormItem("Conflict Resolution", conflictStrategyRadio),
-			widget.NewFormItem("Batch Size", batchSizeEntry),
-			widget.NewFormItem("Verbose Logging", verboseLoggingCheck),
-			widget.NewFormItem("Log Retention", logRetentionSelect),
 			widget.NewFormItem("Parallel Processing", parallelProcessingCheck),
 			widget.NewFormItem("Max Concurrent", maxConcurrentEntry),
 		),
-		container.NewCenter(saveSyncPrefsBtn),
+		syncPrefsHint,
 	)
 
 	themeLabels := []string{"Auto (Follow System)", "Light", "Dark"}
@@ -4321,14 +4301,114 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 	)
 
 	// Other Settings
-	verboseCheck := widget.NewCheck("Debug", nil)
-	verboseCheck.SetChecked(ui.app.State.Debug)
 	testCustomCheckinsCheck := widget.NewCheck("Enable custom checkin API", nil)
 	testCustomCheckinsCheck.SetChecked(ui.app.Config.CustomCheckins)
 	otherCard := ui.newSectionCard("Other Settings", "", container.NewVBox(
-		verboseCheck,
 		testCustomCheckinsCheck,
 	))
+
+	webhooks := ui.app.Config.Server.Webhooks
+	if webhooks == nil {
+		webhooks = map[string]bool{
+			app.WebhookAccountCreate: true,
+			app.WebhookCheckin:       true,
+		}
+	}
+
+	accountWebhookCheck := widget.NewCheck("Account create webhook", nil)
+	checkinWebhookCheck := widget.NewCheck("Check-in webhook", nil)
+	accountWebhookCheck.SetChecked(webhooks[app.WebhookAccountCreate])
+	checkinWebhookCheck.SetChecked(webhooks[app.WebhookCheckin])
+	webhookStatusLabel := widget.NewLabel("")
+	updateWebhookStatus := func(accountEnabled, checkinEnabled bool) {
+		if !accountEnabled && !checkinEnabled {
+			webhookStatusLabel.SetText("All webhooks disabled; server will only serve /health.")
+			return
+		}
+		webhookStatusLabel.SetText("Select which webhooks the embedded server should handle.")
+	}
+	updateWebhookStatus(accountWebhookCheck.Checked, checkinWebhookCheck.Checked)
+
+	accountWebhookCheck.OnChanged = func(enabled bool) {
+		currentCheckin := checkinWebhookCheck.Checked
+		updateWebhookStatus(enabled, currentCheckin)
+		ui.presenter.HandleUpdateServerWebhooks(enabled, currentCheckin)
+	}
+	checkinWebhookCheck.OnChanged = func(enabled bool) {
+		currentAccount := accountWebhookCheck.Checked
+		updateWebhookStatus(currentAccount, enabled)
+		ui.presenter.HandleUpdateServerWebhooks(currentAccount, enabled)
+	}
+
+	webhookCard := ui.newSectionCard(
+		"Webhook Routing",
+		"Select which webhooks the embedded server should handle.",
+		accountWebhookCheck,
+		checkinWebhookCheck,
+		webhookStatusLabel,
+	)
+
+	serverHostEntry := widget.NewEntry()
+	serverHostEntry.SetText(ui.app.Config.Server.Host)
+	serverPortEntry := widget.NewEntry()
+	serverPortEntry.SetText(fmt.Sprintf("%d", ui.app.Config.Server.Port))
+	serverTimezoneEntry := widget.NewEntry()
+	serverTimezoneEntry.SetPlaceHolder("Optional, e.g. America/New_York")
+	serverTimezoneEntry.SetText(ui.app.Config.Server.Timezone)
+	tlsCertEntry := widget.NewEntry()
+	tlsCertEntry.SetText(ui.app.Config.Server.TLSCert)
+	tlsKeyEntry := widget.NewEntry()
+	tlsKeyEntry.SetText(ui.app.Config.Server.TLSKey)
+	logRequestsCheck := widget.NewCheck("Log incoming requests", nil)
+	logRequestsCheck.SetChecked(ui.app.Config.Server.LogRequests)
+
+	var serverForm *widget.Form
+	tlsCertFormItem := widget.NewFormItem("TLS Cert Path", tlsCertEntry)
+	tlsKeyFormItem := widget.NewFormItem("TLS Key Path", tlsKeyEntry)
+	tlsEnabledCheck := widget.NewCheck("Enable TLS", func(enabled bool) {
+		if enabled {
+			serverForm.AppendItem(tlsCertFormItem)
+			serverForm.AppendItem(tlsKeyFormItem)
+		} else {
+			var newItems []*widget.FormItem
+			for _, item := range serverForm.Items {
+				if item != tlsCertFormItem && item != tlsKeyFormItem {
+					newItems = append(newItems, item)
+				}
+			}
+			serverForm.Items = newItems
+		}
+		serverForm.Refresh()
+	})
+
+	serverForm = widget.NewForm(
+		widget.NewFormItem("Host", serverHostEntry),
+		widget.NewFormItem("Port", serverPortEntry),
+		widget.NewFormItem("Global Timezone (IANA)", serverTimezoneEntry),
+	)
+
+	tlsEnabledCheck.SetChecked(ui.app.Config.Server.TLSEnabled)
+
+	saveServerButton := NewSecondaryButton("Save Server Settings", theme.DocumentSaveIcon(), func() {
+		ui.presenter.HandleSaveServerConfig(
+			serverHostEntry.Text,
+			serverPortEntry.Text,
+			serverTimezoneEntry.Text,
+			tlsEnabledCheck.Checked,
+			tlsCertEntry.Text,
+			tlsKeyEntry.Text,
+			logRequestsCheck.Checked,
+		)
+	})
+
+	serverSettingsCard := ui.newSectionCard(
+		"Server Configuration",
+		"Configure host, global timezone, TLS, and request logging for the embedded server.",
+		tlsEnabledCheck,
+		serverForm,
+		logRequestsCheck,
+		container.NewCenter(saveServerButton),
+	)
 
 	// Buttons
 	saveButton := NewSecondaryButton("Save Configuration", theme.ConfirmIcon(), func() {
@@ -4342,8 +4422,6 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 			apiKeyEntry.Text, baseURLEntry.Text, dbTypeSelect.Selected, dbPathEntry.Text,
 			dbHostEntry.Text, dbPortEntry.Text, dbUserEntry.Text, dbPassEntry.Text, dbNameEntry.Text,
 			selectedThemePreference,
-			false, // verbose is deprecated in gui
-			verboseCheck.Checked,
 			maxConcurrentEntry.Text,
 			parallelProcessingCheck.Checked,
 			testCustomCheckinsCheck.Checked,
@@ -4362,6 +4440,8 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 		NewSpacer(fyne.NewSize(0, 10)),
 		apiCard,
 		dbCard,
+		serverSettingsCard,
+		webhookCard,
 		syncPreferencesCard,
 		appearanceCard,
 		otherCard,

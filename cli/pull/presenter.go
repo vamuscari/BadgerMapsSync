@@ -6,8 +6,8 @@ import (
 	appserver "badgermaps/app/server"
 	"badgermaps/app/syncproxy"
 	"badgermaps/events"
+	"badgermaps/utils"
 	"fmt"
-	"os"
 	"strconv"
 
 	"github.com/schollz/progressbar/v3"
@@ -78,7 +78,7 @@ func (p *CliPresenter) HandlePullAccounts() error {
 		case "pull.group.start":
 			bar = progressbar.NewOptions(-1,
 				progressbar.OptionSetDescription("Pulling accounts..."),
-				progressbar.OptionSetWriter(os.Stderr),
+				progressbar.OptionSetWriter(utils.StderrWriter()),
 				progressbar.OptionSpinnerType(14),
 				progressbar.OptionEnableColorCodes(true),
 			)
@@ -178,7 +178,7 @@ func (p *CliPresenter) HandlePullCheckins() error {
 		case "pull.group.start":
 			bar = progressbar.NewOptions(-1,
 				progressbar.OptionSetDescription("Pulling checkins..."),
-				progressbar.OptionSetWriter(os.Stderr),
+				progressbar.OptionSetWriter(utils.StderrWriter()),
 				progressbar.OptionSpinnerType(14),
 				progressbar.OptionEnableColorCodes(true),
 			)
@@ -278,7 +278,7 @@ func (p *CliPresenter) HandlePullRoutes() error {
 		case "pull.group.start":
 			bar = progressbar.NewOptions(-1,
 				progressbar.OptionSetDescription("Pulling routes..."),
-				progressbar.OptionSetWriter(os.Stderr),
+				progressbar.OptionSetWriter(utils.StderrWriter()),
 				progressbar.OptionSpinnerType(14),
 				progressbar.OptionEnableColorCodes(true),
 			)

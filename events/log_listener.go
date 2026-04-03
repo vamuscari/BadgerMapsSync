@@ -23,7 +23,7 @@ type LogListener struct {
 func NewLogListener(state *state.State, logFilePath string) (*LogListener, error) {
 	l := &LogListener{
 		State:         state,
-		consoleWriter: os.Stdout,
+		consoleWriter: utils.StdoutWriter(),
 	}
 
 	if logFilePath != "" {

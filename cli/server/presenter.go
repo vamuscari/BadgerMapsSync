@@ -30,6 +30,7 @@ import (
 type CliPresenter struct {
 	App       *app.App
 	syncQueue *appserver.SyncJobCoordinator
+	scheduler *appserver.Scheduler
 }
 
 // NewCliPresenter creates a new presenter for the server command.
@@ -99,6 +100,10 @@ func (p *CliPresenter) RunServerWithContext(ctx context.Context, config *ServerC
 	if err := scheduler.Start(); err != nil {
 		return fmt.Errorf("failed to start scheduler: %w", err)
 	}
+	p.scheduler = scheduler
+	defer func() {
+		p.scheduler = nil
+	}()
 	defer scheduler.Stop()
 
 	mux := http.NewServeMux()
@@ -141,6 +146,7 @@ func (p *CliPresenter) RunServerWithContext(ctx context.Context, config *ServerC
 	mux.Handle("/internal/jobs/sync", p.withLocalOnly(http.HandlerFunc(p.HandleInternalSyncJob)))
 	mux.Handle("/internal/jobs", p.withLocalOnly(http.HandlerFunc(p.HandleInternalSyncJobs)))
 	mux.Handle("/internal/jobs/", p.withLocalOnly(http.HandlerFunc(p.HandleInternalSyncJobStatus)))
+	mux.Handle("/internal/scheduled-jobs/run", p.withLocalOnly(http.HandlerFunc(p.HandleInternalScheduledJobRun)))
 	mux.Handle("/internal/activity", p.withLocalOnly(http.HandlerFunc(p.HandleInternalActivity)))
 
 	if p.App.Config.WebhookCatchAll {
@@ -423,6 +429,45 @@ func (p *CliPresenter) HandleInternalSyncJob(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(job)
+}
+
+func (p *CliPresenter) HandleInternalScheduledJobRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if p.scheduler == nil {
+		http.Error(w, "Scheduler unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req appserver.ScheduledJobRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("invalid request payload: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	jobID := strings.TrimSpace(req.JobID)
+	if jobID == "" {
+		http.Error(w, "job_id is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := p.scheduler.RunJobNow(jobID); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "job not found") {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		http.Error(w, fmt.Sprintf("failed to queue scheduled job: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(appserver.ScheduledJobRunResponse{
+		JobID:  jobID,
+		Status: "queued",
+	})
 }
 
 func (p *CliPresenter) resolveWorkflowSubmitSteps(req appserver.SyncJobSubmitRequest, mode appserver.SyncMode) ([]appserver.WorkflowStep, string, error) {

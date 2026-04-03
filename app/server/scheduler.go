@@ -35,21 +35,20 @@ const (
 )
 
 type ScheduledJob struct {
-	ID              string         `yaml:"id" json:"id"`
-	Name            string         `yaml:"name" json:"name"`
-	Schedule        string         `yaml:"schedule" json:"schedule"`
-	WorkflowProfile string         `yaml:"workflow_profile,omitempty" json:"workflow_profile,omitempty"`
-	Steps           []WorkflowStep `yaml:"steps" json:"steps"`
-	Enabled         bool           `yaml:"enabled" json:"enabled"`
-	LastRun         *time.Time     `yaml:"last_run,omitempty" json:"last_run,omitempty"`
-	NextRun         *time.Time     `yaml:"next_run,omitempty" json:"next_run,omitempty"`
-	LastSuccess     *time.Time     `yaml:"last_success,omitempty" json:"last_success,omitempty"`
-	LastError       string         `yaml:"last_error,omitempty" json:"last_error,omitempty"`
-	RunCount        int            `yaml:"run_count" json:"run_count"`
-	ErrorCount      int            `yaml:"error_count" json:"error_count"`
-	Timezone        string         `yaml:"timezone,omitempty" json:"timezone,omitempty"`
-	RetryOnError    bool           `yaml:"retry_on_error" json:"retry_on_error"`
-	MaxRetries      int            `yaml:"max_retries" json:"max_retries"`
+	ID           string         `yaml:"id" json:"id"`
+	Name         string         `yaml:"name" json:"name"`
+	Schedule     string         `yaml:"schedule" json:"schedule"`
+	Steps        []WorkflowStep `yaml:"steps" json:"steps"`
+	Enabled      bool           `yaml:"enabled" json:"enabled"`
+	LastRun      *time.Time     `yaml:"last_run,omitempty" json:"last_run,omitempty"`
+	NextRun      *time.Time     `yaml:"next_run,omitempty" json:"next_run,omitempty"`
+	LastSuccess  *time.Time     `yaml:"last_success,omitempty" json:"last_success,omitempty"`
+	LastError    string         `yaml:"last_error,omitempty" json:"last_error,omitempty"`
+	RunCount     int            `yaml:"run_count" json:"run_count"`
+	ErrorCount   int            `yaml:"error_count" json:"error_count"`
+	Timezone     string         `yaml:"timezone,omitempty" json:"timezone,omitempty"`
+	RetryOnError bool           `yaml:"retry_on_error" json:"retry_on_error"`
+	MaxRetries   int            `yaml:"max_retries" json:"max_retries"`
 
 	// Legacy fields are retained solely for hard-fail migration detection.
 	LegacySyncType SyncType              `yaml:"sync_type,omitempty" json:"sync_type,omitempty"`
@@ -212,7 +211,11 @@ func (s *Scheduler) AddJob(job *ScheduledJob) error {
 		return err
 	}
 	if job.ID == "" {
-		job.ID = fmt.Sprintf("job_%d", time.Now().UnixNano())
+		generatedID, err := s.nextAvailableScheduledJobID()
+		if err != nil {
+			return err
+		}
+		job.ID = generatedID
 	}
 
 	if err := s.attachJobToCron(job); err != nil {
@@ -305,9 +308,6 @@ func (s *Scheduler) UpdateJob(jobID string, updates *ScheduledJob) error {
 	if updates.Steps != nil {
 		job.Steps = updates.Steps
 	}
-	if strings.TrimSpace(updates.WorkflowProfile) != "" {
-		job.WorkflowProfile = strings.TrimSpace(updates.WorkflowProfile)
-	}
 	job.Enabled = updates.Enabled
 	job.RetryOnError = updates.RetryOnError
 	job.MaxRetries = updates.MaxRetries
@@ -344,10 +344,9 @@ func (s *Scheduler) executeJob(jobID string) {
 			Payload: events.GenericPayload{
 				Type: "scheduler.job.queued",
 				Data: map[string]interface{}{
-					"job_id":           job.ID,
-					"job_name":         job.Name,
-					"workflow_profile": strings.TrimSpace(job.WorkflowProfile),
-					"steps":            len(job.Steps),
+					"job_id":   job.ID,
+					"job_name": job.Name,
+					"steps":    len(job.Steps),
 				},
 			},
 		})
@@ -487,10 +486,21 @@ func (s *Scheduler) runScheduledJob(jobID string) error {
 		target.LastError = lastError
 		target.ErrorCount += errorDelta
 		target.LastSuccess = lastSuccess
-		if target.Enabled && target.cronID > 0 {
-			entry := s.cron.Entry(target.cronID)
-			nextRun := entry.Next
-			target.NextRun = &nextRun
+		if target.Enabled {
+			switch {
+			case target.cronID > 0:
+				entry := s.cron.Entry(target.cronID)
+				if !entry.Next.IsZero() {
+					nextRun := entry.Next
+					target.NextRun = &nextRun
+				} else if estimatedNext, err := s.estimateNextRun(target); err == nil {
+					target.NextRun = estimatedNext
+				}
+			default:
+				if estimatedNext, err := s.estimateNextRun(target); err == nil {
+					target.NextRun = estimatedNext
+				}
+			}
 		}
 		_ = s.saveJobs()
 	}
@@ -657,6 +667,29 @@ func (s *Scheduler) RunJobNow(jobID string) error {
 	return nil
 }
 
+// QueueStoredJobNow loads persisted jobs when needed and queues a specific job immediately.
+func (s *Scheduler) QueueStoredJobNow(jobID string) error {
+	trimmedID := strings.TrimSpace(jobID)
+	if trimmedID == "" {
+		return fmt.Errorf("job id is required")
+	}
+
+	s.mu.Lock()
+	if len(s.jobs) == 0 {
+		if err := s.loadJobs(); err != nil {
+			s.mu.Unlock()
+			return fmt.Errorf("failed to load scheduled jobs: %w", err)
+		}
+	}
+	_, exists := s.jobs[trimmedID]
+	s.mu.Unlock()
+
+	if !exists {
+		return fmt.Errorf("job not found: %s", trimmedID)
+	}
+	return s.RunJobNow(trimmedID)
+}
+
 // monitor handles background monitoring tasks.
 func (s *Scheduler) monitor() {
 	ticker := time.NewTicker(1 * time.Minute)
@@ -748,7 +781,6 @@ func (s *Scheduler) prepareJobForWrite(job *ScheduledJob) error {
 	}
 	job.Name = strings.TrimSpace(job.Name)
 	job.Schedule = strings.TrimSpace(job.Schedule)
-	job.WorkflowProfile = strings.TrimSpace(job.WorkflowProfile)
 	job.Timezone = NormalizeTimezone(job.Timezone)
 	if job.MaxRetries <= 0 {
 		job.MaxRetries = 1
@@ -895,6 +927,16 @@ func (s *Scheduler) restoreJobSnapshot(jobID string, snapshot *ScheduledJob) err
 	restored := cloneScheduledJob(snapshot)
 	s.jobs[jobID] = restored
 	return s.attachJobToCron(restored)
+}
+
+func (s *Scheduler) nextAvailableScheduledJobID() (string, error) {
+	for attempt := 0; attempt < 128; attempt++ {
+		candidate := GenerateScheduledJobID()
+		if _, exists := s.jobs[candidate]; !exists {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("failed to generate unique scheduled job id")
 }
 
 // TestCronExpression tests if a cron expression is valid.

@@ -12,6 +12,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 	"image/color"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -19,6 +20,11 @@ import (
 type SmartDashboard struct {
 	ui        *Gui
 	presenter *GuiPresenter
+
+	serverStatusLabel    *canvas.Text
+	serverPIDLabel       *widget.Label
+	serverToggleButton   *SecondaryButton
+	serverToggleInFlight int32
 }
 
 // NewSmartDashboard creates a new smart dashboard
@@ -42,25 +48,6 @@ func (d *SmartDashboard) CreateContent() fyne.CanvasObject {
 	// Statistics and insights
 	insights := d.createInsights()
 
-	// Refresh button pinned to page bottom
-	refreshBtn := widget.NewButtonWithIcon("Refresh", theme.ViewRefreshIcon(), func() {
-		d.ui.app.Events.Dispatch(events.Infof("dashboard", "Dashboard refresh requested"))
-		d.presenter.HandleRefreshStatus()
-		// Refresh the dashboard
-		if d.ui.tabs != nil {
-			d.ui.RefreshHomeTab()
-		}
-	})
-	refreshBtn.Importance = widget.HighImportance
-	refreshBtnWrapper := container.New(
-		layout.NewGridWrapLayout(fyne.NewSize(220, refreshBtn.MinSize().Height)),
-		refreshBtn,
-	)
-	footer := container.NewVBox(
-		widget.NewSeparator(),
-		container.NewCenter(refreshBtnWrapper),
-	)
-
 	// Show recent activity in the details panel on load (if UI is fully initialized)
 	if d.ui.rightPaneContent != nil {
 		d.showRecentActivityInDetails()
@@ -75,7 +62,7 @@ func (d *SmartDashboard) CreateContent() fyne.CanvasObject {
 
 	return container.NewVScroll(container.NewBorder(
 		header,
-		footer,
+		nil,
 		nil, nil,
 		mainContent, // Remove padding to reduce height
 	))
@@ -137,22 +124,62 @@ func (d *SmartDashboard) createStatusCards() fyne.CanvasObject {
 		[]fyne.CanvasObject{widget.NewLabel(dbStatusDetail)},
 	)
 
-	// Server Status Card
-	pid, serverRunning := d.ui.app.Server.GetServerStatus()
-	serverHeadline := "Stopped"
-	var serverStatusDetail string
-	if serverRunning {
-		serverHeadline = "Running"
-		serverStatusDetail = fmt.Sprintf("Running (PID: %d)", pid)
-	} else {
-		serverStatusDetail = "Stopped"
+	// Server Status Card (kept as live-updated widget references)
+	d.serverStatusLabel = canvas.NewText("Stopped", d.themeColor(StatusNegativeColorName))
+	d.serverStatusLabel.Alignment = fyne.TextAlignTrailing
+	d.serverStatusLabel.TextStyle = fyne.TextStyle{Bold: true}
+	d.serverStatusLabel.TextSize = theme.TextSize()
+	d.serverPIDLabel = widget.NewLabel("PID: -")
+
+	toggleServer := func(stopServer bool) {
+		if !atomic.CompareAndSwapInt32(&d.serverToggleInFlight, 0, 1) {
+			return
+		}
+		defer func() {
+			atomic.StoreInt32(&d.serverToggleInFlight, 0)
+			d.RefreshDashboard()
+		}()
+
+		if d.serverToggleButton != nil {
+			d.serverToggleButton.Disable()
+		}
+
+		if stopServer {
+			d.presenter.HandleStopServer()
+			return
+		}
+		d.presenter.HandleStartServer()
 	}
 
-	serverCard := d.createConnectionCard(
+	d.serverToggleButton = NewSecondaryButton("Start Server", theme.MediaPlayIcon(), func() {
+		_, running := d.ui.app.Server.GetServerStatus()
+		if running {
+			d.ui.ShowConfirmDialog(
+				"Stop Server",
+				"The server is active and serving health checks. Stop it now?",
+				func(confirm bool) {
+					if !confirm {
+						return
+					}
+					toggleServer(true)
+				},
+			)
+			return
+		}
+		toggleServer(false)
+	})
+	d.serverToggleButton.VerticalPadding = theme.Padding() * 0.45
+	serverControls := container.NewHBox(
+		d.serverPIDLabel,
+		layout.NewSpacer(),
+		d.serverToggleButton,
+	)
+	d.refreshServerStatusCard()
+
+	serverCard := d.createConnectionCardWithStatusLabel(
 		"Server",
-		serverHeadline,
-		serverRunning,
-		[]fyne.CanvasObject{widget.NewLabel(serverStatusDetail)},
+		d.serverStatusLabel,
+		[]fyne.CanvasObject{serverControls},
 	)
 
 	return container.NewGridWithColumns(3, apiCard, dbCard, serverCard)
@@ -169,6 +196,17 @@ func (d *SmartDashboard) createConnectionCard(title, statusText string, isHealth
 	statusLabel.Alignment = fyne.TextAlignTrailing
 	statusLabel.TextStyle = fyne.TextStyle{Bold: true}
 	statusLabel.TextSize = theme.TextSize()
+
+	return d.createConnectionCardWithStatusLabel(title, statusLabel, details)
+}
+
+func (d *SmartDashboard) createConnectionCardWithStatusLabel(title string, statusLabel *canvas.Text, details []fyne.CanvasObject) fyne.CanvasObject {
+	if statusLabel == nil {
+		statusLabel = canvas.NewText("-", theme.ForegroundColor())
+		statusLabel.Alignment = fyne.TextAlignTrailing
+		statusLabel.TextStyle = fyne.TextStyle{Bold: true}
+		statusLabel.TextSize = theme.TextSize()
+	}
 
 	titleLabel := widget.NewLabelWithStyle(title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 
@@ -197,6 +235,41 @@ func (d *SmartDashboard) createConnectionCard(title, statusText string, isHealth
 	padded := container.NewPadded(content)
 
 	return container.NewStack(background, padded)
+}
+
+func (d *SmartDashboard) refreshServerStatusCard() {
+	if d == nil || d.ui == nil || d.ui.app == nil || d.ui.app.Server == nil {
+		return
+	}
+	if d.serverStatusLabel == nil || d.serverPIDLabel == nil || d.serverToggleButton == nil {
+		return
+	}
+
+	pid, serverRunning := d.ui.app.Server.GetServerStatus()
+	if serverRunning {
+		d.serverStatusLabel.Text = "Running"
+		d.serverStatusLabel.Color = d.themeColor(StatusPositiveColorName)
+		d.serverPIDLabel.SetText(fmt.Sprintf("PID: %d", pid))
+		d.serverToggleButton.SetText("Stop Server")
+		d.serverToggleButton.SetIcon(theme.NewColoredResource(theme.MediaStopIcon(), ServerActionStopColorName))
+		d.serverToggleButton.TextColor = d.themeColor(ServerActionStopColorName)
+	} else {
+		d.serverStatusLabel.Text = "Stopped"
+		d.serverStatusLabel.Color = d.themeColor(StatusNegativeColorName)
+		d.serverPIDLabel.SetText("PID: -")
+		d.serverToggleButton.SetText("Start Server")
+		d.serverToggleButton.SetIcon(theme.NewColoredResource(theme.MediaPlayIcon(), ServerActionStartColorName))
+		d.serverToggleButton.TextColor = d.themeColor(ServerActionStartColorName)
+	}
+
+	if atomic.LoadInt32(&d.serverToggleInFlight) == 0 {
+		d.serverToggleButton.Enable()
+	} else {
+		d.serverToggleButton.Disable()
+	}
+	canvas.Refresh(d.serverStatusLabel)
+	d.serverPIDLabel.Refresh()
+	d.serverToggleButton.Refresh()
 }
 
 // showRecentActivityInDetails displays recent activity in the details panel
@@ -693,6 +766,9 @@ func coarseDuration(d time.Duration) string {
 
 // RefreshDashboard updates all dashboard components with latest data
 func (d *SmartDashboard) RefreshDashboard() {
-	// This would refresh all components with latest data
-	d.ui.app.Events.Dispatch(events.Debugf("dashboard", "Refreshing dashboard"))
+	if d == nil || d.ui == nil || d.ui.app == nil {
+		return
+	}
+	d.ui.app.Events.Dispatch(events.Debugf("dashboard", "Refreshing dashboard widgets in place"))
+	d.refreshServerStatusCard()
 }

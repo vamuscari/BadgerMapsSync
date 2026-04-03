@@ -67,6 +67,9 @@ func createRootCmd() *cobra.Command {
 		},
 	}
 
+	rootCmd.SetOut(utils.StdoutWriter())
+	rootCmd.SetErr(utils.StderrWriter())
+
 	// Create and add commands
 	pullCmd := pull.PullCmd(App)
 	pushCmd := push.PushCmd(App)
@@ -95,6 +98,8 @@ func main() {
 	// Initialize the core application
 	App = app.NewApp()
 	defer App.Close()
+
+	prepareConsoleForCLI(os.Args[1:])
 
 	utils.InitColors(App.State)
 	if App.DB != nil {

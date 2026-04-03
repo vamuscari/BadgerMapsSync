@@ -12,6 +12,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 	xwidget "fyne.io/x/fyne/widget"
 	"github.com/guregu/null/v6"
+	"image/color"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -65,6 +66,332 @@ type SyncCenter struct {
 	currentRecord int
 	syncGate      int32
 	lastDetail    string
+
+	serverStatusLabel *canvas.Text
+}
+
+type serverControlVisualState struct {
+	StatusLabel     string
+	ActionLabel     string
+	StatusColorName fyne.ThemeColorName
+	ActionColorName fyne.ThemeColorName
+}
+
+func resolveServerControlVisualState(running bool) serverControlVisualState {
+	if running {
+		return serverControlVisualState{
+			StatusLabel:     "Running",
+			ActionLabel:     "Stop",
+			StatusColorName: StatusPositiveColorName,
+			ActionColorName: StatusNegativeColorName,
+		}
+	}
+	return serverControlVisualState{
+		StatusLabel:     "Stopped",
+		ActionLabel:     "Start",
+		StatusColorName: StatusNegativeColorName,
+		ActionColorName: StatusPositiveColorName,
+	}
+}
+
+func neutralServerControlVisualState() serverControlVisualState {
+	return serverControlVisualState{
+		StatusLabel:     "Unknown",
+		ActionLabel:     "Checking...",
+		StatusColorName: StatusCardBackgroundColorName,
+		ActionColorName: StatusCardBackgroundColorName,
+	}
+}
+
+type splitPillServerControl struct {
+	widget.BaseWidget
+
+	statusText        string
+	actionText        string
+	statusTextColor   color.Color
+	actionTextColor   color.Color
+	statusBackground  color.Color
+	actionBackground  color.Color
+	borderColor       color.Color
+	actionEnabled     bool
+	onActionRequested func()
+}
+
+const (
+	splitPillInset          float32 = 1
+	splitPillDividerWidth   float32 = 1
+	splitPillMinStatusWidth float32 = 92
+	splitPillMinActionWidth float32 = 80
+)
+
+func newSplitPillServerControl() *splitPillServerControl {
+	ctrl := &splitPillServerControl{
+		statusText:       "Unknown",
+		actionText:       "Checking...",
+		statusTextColor:  theme.ForegroundColor(),
+		actionTextColor:  theme.ForegroundColor(),
+		statusBackground: theme.ButtonColor(),
+		actionBackground: theme.ButtonColor(),
+		borderColor:      theme.SeparatorColor(),
+		actionEnabled:    false,
+	}
+	ctrl.ExtendBaseWidget(ctrl)
+	return ctrl
+}
+
+func (c *splitPillServerControl) SetState(
+	statusText string,
+	actionText string,
+	statusBackground color.Color,
+	actionBackground color.Color,
+	statusTextColor color.Color,
+	actionTextColor color.Color,
+	borderColor color.Color,
+	actionEnabled bool,
+) {
+	c.statusText = statusText
+	c.actionText = actionText
+	c.statusBackground = statusBackground
+	c.actionBackground = actionBackground
+	c.statusTextColor = statusTextColor
+	c.actionTextColor = actionTextColor
+	c.borderColor = borderColor
+	c.actionEnabled = actionEnabled
+	c.Refresh()
+}
+
+func (c *splitPillServerControl) SetOnActionRequested(handler func()) {
+	c.onActionRequested = handler
+}
+
+func (c *splitPillServerControl) CreateRenderer() fyne.WidgetRenderer {
+	border := canvas.NewRectangle(color.NRGBA{A: 0})
+	border.StrokeWidth = 1
+	border.CornerRadius = theme.InputRadiusSize()
+	statusBackground := canvas.NewRectangle(theme.ButtonColor())
+	actionBackground := canvas.NewRectangle(theme.ButtonColor())
+	statusCap := canvas.NewCircle(theme.ButtonColor())
+	actionCap := canvas.NewCircle(theme.ButtonColor())
+	divider := canvas.NewRectangle(theme.SeparatorColor())
+	statusLabel := canvas.NewText("", theme.ForegroundColor())
+	statusLabel.TextStyle = fyne.TextStyle{Bold: true}
+	actionLabel := canvas.NewText("", theme.ForegroundColor())
+	actionLabel.TextStyle = fyne.TextStyle{Bold: true}
+
+	r := &splitPillServerControlRenderer{
+		control:          c,
+		border:           border,
+		statusBackground: statusBackground,
+		actionBackground: actionBackground,
+		statusCap:        statusCap,
+		actionCap:        actionCap,
+		divider:          divider,
+		statusLabel:      statusLabel,
+		actionLabel:      actionLabel,
+	}
+	r.objects = []fyne.CanvasObject{border, statusBackground, actionBackground, statusCap, actionCap, divider, statusLabel, actionLabel}
+	r.Refresh()
+	return r
+}
+
+func (c *splitPillServerControl) Tapped(pe *fyne.PointEvent) {
+	if !c.actionEnabled || c.onActionRequested == nil {
+		return
+	}
+	size := c.Size()
+	if size.Width <= 0 {
+		return
+	}
+	actionStart := splitPillActionStartX(size.Width)
+	if pe.Position.X < actionStart {
+		return
+	}
+	c.onActionRequested()
+}
+
+func (c *splitPillServerControl) TappedSecondary(*fyne.PointEvent) {}
+
+type splitPillServerControlRenderer struct {
+	control          *splitPillServerControl
+	border           *canvas.Rectangle
+	statusBackground *canvas.Rectangle
+	actionBackground *canvas.Rectangle
+	statusCap        *canvas.Circle
+	actionCap        *canvas.Circle
+	divider          *canvas.Rectangle
+	statusLabel      *canvas.Text
+	actionLabel      *canvas.Text
+	objects          []fyne.CanvasObject
+}
+
+func (r *splitPillServerControlRenderer) Layout(size fyne.Size) {
+	if size.Width <= 0 || size.Height <= 0 {
+		return
+	}
+
+	r.border.Resize(size)
+	r.border.Move(fyne.NewPos(0, 0))
+
+	innerWidth := size.Width - (splitPillInset * 2)
+	innerHeight := size.Height - (splitPillInset * 2)
+	if innerWidth <= 0 || innerHeight <= 0 {
+		return
+	}
+
+	splitX := splitPillServerControlSplit(innerWidth)
+	statusWidth := splitX
+	actionWidth := innerWidth - splitX - splitPillDividerWidth
+	if statusWidth < 1 {
+		statusWidth = 1
+	}
+	if actionWidth < 1 {
+		actionWidth = 1
+	}
+
+	// Keep the rounded corners only on the outer edges.
+	capDiameter := innerHeight
+	statusRectStart := splitPillInset + capDiameter/2
+	statusRectWidth := statusWidth - capDiameter/2
+	if statusRectWidth < 0 {
+		statusRectWidth = 0
+	}
+	actionRectStart := splitPillInset + splitX + splitPillDividerWidth
+	actionRectWidth := actionWidth - capDiameter/2
+	if actionRectWidth < 0 {
+		actionRectWidth = 0
+	}
+
+	r.statusCap.Move(fyne.NewPos(splitPillInset, splitPillInset))
+	r.statusCap.Resize(fyne.NewSize(capDiameter, capDiameter))
+	r.actionCap.Move(fyne.NewPos(splitPillInset+innerWidth-capDiameter, splitPillInset))
+	r.actionCap.Resize(fyne.NewSize(capDiameter, capDiameter))
+
+	r.statusBackground.Move(fyne.NewPos(statusRectStart, splitPillInset))
+	r.statusBackground.Resize(fyne.NewSize(statusRectWidth, innerHeight))
+	r.divider.Move(fyne.NewPos(splitPillInset+splitX, splitPillInset))
+	r.divider.Resize(fyne.NewSize(splitPillDividerWidth, innerHeight))
+	r.actionBackground.Move(fyne.NewPos(actionRectStart, splitPillInset))
+	r.actionBackground.Resize(fyne.NewSize(actionRectWidth, innerHeight))
+
+	statusSize := r.statusLabel.MinSize()
+	r.statusLabel.Resize(statusSize)
+	r.statusLabel.Move(fyne.NewPos(
+		splitPillInset+(statusWidth-statusSize.Width)/2,
+		splitPillInset+(innerHeight-statusSize.Height)/2,
+	))
+	actionSize := r.actionLabel.MinSize()
+	r.actionLabel.Resize(actionSize)
+	r.actionLabel.Move(fyne.NewPos(
+		splitPillInset+splitX+splitPillDividerWidth+(actionWidth-actionSize.Width)/2,
+		splitPillInset+(innerHeight-actionSize.Height)/2,
+	))
+}
+
+func (r *splitPillServerControlRenderer) MinSize() fyne.Size {
+	statusSize := r.statusLabel.MinSize()
+	actionSize := r.actionLabel.MinSize()
+	width := statusSize.Width + actionSize.Width + theme.Padding()*6 + 3
+	minInteractiveWidth := (splitPillInset * 2) + splitPillDividerWidth + splitPillMinStatusWidth + splitPillMinActionWidth
+	if width < minInteractiveWidth {
+		width = minInteractiveWidth
+	}
+	height := statusSize.Height
+	if actionSize.Height > height {
+		height = actionSize.Height
+	}
+	height += theme.Padding() * 2
+	return fyne.NewSize(width, height)
+}
+
+func (r *splitPillServerControlRenderer) Refresh() {
+	r.statusLabel.Text = r.control.statusText
+	r.actionLabel.Text = r.control.actionText
+	r.statusLabel.Color = r.control.statusTextColor
+	r.actionLabel.Color = r.control.actionTextColor
+	r.statusBackground.FillColor = r.control.statusBackground
+	r.actionBackground.FillColor = r.control.actionBackground
+	r.statusCap.FillColor = r.control.statusBackground
+	r.actionCap.FillColor = r.control.actionBackground
+	r.divider.FillColor = r.control.borderColor
+	r.border.StrokeColor = r.control.borderColor
+
+	if !r.control.actionEnabled {
+		r.actionBackground.FillColor = theme.DisabledButtonColor()
+		r.actionCap.FillColor = theme.DisabledButtonColor()
+		r.actionLabel.Color = theme.DisabledColor()
+	}
+
+	r.Layout(r.control.Size())
+	canvas.Refresh(r.statusLabel)
+	canvas.Refresh(r.actionLabel)
+	r.statusCap.Refresh()
+	r.actionCap.Refresh()
+	r.statusBackground.Refresh()
+	r.actionBackground.Refresh()
+	r.divider.Refresh()
+	r.border.Refresh()
+}
+
+func (r *splitPillServerControlRenderer) Objects() []fyne.CanvasObject {
+	return r.objects
+}
+
+func (r *splitPillServerControlRenderer) Destroy() {}
+
+func splitPillServerControlSplit(width float32) float32 {
+	if width <= 0 {
+		return 0
+	}
+	split := width * 0.6
+	requiredMinWidth := splitPillMinStatusWidth + splitPillMinActionWidth + splitPillDividerWidth
+	if width >= requiredMinWidth {
+		if width-split < splitPillMinActionWidth {
+			split = width - splitPillMinActionWidth
+		}
+		if split < splitPillMinStatusWidth {
+			split = splitPillMinStatusWidth
+		}
+	} else {
+		// In very tight widths, keep a visible action area by preserving a ratio.
+		split = width * 0.58
+	}
+	if split > width-2 {
+		split = width - 2
+	}
+	if split < 1 {
+		split = 1
+	}
+	return split
+}
+
+func splitPillActionStartX(totalWidth float32) float32 {
+	if totalWidth <= 0 {
+		return 0
+	}
+	innerWidth := totalWidth - (splitPillInset * 2)
+	if innerWidth <= 0 {
+		return totalWidth
+	}
+	return splitPillInset + splitPillServerControlSplit(innerWidth) + splitPillDividerWidth
+}
+
+func serverControlThemeColor(ui *Gui, name fyne.ThemeColorName) color.Color {
+	switch name {
+	case StatusPositiveColorName, StatusNegativeColorName, StatusCardBackgroundColorName, StatusCardBorderColorName:
+		variant := theme.VariantDark
+		if ui != nil && ui.fyneApp != nil {
+			variant = ui.fyneApp.Settings().ThemeVariant()
+		}
+		return newModernThemeForVariant(variant).Color(name, variant)
+	}
+
+	if ui != nil {
+		if c := ui.themeColor(name); c != nil {
+			return c
+		}
+	}
+
+	return theme.ForegroundColor()
 }
 
 func NewSyncCenter(ui *Gui, presenter *GuiPresenter) *SyncCenter {
@@ -141,21 +468,34 @@ func NewSyncCenter(ui *Gui, presenter *GuiPresenter) *SyncCenter {
 	return sc
 }
 
+func (sc *SyncCenter) RefreshServerStatusLabel() {
+	if sc == nil || sc.serverStatusLabel == nil {
+		return
+	}
+
+	statusText := "Server: Unknown"
+	statusColor := theme.ForegroundColor()
+	if sc.ui != nil && sc.ui.app != nil && sc.ui.app.Server != nil {
+		pid, running := sc.ui.app.Server.GetServerStatus()
+		if running {
+			statusText = fmt.Sprintf("Server: Running (PID %d)", pid)
+			statusColor = sc.ui.themeColor(StatusPositiveColorName)
+		} else {
+			statusText = "Server: Stopped"
+			statusColor = sc.ui.themeColor(StatusNegativeColorName)
+		}
+	}
+
+	sc.serverStatusLabel.Text = statusText
+	sc.serverStatusLabel.Color = statusColor
+	canvas.Refresh(sc.serverStatusLabel)
+}
+
 // PushCard exposes the push card for external rendering (e.g., screenshots)
 func (sc *SyncCenter) PushCard() fyne.CanvasObject { return sc.pushCard }
 
 func (sc *SyncCenter) CreateContent() fyne.CanvasObject {
 	sc.controlsBody = container.NewVBox()
-
-	// Push card content: includes Pending Changes shortcut
-	pendingChangesRow := container.NewHBox(
-		widget.NewButtonWithIcon("Pending Changes", theme.NavigateNextIcon(), func() {
-			if !sc.ui.OpenExplorerPendingChanges() {
-				sc.ui.app.Events.Dispatch(events.Debugf("sync_center", "unable to navigate to pending changes"))
-			}
-		}),
-		layout.NewSpacer(),
-	)
 
 	sc.controlsCard = sc.ui.newSectionCard(
 		"Pull",
@@ -171,29 +511,57 @@ func (sc *SyncCenter) CreateContent() fyne.CanvasObject {
 		"Push pending changes to BadgerMaps",
 		container.NewVBox(
 			sc.pushBody,
-			widget.NewSeparator(),
-			pendingChangesRow,
 		),
 	)
 	sc.rebuildControlsLayout()
 	sc.rebuildPushLayout()
 	sc.applyStoredDetail()
 
+	sc.serverStatusLabel = canvas.NewText("Server: Unknown", theme.ForegroundColor())
+	sc.serverStatusLabel.TextStyle = fyne.TextStyle{Bold: true}
+	sc.serverStatusLabel.TextSize = theme.TextSize()
+	sc.RefreshServerStatusLabel()
+
 	syncHistoryButton := widget.NewButtonWithIcon("Sync History", theme.NavigateNextIcon(), func() {
 		if !sc.ui.OpenExplorerTable("SyncHistory") {
 			sc.ui.app.Events.Dispatch(events.Debugf("sync_center", "unable to navigate to sync history"))
 		}
 	})
+	pendingChangesButton := widget.NewButtonWithIcon("Pending Changes", theme.NavigateNextIcon(), func() {
+		if !sc.ui.OpenExplorerPendingChanges() {
+			sc.ui.app.Events.Dispatch(events.Debugf("sync_center", "unable to navigate to pending changes"))
+		}
+	})
+	toolsTabs := container.NewAppTabs(
+		container.NewTabItemWithIcon("Pull", theme.DownloadIcon(), sc.controlsCard),
+		container.NewTabItemWithIcon("Push", theme.UploadIcon(), sc.pushCard),
+		container.NewTabItemWithIcon("Navigation", theme.NavigateNextIcon(), container.NewVBox(
+			syncHistoryButton,
+			pendingChangesButton,
+		)),
+	)
+	toolsCard := sc.ui.newSectionCard(
+		"Additional Tools",
+		"Manual sync actions and explorer shortcuts.",
+		toolsTabs,
+	)
 
 	title := canvas.NewText("Sync Center", theme.ForegroundColor())
 	title.TextStyle = fyne.TextStyle{Bold: true}
 	title.TextSize = theme.TextSize() + 4
 
-	header := container.NewBorder(nil, nil, nil, syncHistoryButton, container.NewHBox(title))
+	headerControls := container.NewVBox(
+		NewSpacer(fyne.NewSize(0, theme.Padding()*0.5)),
+		container.NewHBox(
+			sc.serverStatusLabel,
+			NewSpacer(fyne.NewSize(theme.Padding()*2, 0)),
+		),
+	)
+	header := container.NewBorder(nil, nil, nil, headerControls, container.NewHBox(title))
 
 	content := container.NewVScroll(container.NewVBox(
-		sc.controlsCard,
-		sc.pushCard,
+		sc.ui.createScheduledJobsSection(),
+		toolsCard,
 	))
 
 	return container.NewBorder(header, nil, nil, nil, content)
@@ -264,7 +632,7 @@ func (sc *SyncCenter) updateActionLabel() {
 	text := "Run"
 	switch sc.currentType {
 	case syncKindAll:
-		text = "Sync Everything"
+		text = "Pull All"
 	case syncKindUser:
 		text = "Pull User Profile"
 	case syncKindAccounts:

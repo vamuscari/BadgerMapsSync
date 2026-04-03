@@ -1,6 +1,7 @@
 package server
 
 import (
+	"badgermaps/app/action"
 	"badgermaps/app/state"
 	"os"
 	"path/filepath"
@@ -213,6 +214,107 @@ func TestRunScheduledJobFailurePreservesLastSuccess(t *testing.T) {
 	if !preserved.Equal(lastSuccess) {
 		t.Fatalf("expected LastSuccess %s, got %s", lastSuccess, preserved.Format(time.RFC3339Nano))
 	}
+}
+
+func TestRunScheduledJobPreservesNonZeroNextRunWhenCronNotStarted(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.yaml")
+
+	st := state.NewState()
+	*st.ConfigFile = configPath
+
+	s := NewScheduler(st, nil, nil, nil, nil, nil, nil, nil, "")
+
+	job := &ScheduledJob{
+		ID:       "job_next_run_non_zero",
+		Name:     "Next Run Non-Zero",
+		Schedule: "0 0 * * * *",
+		Steps: []WorkflowStep{
+			{
+				ID:   "action_echo",
+				Type: WorkflowStepTypeAction,
+				Action: action.ActionConfig{
+					Type: "exec",
+					Args: map[string]interface{}{
+						"command": "echo scheduler-next-run",
+					},
+				},
+			},
+		},
+		Enabled: true,
+	}
+
+	if err := s.prepareJobForWrite(job); err != nil {
+		t.Fatalf("failed to prepare scheduled job: %v", err)
+	}
+	if err := s.attachJobToCron(job); err != nil {
+		t.Fatalf("failed to attach scheduled job: %v", err)
+	}
+	if job.NextRun == nil || job.NextRun.IsZero() {
+		t.Fatal("expected initial next run to be populated")
+	}
+	s.jobs[job.ID] = job
+
+	if err := s.runScheduledJob(job.ID); err != nil {
+		t.Fatalf("expected scheduled job run to succeed, got %v", err)
+	}
+
+	updated := s.jobs[job.ID]
+	if updated.NextRun == nil {
+		t.Fatal("expected next run to stay populated after manual run")
+	}
+	if updated.NextRun.IsZero() {
+		t.Fatal("expected non-zero next run after manual run")
+	}
+}
+
+func TestQueueStoredJobNowLoadsJobsFromPersistence(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.yaml")
+
+	st := state.NewState()
+	*st.ConfigFile = configPath
+
+	persisted := map[string]*ScheduledJob{
+		"job_queue_persisted": {
+			ID:       "job_queue_persisted",
+			Name:     "Queue Persisted Job",
+			Schedule: "0 0 * * * *",
+			Steps: []WorkflowStep{
+				{
+					ID:   "action_echo",
+					Type: WorkflowStepTypeAction,
+					Action: action.ActionConfig{
+						Type: "exec",
+						Args: map[string]interface{}{
+							"command": "echo queued-from-store",
+						},
+					},
+				},
+			},
+			Enabled: true,
+		},
+	}
+	if err := SaveScheduledJobs(st, persisted); err != nil {
+		t.Fatalf("failed to seed persisted scheduled jobs: %v", err)
+	}
+
+	queue := NewSyncJobCoordinator(st, nil)
+	defer queue.Stop()
+
+	s := NewScheduler(st, nil, nil, nil, nil, nil, queue, nil, "")
+	if err := s.QueueStoredJobNow("job_queue_persisted"); err != nil {
+		t.Fatalf("expected persisted job queueing to succeed, got %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(queue.ListJobs()) > 0 {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("expected queue entry after QueueStoredJobNow")
 }
 
 type failingSchedulerSyncExecutor struct{}

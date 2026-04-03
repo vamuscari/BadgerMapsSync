@@ -3,6 +3,7 @@ package server
 import (
 	"badgermaps/api"
 	"badgermaps/app"
+	"badgermaps/app/action"
 	appserver "badgermaps/app/server"
 	"badgermaps/app/state"
 	"badgermaps/database"
@@ -273,6 +274,164 @@ func TestHandleInternalSyncJobsIncludesCurrentAction(t *testing.T) {
 
 	close(runGate)
 	waitForQueueJobStatus(t, queue, job.ID, appserver.SyncJobCompleted)
+}
+
+func TestHandleInternalScheduledJobRunMethodGuard(t *testing.T) {
+	a := app.NewApp()
+	presenter := NewCliPresenter(a)
+	req := httptest.NewRequest(http.MethodGet, "/internal/scheduled-jobs/run", nil)
+	rr := httptest.NewRecorder()
+
+	presenter.HandleInternalScheduledJobRun(rr, req)
+
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected status %d, got %d", http.StatusMethodNotAllowed, rr.Code)
+	}
+}
+
+func TestHandleInternalScheduledJobRunMissingJobID(t *testing.T) {
+	a := app.NewApp()
+	*a.State.ConfigFile = filepath.Join(t.TempDir(), "config.yaml")
+
+	presenter := NewCliPresenter(a)
+	queue := appserver.NewSyncJobCoordinator(a.State, a.Events)
+	defer queue.Stop()
+	presenter.syncQueue = queue
+
+	scheduler := appserver.NewScheduler(
+		a.State,
+		nil,
+		nil,
+		a.Events,
+		nil,
+		nil,
+		queue,
+		a.Config.WorkflowProfiles,
+		a.Config.Server.Timezone,
+	)
+	if err := scheduler.Start(); err != nil {
+		t.Fatalf("failed to start scheduler: %v", err)
+	}
+	defer scheduler.Stop()
+	presenter.scheduler = scheduler
+
+	req := httptest.NewRequest(http.MethodPost, "/internal/scheduled-jobs/run", bytes.NewBufferString(`{}`))
+	rr := httptest.NewRecorder()
+
+	presenter.HandleInternalScheduledJobRun(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rr.Code)
+	}
+}
+
+func TestHandleInternalScheduledJobRunUnknownJob(t *testing.T) {
+	a := app.NewApp()
+	*a.State.ConfigFile = filepath.Join(t.TempDir(), "config.yaml")
+
+	presenter := NewCliPresenter(a)
+	queue := appserver.NewSyncJobCoordinator(a.State, a.Events)
+	defer queue.Stop()
+	presenter.syncQueue = queue
+
+	scheduler := appserver.NewScheduler(
+		a.State,
+		nil,
+		nil,
+		a.Events,
+		nil,
+		nil,
+		queue,
+		a.Config.WorkflowProfiles,
+		a.Config.Server.Timezone,
+	)
+	if err := scheduler.Start(); err != nil {
+		t.Fatalf("failed to start scheduler: %v", err)
+	}
+	defer scheduler.Stop()
+	presenter.scheduler = scheduler
+
+	reqBody := bytes.NewBufferString(`{"job_id":"job_missing"}`)
+	req := httptest.NewRequest(http.MethodPost, "/internal/scheduled-jobs/run", reqBody)
+	rr := httptest.NewRecorder()
+
+	presenter.HandleInternalScheduledJobRun(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, rr.Code)
+	}
+}
+
+func TestHandleInternalScheduledJobRunQueuesJob(t *testing.T) {
+	a := app.NewApp()
+	*a.State.ConfigFile = filepath.Join(t.TempDir(), "config.yaml")
+
+	jobs := map[string]*appserver.ScheduledJob{
+		"job_run_now": {
+			ID:       "job_run_now",
+			Name:     "Run Now Test",
+			Schedule: "0 0 * * * *",
+			Steps: []appserver.WorkflowStep{
+				{
+					ID:   "action_echo",
+					Type: appserver.WorkflowStepTypeAction,
+					Action: action.ActionConfig{
+						Type: "exec",
+						Args: map[string]interface{}{
+							"command": "echo run-now",
+						},
+					},
+				},
+			},
+			Enabled: true,
+		},
+	}
+	if err := appserver.SaveScheduledJobs(a.State, jobs); err != nil {
+		t.Fatalf("failed to seed scheduled jobs: %v", err)
+	}
+
+	presenter := NewCliPresenter(a)
+	queue := appserver.NewSyncJobCoordinator(a.State, a.Events)
+	defer queue.Stop()
+	presenter.syncQueue = queue
+
+	scheduler := appserver.NewScheduler(
+		a.State,
+		nil,
+		nil,
+		a.Events,
+		nil,
+		nil,
+		queue,
+		a.Config.WorkflowProfiles,
+		a.Config.Server.Timezone,
+	)
+	if err := scheduler.Start(); err != nil {
+		t.Fatalf("failed to start scheduler: %v", err)
+	}
+	defer scheduler.Stop()
+	presenter.scheduler = scheduler
+
+	reqBody := bytes.NewBufferString(`{"job_id":"job_run_now"}`)
+	req := httptest.NewRequest(http.MethodPost, "/internal/scheduled-jobs/run", reqBody)
+	rr := httptest.NewRecorder()
+
+	presenter.HandleInternalScheduledJobRun(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d", http.StatusAccepted, rr.Code)
+	}
+
+	var response appserver.ScheduledJobRunResponse
+	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
+		t.Fatalf("failed to decode scheduled job run response: %v", err)
+	}
+	if response.JobID != "job_run_now" {
+		t.Fatalf("expected job id %q, got %q", "job_run_now", response.JobID)
+	}
+	if response.Status != "queued" {
+		t.Fatalf("expected response status %q, got %q", "queued", response.Status)
+	}
 }
 
 func waitForQueueJobStatus(t *testing.T, queue *appserver.SyncJobCoordinator, jobID string, expected appserver.SyncJobStatus) {

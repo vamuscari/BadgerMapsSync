@@ -11,7 +11,7 @@ The server and scheduler now support explicit timezone handling end-to-end:
 - A global server timezone can be configured with `server.timezone` (IANA format, for example `America/New_York`).
 - Each scheduled job can optionally define its own timezone override.
 - Sync history now stores timezone context for start and completion timestamps.
-- Server runtime now exposes a jobs snapshot endpoint used by the GUI Server tab.
+- Server runtime now exposes a jobs snapshot endpoint used by the GUI Sync Center and the right-pane `Jobs` monitor.
 
 ## Server Timezone Configuration
 
@@ -30,7 +30,7 @@ server:
 
 Ways to configure:
 
-- GUI: Server tab, `Global Timezone (IANA)`.
+- GUI: Configuration tab, `Global Timezone (IANA)`.
 - CLI: `./badgermaps server setup` prompts for `Global Timezone (IANA, optional)`.
 - Direct YAML edit: set `server.timezone` in `config.yaml`.
 
@@ -77,7 +77,7 @@ The runtime payload includes:
 - Per-job `current_action` when a sync job is actively executing a stage.
 - Activity-level `active_job_action` for quick status display.
 
-The GUI Server tab uses these endpoints to show active, queued, and recent jobs. The right-pane slide-out `Jobs` section uses the same endpoint and focuses on active and queued jobs with live action updates while running. Access is restricted to local requests.
+The GUI Sync Center uses these endpoints to show active, queued, and recent jobs. The right-pane slide-out `Jobs` section uses the same endpoint and focuses on active and queued jobs with live action updates while running. Access is restricted to local requests.
 
 ## Sync History Timezone Fields
 

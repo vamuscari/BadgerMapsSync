@@ -2,6 +2,8 @@ package events
 
 import (
 	"badgermaps/app/state"
+	"badgermaps/utils"
+	"bytes"
 	"io/ioutil"
 	"os"
 	"strings"
@@ -80,5 +82,39 @@ func TestLogListener_FileLogging_NonDebugWritesOnlyErrors(t *testing.T) {
 	}
 	if strings.Contains(logText, "debug message") {
 		t.Errorf("Expected file log to exclude debug messages. Got: %s", logText)
+	}
+}
+
+func TestLogListener_UsesSharedConsoleWriter(t *testing.T) {
+	s := state.NewState()
+	listener, err := NewLogListener(s, "")
+	if err != nil {
+		t.Fatalf("Failed to create log listener: %v", err)
+	}
+	defer listener.Close()
+
+	if listener.consoleWriter != utils.StdoutWriter() {
+		t.Fatalf("expected console writer to use shared stdout writer")
+	}
+}
+
+func TestLogListener_ConsoleOutputLineTermination(t *testing.T) {
+	s := state.NewState()
+	listener, err := NewLogListener(s, "")
+	if err != nil {
+		t.Fatalf("Failed to create log listener: %v", err)
+	}
+	defer listener.Close()
+
+	var buf bytes.Buffer
+	listener.consoleWriter = &buf
+	listener.Handle(Infof("test_source", "line ending check"))
+
+	got := buf.String()
+	if !strings.HasSuffix(got, "\n") {
+		t.Fatalf("expected log output to end with newline, got: %q", got)
+	}
+	if !strings.Contains(got, "line ending check") {
+		t.Fatalf("expected console output to contain message, got: %q", got)
 	}
 }

@@ -24,11 +24,9 @@ The application includes a graphical user interface (GUI) built with the Fyne to
 
 ### GUI Features
 
-- **Pull**: Pull data from the BadgerMaps API, either all at once or by specific IDs.
-- **Push**: Push local changes to the BadgerMaps API.
+- **Sync Center**: Run manual pull/push actions, manage scheduled jobs, and start/stop the embedded server with runtime job visibility.
 - **Explorer**: A database explorer to view the contents of the local database. Supports per-column menus (sort/filter), resizable columns, and quick presets.
-- **Server**: Configure and start the webhook server (host/port, global timezone, TLS, request logging) and view active/queued jobs.
-- **Configuration**: Configure API credentials, database settings, and application preferences.
+- **Configuration**: Configure API credentials, database settings, server settings (host/port/timezone/TLS/logging), webhook routing, and application preferences.
 - **Debug**: Inspect debug information.
 - **Log View + Details + Jobs**: Real-time logs, details, and active/queued server jobs in the right-pane slide-out.
 
@@ -47,7 +45,6 @@ Below are example views using dummy data. If the images don’t render in your e
 | Sync Center — Pull | ![Sync Pull](assets/screenshots/sync-pull.png) |
 | Sync Center — Push | ![Sync Push](assets/screenshots/sync-push.png) |
 | Explorer — Accounts | ![Explorer Accounts](assets/screenshots/explorer-accounts.png) |
-| Server | ![Server](assets/screenshots/server.png) |
 
 > Tip: All images are referenced from `assets/screenshots/`. You can replace them with your own screenshots or generate demo screenshots by following the steps below.
 
@@ -176,7 +173,6 @@ Then capture the following views and save them under `assets/screenshots/` with 
 - `sync-pull.png` — Sync Center (Pull)
 - `sync-push.png` — Sync Center (Push)
 - `explorer-accounts.png` — Explorer showing Accounts table
-- `server.png` — Server tab
 
 These filenames are already referenced by the README table above.
 
@@ -194,7 +190,7 @@ SCALE=3 go run scripts/generate_screenshots.go
 ```
 
 - Outputs are written to `assets/screenshots/`:
-  - `home.png`, `config.png`, `sync-pull.png`, `sync-push.png`, `explorer-accounts.png`, `server.png`
+  - `home.png`, `config.png`, `sync-pull.png`, `sync-push.png`, `explorer-accounts.png`
 - The helper seeds a demo SQLite database at `assets/screenshots/demo.db` (git‑ignored).
 
 ## License

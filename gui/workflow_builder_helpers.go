@@ -15,7 +15,6 @@ import (
 const (
 	workflowEditorModeBuilder  = "Builder"
 	workflowEditorModeAdvanced = "Advanced JSON"
-	workflowProfileCustom      = "(custom)"
 
 	workflowActionTypeExec = "exec"
 	workflowActionTypeDB   = "db"
@@ -468,37 +467,24 @@ func nextWorkflowBuilderStepID(drafts []workflowBuilderDraftStep, draft workflow
 	return fmt.Sprintf("%s_%s", prefix, strings.ToUpper(strconv.FormatInt(time.Now().UnixNano(), 36)))
 }
 
-func applyWorkflowProfileTemplateSelection(currentProfile, selectedProfile string, currentSteps []appserver.WorkflowStep, profiles map[string]appserver.WorkflowProfile, confirmed bool) (string, []appserver.WorkflowStep, bool, error) {
-	currentProfile = strings.TrimSpace(currentProfile)
+func applyWorkflowProfileTemplateSelection(selectedProfile string, currentSteps []appserver.WorkflowStep, profiles map[string]appserver.WorkflowProfile, confirmed bool) ([]appserver.WorkflowStep, bool, error) {
 	selectedProfile = strings.TrimSpace(selectedProfile)
-
-	if selectedProfile == "" {
-		selectedProfile = workflowProfileCustom
-	}
-	if currentProfile == "" {
-		currentProfile = workflowProfileCustom
-	}
-
-	if selectedProfile == currentProfile {
-		return currentProfile, cloneWorkflowSteps(currentSteps), false, nil
-	}
-	if selectedProfile == workflowProfileCustom {
-		return workflowProfileCustom, cloneWorkflowSteps(currentSteps), false, nil
-	}
 	if !confirmed {
-		return currentProfile, cloneWorkflowSteps(currentSteps), false, nil
+		return cloneWorkflowSteps(currentSteps), false, nil
+	}
+	if selectedProfile == "" {
+		return cloneWorkflowSteps(currentSteps), false, nil
 	}
 
 	profile, ok := profiles[selectedProfile]
 	if !ok {
-		return currentProfile, cloneWorkflowSteps(currentSteps), false, fmt.Errorf("workflow profile %q not found", selectedProfile)
+		return cloneWorkflowSteps(currentSteps), false, fmt.Errorf("workflow profile %q not found", selectedProfile)
 	}
-	return selectedProfile, cloneWorkflowSteps(profile.Steps), true, nil
+	return cloneWorkflowSteps(profile.Steps), true, nil
 }
 
-func sortedWorkflowProfileOptions(profiles map[string]appserver.WorkflowProfile, selectedProfile string) []string {
-	options := make([]string, 0, len(profiles)+2)
-	options = append(options, workflowProfileCustom)
+func sortedWorkflowProfileOptions(profiles map[string]appserver.WorkflowProfile) []string {
+	options := make([]string, 0, len(profiles))
 	for name := range profiles {
 		name = strings.TrimSpace(name)
 		if name == "" {
@@ -506,11 +492,7 @@ func sortedWorkflowProfileOptions(profiles map[string]appserver.WorkflowProfile,
 		}
 		options = append(options, name)
 	}
-	selectedProfile = strings.TrimSpace(selectedProfile)
-	if selectedProfile != "" && selectedProfile != workflowProfileCustom && !containsString(options, selectedProfile) {
-		options = append(options, selectedProfile)
-	}
-	sort.Strings(options[1:])
+	sort.Strings(options)
 	return options
 }
 

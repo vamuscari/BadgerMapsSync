@@ -121,6 +121,54 @@ func TestFormatServerJobLineIncludesCurrentAction(t *testing.T) {
 	}
 }
 
+func TestFormatServerJobLineLabelsParentAndSubprocess(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("failed to load timezone: %v", err)
+	}
+
+	parent := &appserver.SyncJob{
+		ID:       "sync_parent",
+		Name:     "Nightly Workflow",
+		Source:   "scheduler",
+		Mode:     appserver.SyncModePull,
+		Kind:     appserver.SyncJobKindWorkflow,
+		Status:   appserver.SyncJobRunning,
+		QueuedAt: time.Date(2026, time.April, 2, 20, 0, 0, 0, time.UTC),
+	}
+	parentLine := formatServerJobLine(parent, loc)
+	if !strings.Contains(parentLine, "Parent: sync_parent (Nightly Workflow)") {
+		t.Fatalf("expected parent label with name, got %q", parentLine)
+	}
+	if strings.Contains(parentLine, "parent=") {
+		t.Fatalf("did not expect parent linkage on parent line, got %q", parentLine)
+	}
+
+	subprocess := &appserver.SyncJob{
+		ID:          "sync_child_1",
+		Name:        "Pull Accounts",
+		Source:      "scheduler",
+		Mode:        appserver.SyncModePullAccounts,
+		Kind:        appserver.SyncJobKindSync,
+		Status:      appserver.SyncJobRunning,
+		ParentJobID: "sync_parent",
+		StepID:      "pull_accounts",
+		StepIndex:   1,
+		TotalSteps:  3,
+		QueuedAt:    time.Date(2026, time.April, 2, 20, 1, 0, 0, time.UTC),
+	}
+	subprocessLine := formatServerJobLine(subprocess, loc)
+	if !strings.Contains(subprocessLine, "Subprocess: sync_child_1 (Pull Accounts)") {
+		t.Fatalf("expected subprocess label with name, got %q", subprocessLine)
+	}
+	if !strings.Contains(subprocessLine, "parent=sync_parent") {
+		t.Fatalf("expected parent linkage for subprocess, got %q", subprocessLine)
+	}
+	if !strings.Contains(subprocessLine, "step=1/3 (pull_accounts)") {
+		t.Fatalf("expected step metadata for subprocess, got %q", subprocessLine)
+	}
+}
+
 func TestFilterActiveAndQueuedJobs(t *testing.T) {
 	jobs := []*appserver.SyncJob{
 		{ID: "running", Status: appserver.SyncJobRunning},

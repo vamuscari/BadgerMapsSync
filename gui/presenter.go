@@ -618,7 +618,6 @@ func (p *GuiPresenter) HandlePushAll() {
 func (p *GuiPresenter) HandleSaveConfig(
 	apiKey, baseURL, dbType, dbPath, dbHost, dbPortStr, dbUser, dbPass, dbName string,
 	themePreference string,
-	verbose, debug bool,
 	maxConcurrentStr string,
 	parallelProcessing bool,
 	customCheckins bool,
@@ -629,7 +628,6 @@ func (p *GuiPresenter) HandleSaveConfig(
 	// Update API config in memory
 	p.app.Config.API.APIKey = apiKey
 	p.app.Config.API.BaseURL = baseURL
-	p.app.State.Debug = debug
 	p.app.Config.ThemePreference = app.NormalizeThemePreference(themePreference)
 
 	trimmedMax := strings.TrimSpace(maxConcurrentStr)
@@ -931,8 +929,9 @@ func (p *GuiPresenter) HandleStartServer() {
 	if err := p.app.Server.StartServer(); err != nil {
 		p.app.Events.Dispatch(events.Errorf("presenter", "Error starting server: %v", err))
 		p.view.ShowErrorDialog(err)
+		return
 	}
-	p.view.RefreshHomeTab()
+	p.app.Events.Dispatch(events.Event{Type: "server.status.changed", Source: "presenter"})
 }
 
 // HandleStopServer stops the webhook server.
@@ -940,8 +939,9 @@ func (p *GuiPresenter) HandleStopServer() {
 	if err := p.app.Server.StopServer(); err != nil {
 		p.app.Events.Dispatch(events.Errorf("presenter", "Error stopping server: %v", err))
 		p.view.ShowErrorDialog(err)
+		return
 	}
-	p.view.RefreshHomeTab()
+	p.app.Events.Dispatch(events.Event{Type: "server.status.changed", Source: "presenter"})
 }
 
 // HandleUpdateServerWebhooks persists the enabled webhook set.
@@ -967,6 +967,32 @@ func (p *GuiPresenter) HandleUpdateServerWebhooks(accountEnabled, checkinEnabled
 
 func (p *GuiPresenter) FetchServerJobsSnapshot() (*appserver.SyncJobListResponse, error) {
 	return syncproxy.FetchServerJobsSnapshot(p.app)
+}
+
+func (p *GuiPresenter) HandleRunScheduledJob(jobID string, jobName string) {
+	trimmedID := strings.TrimSpace(jobID)
+	if trimmedID == "" {
+		p.view.ShowToast("Error: Scheduled job ID is required.")
+		return
+	}
+
+	displayName := strings.TrimSpace(jobName)
+	if displayName == "" {
+		displayName = trimmedID
+	}
+
+	p.app.Events.Dispatch(events.Infof("presenter", "Queueing scheduled job '%s'...", displayName))
+	p.view.ShowToast(fmt.Sprintf("Queueing job '%s'...", displayName))
+
+	go func() {
+		if err := syncproxy.RunScheduledJobNow(p.app, trimmedID); err != nil {
+			p.app.Events.Dispatch(events.Errorf("presenter", "Failed to queue scheduled job '%s': %v", displayName, err))
+			p.view.ShowToast(fmt.Sprintf("Error: Failed to queue job '%s'.", displayName))
+			return
+		}
+		p.app.Events.Dispatch(events.Infof("presenter", "Queued scheduled job '%s'.", displayName))
+		p.view.ShowToast(fmt.Sprintf("Queued job '%s'.", displayName))
+	}()
 }
 
 // --- Status Handlers ---

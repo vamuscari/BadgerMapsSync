@@ -193,29 +193,23 @@ func TestApplyWorkflowProfileTemplateSelection(t *testing.T) {
 	}
 	currentSteps := []appserver.WorkflowStep{{ID: "custom", Type: appserver.WorkflowStepTypeSync, SyncMode: appserver.SyncModePushAccounts}}
 
-	profileAfterCancel, stepsAfterCancel, replaced, err := applyWorkflowProfileTemplateSelection("push_all", "pull_all", currentSteps, profiles, false)
+	stepsAfterCancel, replaced, err := applyWorkflowProfileTemplateSelection("pull_all", currentSteps, profiles, false)
 	if err != nil {
 		t.Fatalf("expected cancel path without error: %v", err)
 	}
 	if replaced {
 		t.Fatalf("expected no replacement when not confirmed")
 	}
-	if profileAfterCancel != "push_all" {
-		t.Fatalf("expected profile to remain unchanged, got %q", profileAfterCancel)
-	}
 	if !reflect.DeepEqual(stepsAfterCancel, currentSteps) {
 		t.Fatalf("expected steps unchanged on cancel, got %#v", stepsAfterCancel)
 	}
 
-	profileAfterConfirm, stepsAfterConfirm, replaced, err := applyWorkflowProfileTemplateSelection("push_all", "pull_all", currentSteps, profiles, true)
+	stepsAfterConfirm, replaced, err := applyWorkflowProfileTemplateSelection("pull_all", currentSteps, profiles, true)
 	if err != nil {
 		t.Fatalf("expected confirm path without error: %v", err)
 	}
 	if !replaced {
 		t.Fatalf("expected replacement when confirmed")
-	}
-	if profileAfterConfirm != "pull_all" {
-		t.Fatalf("expected profile to become pull_all, got %q", profileAfterConfirm)
 	}
 	if !reflect.DeepEqual(stepsAfterConfirm, profiles["pull_all"].Steps) {
 		t.Fatalf("expected steps from selected profile, got %#v", stepsAfterConfirm)

@@ -2,8 +2,13 @@ package syncproxy
 
 import (
 	"badgermaps/app"
+	"badgermaps/app/action"
+	appserver "badgermaps/app/server"
 	"badgermaps/app/state"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestServerBaseURLNormalizesWildcardHostsToLoopback(t *testing.T) {
@@ -39,5 +44,79 @@ func TestServerBaseURLFormatsIPv6LiteralAndTLS(t *testing.T) {
 
 	if got, want := serverBaseURL(a), "https://[::1]:9443"; got != want {
 		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestRunScheduledJobNowRejectsEmptyJobID(t *testing.T) {
+	a := app.NewApp()
+	err := RunScheduledJobNow(a, "   ")
+	if err == nil {
+		t.Fatal("expected error for empty job id")
+	}
+	if !strings.Contains(err.Error(), "job id is required") {
+		t.Fatalf("expected job id validation error, got %v", err)
+	}
+}
+
+func TestRunScheduledJobNowQueuesLocallyWhenServerStopped(t *testing.T) {
+	tempDir := t.TempDir()
+	a := app.NewApp()
+	a.SetConfigFilePath(filepath.Join(tempDir, "config.yaml"))
+
+	jobs := map[string]*appserver.ScheduledJob{
+		"job_run_local": {
+			ID:       "job_run_local",
+			Name:     "Run Local",
+			Schedule: "0 0 * * * *",
+			Steps: []appserver.WorkflowStep{
+				{
+					ID:   "action_echo",
+					Type: appserver.WorkflowStepTypeAction,
+					Action: action.ActionConfig{
+						Type: "exec",
+						Args: map[string]interface{}{
+							"command": "echo local-run",
+						},
+					},
+				},
+			},
+			Enabled: true,
+		},
+	}
+	if err := appserver.SaveScheduledJobs(a.State, jobs); err != nil {
+		t.Fatalf("failed to seed scheduled jobs: %v", err)
+	}
+
+	if err := RunScheduledJobNow(a, "job_run_local"); err != nil {
+		t.Fatalf("expected local scheduled job queueing to succeed, got %v", err)
+	}
+
+	queue := a.GetSyncCoordinator()
+	if queue == nil {
+		t.Fatal("expected local sync queue to be initialized")
+	}
+	defer queue.Stop()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(queue.ListJobs()) > 0 {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("expected at least one queued local job after RunScheduledJobNow")
+}
+
+func TestRunScheduledJobNowReturnsErrorForUnknownLocalJob(t *testing.T) {
+	tempDir := t.TempDir()
+	a := app.NewApp()
+	a.SetConfigFilePath(filepath.Join(tempDir, "config.yaml"))
+
+	err := RunScheduledJobNow(a, "job_missing")
+	if err == nil {
+		t.Fatal("expected error when scheduled job does not exist")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "job not found") {
+		t.Fatalf("expected job not found error, got %v", err)
 	}
 }

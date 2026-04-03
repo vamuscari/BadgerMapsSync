@@ -2,12 +2,20 @@ package server
 
 import (
 	"badgermaps/app/state"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
+)
+
+const (
+	scheduledJobIDPrefix   = "job_"
+	scheduledJobIDLength   = 8
+	scheduledJobIDAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 )
 
 func LoadScheduledJobs(s *state.State) (map[string]*ScheduledJob, error) {
@@ -84,10 +92,33 @@ func SaveScheduledJobs(s *state.State, jobs map[string]*ScheduledJob) error {
 }
 
 func GenerateScheduledJobID() string {
-	return fmt.Sprintf("job_%d", time.Now().UnixNano())
+	return scheduledJobIDPrefix + randomScheduledJobCode(scheduledJobIDLength)
+}
+
+func randomScheduledJobCode(length int) string {
+	if length <= 0 {
+		return ""
+	}
+
+	randomBytes := make([]byte, length)
+	if _, err := rand.Read(randomBytes); err == nil {
+		out := make([]byte, length)
+		for i, b := range randomBytes {
+			out[i] = scheduledJobIDAlphabet[int(b)%len(scheduledJobIDAlphabet)]
+		}
+		return string(out)
+	}
+
+	fallback := strings.ToUpper(strconv.FormatInt(time.Now().UnixNano(), 36))
+	if len(fallback) >= length {
+		return fallback[len(fallback)-length:]
+	}
+	return strings.Repeat("X", length-len(fallback)) + fallback
 }
 
 func ValidateScheduledJobDefinition(job *ScheduledJob, workflowProfiles map[string]WorkflowProfile) error {
+	_ = workflowProfiles
+
 	if job == nil {
 		return fmt.Errorf("job is required")
 	}
@@ -108,13 +139,6 @@ func ValidateScheduledJobDefinition(job *ScheduledJob, workflowProfiles map[stri
 	}
 	if err := ValidateWorkflowSteps(steps); err != nil {
 		return err
-	}
-
-	profileName := strings.TrimSpace(job.WorkflowProfile)
-	if profileName != "" && workflowProfiles != nil {
-		if _, exists := workflowProfiles[profileName]; !exists {
-			return fmt.Errorf("workflow_profile %q not found", profileName)
-		}
 	}
 	return nil
 }

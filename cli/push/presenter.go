@@ -7,8 +7,8 @@ import (
 	"badgermaps/app/syncproxy"
 	"badgermaps/database"
 	"badgermaps/events"
+	"badgermaps/utils"
 	"fmt"
-	"os"
 	"text/tabwriter"
 	"time"
 
@@ -47,7 +47,7 @@ func (p *CliPresenter) HandleList(entityType, status, date string, accountID int
 		return err
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	w := tabwriter.NewWriter(utils.StdoutWriter(), 0, 0, 2, ' ', 0)
 	defer w.Flush()
 
 	switch entityType {
@@ -161,7 +161,7 @@ func (p *CliPresenter) HandlePushCheckins() error {
 			if len(changes) > 0 {
 				bar = progressbar.NewOptions(len(changes),
 					progressbar.OptionSetDescription(fmt.Sprintf("Pushing %d %s changes", len(changes), e.Source)),
-					progressbar.OptionSetWriter(os.Stderr),
+					progressbar.OptionSetWriter(utils.StderrWriter()),
 					progressbar.OptionEnableColorCodes(true),
 				)
 			}

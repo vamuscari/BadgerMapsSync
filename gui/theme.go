@@ -12,6 +12,9 @@ const (
 	StatusNegativeColorName       fyne.ThemeColorName = "statusNegative"
 	StatusCardBackgroundColorName fyne.ThemeColorName = "statusCardBackground"
 	StatusCardBorderColorName     fyne.ThemeColorName = "statusCardBorder"
+	ServerActionStartColorName    fyne.ThemeColorName = "serverActionStart"
+	ServerActionStopColorName     fyne.ThemeColorName = "serverActionStop"
+	AddJobAccentColorName         fyne.ThemeColorName = "addJobAccent"
 )
 
 type modernTheme struct {
@@ -45,6 +48,15 @@ func (m *modernTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant)
 			return color.NRGBA{R: 0xf9, G: 0xfb, B: 0xff, A: 0xff}
 		case StatusCardBorderColorName:
 			return color.NRGBA{R: 0xd0, G: 0xd5, B: 0xde, A: 0xff}
+		case ServerActionStartColorName:
+			// Light mode: light desaturated green.
+			return color.NRGBA{R: 0x7d, G: 0xac, B: 0x7d, A: 0xff}
+		case ServerActionStopColorName:
+			// Light mode: light desaturated red.
+			return color.NRGBA{R: 0xb3, G: 0x7d, B: 0x7d, A: 0xff}
+		case AddJobAccentColorName:
+			// Light mode: slightly darker accent for stronger contrast on light backgrounds.
+			return color.NRGBA{R: 0x00, G: 0x4a, B: 0xbd, A: 0xff}
 		case theme.ColorNameBackground:
 			return color.NRGBA{R: 0xf5, G: 0xf5, B: 0xf5, A: 0xff}
 		case theme.ColorNameButton:
@@ -65,6 +77,15 @@ func (m *modernTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant)
 		return color.NRGBA{R: 0x28, G: 0x2c, B: 0x36, A: 0xff}
 	case StatusCardBorderColorName:
 		return color.NRGBA{R: 0x3a, G: 0x3f, B: 0x4b, A: 0xff}
+	case ServerActionStartColorName:
+		// Dark mode: dark desaturated green.
+		return color.NRGBA{R: 0x4d, G: 0x73, B: 0x4d, A: 0xff}
+	case ServerActionStopColorName:
+		// Dark mode: dark desaturated red.
+		return color.NRGBA{R: 0x73, G: 0x4d, B: 0x4d, A: 0xff}
+	case AddJobAccentColorName:
+		// Dark mode: lighter accent for better visibility on dark surfaces.
+		return color.NRGBA{R: 0x6e, G: 0xae, B: 0xff, A: 0xff}
 	case theme.ColorNameBackground:
 		return color.NRGBA{R: 0x1e, G: 0x1e, B: 0x1e, A: 0xff}
 	case theme.ColorNameButton:

@@ -13,3 +13,12 @@ type SyncJobListResponse struct {
 	Activity RuntimeActivity `json:"activity"`
 	Jobs     []*SyncJob      `json:"jobs"`
 }
+
+type ScheduledJobRunRequest struct {
+	JobID string `json:"job_id"`
+}
+
+type ScheduledJobRunResponse struct {
+	JobID  string `json:"job_id"`
+	Status string `json:"status"`
+}

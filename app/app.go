@@ -585,13 +585,16 @@ func (a *App) UpsertScheduledJob(job *server.ScheduledJob) error {
 
 	jobID := strings.TrimSpace(job.ID)
 	if jobID == "" {
-		jobID = server.GenerateScheduledJobID()
+		generatedID, err := nextAvailableScheduledJobID(jobsMap)
+		if err != nil {
+			return err
+		}
+		jobID = generatedID
 	}
 
 	jobCopy := *job
 	jobCopy.ID = jobID
 	jobCopy.Schedule = trimmedSchedule
-	jobCopy.WorkflowProfile = strings.TrimSpace(jobCopy.WorkflowProfile)
 	jobCopy.Timezone = server.NormalizeTimezone(jobCopy.Timezone)
 	if err := server.ValidateTimezone(jobCopy.Timezone); err != nil {
 		return err
@@ -610,6 +613,16 @@ func (a *App) UpsertScheduledJob(job *server.ScheduledJob) error {
 
 	a.Events.Dispatch(events.Infof("jobs", "Saved scheduled job '%s'", jobCopy.Name))
 	return nil
+}
+
+func nextAvailableScheduledJobID(existing map[string]*server.ScheduledJob) (string, error) {
+	for attempt := 0; attempt < 128; attempt++ {
+		candidate := server.GenerateScheduledJobID()
+		if _, exists := existing[candidate]; !exists {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("failed to generate unique scheduled job id")
 }
 
 func (a *App) DeleteScheduledJob(jobID string) error {

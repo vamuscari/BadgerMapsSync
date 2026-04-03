@@ -6,6 +6,7 @@ import (
 	appserver "badgermaps/app/server"
 	"badgermaps/app/syncproxy"
 	"badgermaps/events"
+	"badgermaps/utils"
 	"fmt"
 	"log"
 	"os"
@@ -48,14 +49,14 @@ func runPullGroup(a *app.App, top int) {
 			return fmt.Errorf("database is not connected. please check your database configuration")
 		}
 
-		log.SetOutput(os.Stderr)
+		log.SetOutput(utils.StderrWriter())
 
 		pullListener := func(e events.Event) {
 			switch e.Type {
 			case "pull.group.start":
 				bar = progressbar.NewOptions(-1,
 					progressbar.OptionSetDescription(fmt.Sprintf("Starting pull for %s...", e.Source)),
-					progressbar.OptionSetWriter(os.Stderr),
+					progressbar.OptionSetWriter(utils.StderrWriter()),
 					progressbar.OptionSpinnerType(14),
 					progressbar.OptionEnableColorCodes(true),
 				)
@@ -107,7 +108,7 @@ func runPullGroup(a *app.App, top int) {
 	}
 
 	if err := syncproxy.RunWithServerRouting(a, appserver.SyncModePull, "cli.pull.all", top, localRun); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(utils.StderrWriter(), "Error: %v\n", err)
 		os.Exit(1)
 	}
 }

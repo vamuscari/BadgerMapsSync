@@ -10,9 +10,10 @@ export CGO_ENABLED=1
 
 usage() {
   cat <<EOF
-Usage: $0 [-k] [-o targets]
+Usage: $0 [-k] [-c] [-o targets]
 
   -k           Keep intermediate files after packaging.
+  -c           Clear Fyne and Go build caches before packaging.
   -o targets   Comma-separated list of operating systems to build (darwin, windows).
                Defaults to building both targets.
 EOF
@@ -21,14 +22,41 @@ EOF
 
 # Default options
 CLEAN_UP=true
+CLEAR_FYNE_CACHE=false
 TARGETS=("darwin" "windows")
 
+clear_fyne_cache() {
+  echo "Clearing Fyne cache directories..."
+  local cache_dirs=(
+    "${HOME}/Library/Caches/fyne"
+    "${HOME}/Library/Caches/fyne-cross"
+    "${HOME}/.cache/fyne"
+  )
+
+  for dir in "${cache_dirs[@]}"; do
+    if [ -d "${dir}" ]; then
+      echo "  Removing ${dir}"
+      rm -rf "${dir}"
+    fi
+  done
+
+  # Remove stale Fyne-generated resource files that can preserve old metadata/icons.
+  rm -f fyne.syso fyne-manifest.rc
+
+  echo "Clearing Go build cache..."
+  go clean -cache
+}
+
 # Parse flags
-while getopts ":ko:h" opt; do
+while getopts ":kco:h" opt; do
   case ${opt} in
   k)
     CLEAN_UP=false
     echo "Running with -k, will not remove intermediate files."
+    ;;
+  c)
+    CLEAR_FYNE_CACHE=true
+    echo "Running with -c, will clear Fyne and Go build caches."
     ;;
   o)
     if [ -z "${OPTARG}" ]; then
@@ -87,6 +115,10 @@ done
 
 # Exit on error
 set -e
+
+if [ "$CLEAR_FYNE_CACHE" = true ]; then
+  clear_fyne_cache
+fi
 
 # Clean the build directory
 if [ "$CLEAN_UP" = true ]; then
