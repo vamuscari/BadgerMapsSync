@@ -3,6 +3,7 @@ package server
 import (
 	"badgermaps/api/models"
 	"badgermaps/app"
+	"badgermaps/app/action"
 	"badgermaps/app/pull"
 	"badgermaps/app/push"
 	appserver "badgermaps/app/server"
@@ -77,11 +78,11 @@ func (p *CliPresenter) RunServer(config *ServerConfig) {
 
 // RunServerWithContext runs the server until context cancellation or a fatal server error.
 func (p *CliPresenter) RunServerWithContext(ctx context.Context, config *ServerConfig) error {
-	syncQueue := appserver.NewSyncJobCoordinator(p.App.State, p.App.Events)
+	syncQueue := p.App.EnsureSyncCoordinator()
 	p.syncQueue = syncQueue
 	defer func() {
 		p.syncQueue = nil
-		syncQueue.Stop()
+		p.App.StopSyncCoordinator()
 	}()
 
 	scheduler := appserver.NewScheduler(
@@ -92,7 +93,7 @@ func (p *CliPresenter) RunServerWithContext(ctx context.Context, config *ServerC
 		nil,
 		&schedulerSyncExecutor{presenter: p},
 		syncQueue,
-		p.App.Config.CronJobs,
+		p.App.Config.WorkflowProfiles,
 		p.App.Config.Server.Timezone,
 	)
 	if err := scheduler.Start(); err != nil {
@@ -357,11 +358,19 @@ func (p *CliPresenter) HandleInternalSyncJob(w http.ResponseWriter, r *http.Requ
 		http.Error(w, fmt.Sprintf("invalid request payload: %v", err), http.StatusBadRequest)
 		return
 	}
-
-	mode, err := appserver.ParseSyncMode(req.Mode)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if strings.TrimSpace(req.Mode) == "" && len(req.Steps) == 0 && strings.TrimSpace(req.WorkflowProfile) == "" {
+		http.Error(w, "mode is required when workflow_profile/steps are not provided", http.StatusBadRequest)
 		return
+	}
+
+	mode := appserver.SyncModeWorkflow
+	if strings.TrimSpace(req.Mode) != "" {
+		parsedMode, err := appserver.ParseSyncMode(req.Mode)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		mode = parsedMode
 	}
 
 	source := strings.TrimSpace(req.Source)
@@ -369,12 +378,41 @@ func (p *CliPresenter) HandleInternalSyncJob(w http.ResponseWriter, r *http.Requ
 		source = "manual"
 	}
 
+	steps, profileName, err := p.resolveWorkflowSubmitSteps(req, mode)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	job, err := p.syncQueue.Submit(appserver.SyncJobRequest{
 		Name:   req.Name,
 		Source: source,
 		Mode:   mode,
+		Kind:   appserver.SyncJobKindWorkflow,
 		Run: func(_ context.Context) error {
-			return p.runSyncMode(mode, req.ResourceID)
+			_, runErr := appserver.ExecuteWorkflowSteps(appserver.WorkflowExecutionOptions{
+				Queue:      p.syncQueue,
+				Source:     source,
+				ParentMode: mode,
+				ResourceID: req.ResourceID,
+				Steps:      steps,
+				RunSync: func(stepMode appserver.SyncMode, stepResourceID int) error {
+					return p.runSyncMode(stepMode, stepResourceID)
+				},
+				RunAction: func(cfg action.ActionConfig, step appserver.WorkflowStep) error {
+					execCtx := &action.ExecutionContext{
+						EventType: "workflow.step.action",
+						Source:    source,
+						Payload: map[string]interface{}{
+							"workflow_profile": profileName,
+							"step_id":          step.ID,
+							"step_name":        step.EffectiveName(),
+						},
+					}
+					return p.App.ExecuteActionSyncWithContext(cfg, execCtx)
+				},
+			})
+			return runErr
 		},
 	})
 	if err != nil {
@@ -385,6 +423,39 @@ func (p *CliPresenter) HandleInternalSyncJob(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(job)
+}
+
+func (p *CliPresenter) resolveWorkflowSubmitSteps(req appserver.SyncJobSubmitRequest, mode appserver.SyncMode) ([]appserver.WorkflowStep, string, error) {
+	if len(req.Steps) > 0 || strings.TrimSpace(req.WorkflowProfile) != "" {
+		steps, err := appserver.ResolveWorkflowSteps(req.WorkflowProfile, req.Steps, p.App.Config.WorkflowProfiles)
+		if err != nil {
+			return nil, "", err
+		}
+		return steps, strings.TrimSpace(req.WorkflowProfile), nil
+	}
+
+	profileName := appserver.DefaultWorkflowProfileForMode(mode)
+	steps, err := appserver.ResolveWorkflowSteps(profileName, nil, p.App.Config.WorkflowProfiles)
+	if err == nil {
+		return steps, profileName, nil
+	}
+
+	fallbackID := strings.TrimSpace(string(mode))
+	if fallbackID == "" {
+		fallbackID = "step_1"
+	}
+	fallbackSteps := []appserver.WorkflowStep{
+		{
+			ID:       fallbackID,
+			Name:     fallbackID,
+			Type:     appserver.WorkflowStepTypeSync,
+			SyncMode: mode,
+		},
+	}
+	if validateErr := appserver.ValidateWorkflowSteps(fallbackSteps); validateErr != nil {
+		return nil, "", validateErr
+	}
+	return fallbackSteps, "", nil
 }
 
 func (p *CliPresenter) HandleInternalSyncJobStatus(w http.ResponseWriter, r *http.Request) {

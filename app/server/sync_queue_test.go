@@ -1,8 +1,11 @@
 package server
 
 import (
+	"badgermaps/app/action"
 	"badgermaps/app/state"
+	"badgermaps/events"
 	"context"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -117,6 +120,79 @@ func TestSyncJobCoordinatorTracksActiveJobAction(t *testing.T) {
 	activity = queue.GetActivity()
 	if activity.ActiveJobAction != "" {
 		t.Fatalf("expected runtime activity action to be cleared, got %q", activity.ActiveJobAction)
+	}
+}
+
+func TestRunChildJobErrorEventUsesFinalizedStatus(t *testing.T) {
+	s := state.NewState()
+	*s.ConfigFile = filepath.Join(t.TempDir(), "config.yaml")
+
+	dispatcher := events.NewEventDispatcher()
+	queue := NewSyncJobCoordinator(s, dispatcher)
+	defer queue.Stop()
+
+	childErrorEvents := make(chan events.Event, 1)
+	dispatcher.Subscribe("sync.job.error", func(e events.Event) {
+		payload, ok := e.Payload.(events.GenericPayload)
+		if !ok {
+			return
+		}
+		kind, _ := payload.Data["job_kind"].(string)
+		if kind == string(SyncJobKindSync) {
+			select {
+			case childErrorEvents <- e:
+			default:
+			}
+		}
+	})
+
+	job, err := queue.Submit(SyncJobRequest{
+		Name:   "parent",
+		Source: "test",
+		Mode:   SyncModeWorkflow,
+		Kind:   SyncJobKindWorkflow,
+		Run: func(_ context.Context) error {
+			_, runErr := ExecuteWorkflowSteps(WorkflowExecutionOptions{
+				Queue:      queue,
+				Source:     "test",
+				ParentMode: SyncModeWorkflow,
+				Steps: []WorkflowStep{
+					{ID: "failing_sync", Type: WorkflowStepTypeSync, SyncMode: SyncModePullAccounts},
+				},
+				RunSync: func(mode SyncMode, resourceID int) error {
+					return fmt.Errorf("expected child failure")
+				},
+				RunAction: func(cfg action.ActionConfig, step WorkflowStep) error {
+					return nil
+				},
+			})
+			return runErr
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to queue parent job: %v", err)
+	}
+
+	waitForTerminalJob(t, queue, job.ID)
+	if drained := dispatcher.WaitForDrain(2 * time.Second); !drained {
+		t.Fatalf("timed out waiting for event dispatcher to drain")
+	}
+
+	var childErrEvent events.Event
+	select {
+	case childErrEvent = <-childErrorEvents:
+	default:
+		t.Fatalf("expected child sync.job.error event")
+	}
+
+	payload, ok := childErrEvent.Payload.(events.GenericPayload)
+	if !ok {
+		t.Fatalf("expected generic payload for child error event")
+	}
+
+	status, _ := payload.Data["status"].(string)
+	if status != string(SyncJobFailed) {
+		t.Fatalf("expected child error status %q, got %q", SyncJobFailed, status)
 	}
 }
 

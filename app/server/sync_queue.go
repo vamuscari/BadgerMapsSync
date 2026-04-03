@@ -17,16 +17,31 @@ const (
 	defaultSyncHistoryLimit    = 256
 )
 
+type SyncJobKind string
+
+const (
+	SyncJobKindWorkflow SyncJobKind = "workflow"
+	SyncJobKindSync     SyncJobKind = "sync"
+	SyncJobKindAction   SyncJobKind = "action"
+)
+
 type SyncJob struct {
 	ID            string        `json:"id"`
 	Name          string        `json:"name,omitempty"`
 	Source        string        `json:"source"`
 	Mode          SyncMode      `json:"mode"`
+	Kind          SyncJobKind   `json:"job_kind,omitempty"`
+	ParentJobID   string        `json:"parent_job_id,omitempty"`
+	RootJobID     string        `json:"root_job_id,omitempty"`
+	StepID        string        `json:"step_id,omitempty"`
+	StepIndex     int           `json:"step_index,omitempty"`
+	TotalSteps    int           `json:"total_steps,omitempty"`
 	Status        SyncJobStatus `json:"status"`
 	CurrentAction string        `json:"current_action,omitempty"`
 	QueuedAt      time.Time     `json:"queued_at"`
 	StartedAt     *time.Time    `json:"started_at,omitempty"`
 	CompletedAt   *time.Time    `json:"completed_at,omitempty"`
+	ErrorCount    int           `json:"error_count,omitempty"`
 	Error         string        `json:"error,omitempty"`
 }
 
@@ -47,10 +62,29 @@ func (j *SyncJob) clone() *SyncJob {
 }
 
 type SyncJobRequest struct {
-	Name   string
-	Source string
-	Mode   SyncMode
-	Run    func(context.Context) error
+	Name        string
+	Source      string
+	Mode        SyncMode
+	Kind        SyncJobKind
+	ParentJobID string
+	RootJobID   string
+	StepID      string
+	StepIndex   int
+	TotalSteps  int
+	Run         func(context.Context) error
+}
+
+type SyncChildJobRequest struct {
+	Name        string
+	Source      string
+	Mode        SyncMode
+	Kind        SyncJobKind
+	ParentJobID string
+	RootJobID   string
+	StepID      string
+	StepIndex   int
+	TotalSteps  int
+	Run         func(context.Context) error
 }
 
 type queuedSyncJob struct {
@@ -121,19 +155,8 @@ func (c *SyncJobCoordinator) Submit(req SyncJobRequest) (*SyncJob, error) {
 		return nil, fmt.Errorf("sync job run function is required")
 	}
 
-	if req.Source == "" {
-		req.Source = "manual"
-	}
-
-	now := time.Now()
-	job := &SyncJob{
-		ID:       c.nextJobID(now),
-		Name:     req.Name,
-		Source:   req.Source,
-		Mode:     req.Mode,
-		Status:   SyncJobQueued,
-		QueuedAt: now,
-	}
+	job := c.newJob(req)
+	now := job.QueuedAt
 
 	c.mu.Lock()
 	if c.stopped {
@@ -162,22 +185,146 @@ func (c *SyncJobCoordinator) Submit(req SyncJobRequest) (*SyncJob, error) {
 	}
 
 	c.persistActivity(activity)
-	if c.events != nil {
-		c.events.Dispatch(events.Event{
-			Type:   "sync.job.queued",
-			Source: req.Source,
-			Payload: events.GenericPayload{
-				Type: "sync.job.queued",
-				Data: map[string]interface{}{
-					"job_id": job.ID,
-					"mode":   string(job.Mode),
-					"name":   job.Name,
-				},
-			},
-		})
-	}
+	c.dispatchJobEvent("sync.job.queued", job, nil)
 
 	return job.clone(), nil
+}
+
+func (c *SyncJobCoordinator) RunChildJob(req SyncChildJobRequest) (*SyncJob, error) {
+	if req.Run == nil {
+		return nil, fmt.Errorf("child sync job run function is required")
+	}
+
+	now := time.Now()
+	job := &SyncJob{
+		ID:          c.nextJobID(now),
+		Name:        strings.TrimSpace(req.Name),
+		Source:      strings.TrimSpace(req.Source),
+		Mode:        req.Mode,
+		Kind:        req.Kind,
+		ParentJobID: strings.TrimSpace(req.ParentJobID),
+		RootJobID:   strings.TrimSpace(req.RootJobID),
+		StepID:      strings.TrimSpace(req.StepID),
+		StepIndex:   req.StepIndex,
+		TotalSteps:  req.TotalSteps,
+		Status:      SyncJobRunning,
+		QueuedAt:    now,
+		StartedAt:   &now,
+	}
+	if job.Source == "" {
+		job.Source = "manual"
+	}
+	if job.Kind == "" {
+		job.Kind = SyncJobKindSync
+	}
+
+	c.mu.Lock()
+	if c.stopped {
+		c.mu.Unlock()
+		return nil, fmt.Errorf("sync job coordinator is stopped")
+	}
+	if c.activeJobID == "" {
+		c.mu.Unlock()
+		return nil, fmt.Errorf("no active parent job available for child execution")
+	}
+
+	parentID := job.ParentJobID
+	if parentID == "" {
+		parentID = c.activeJobID
+		job.ParentJobID = parentID
+	}
+
+	if job.RootJobID == "" {
+		rootID := parentID
+		if parent, ok := c.jobs[parentID]; ok && parent != nil {
+			if parent.RootJobID != "" {
+				rootID = parent.RootJobID
+			}
+		}
+		job.RootJobID = rootID
+	}
+
+	if job.RootJobID == "" {
+		job.RootJobID = job.ParentJobID
+	}
+
+	c.jobs[job.ID] = job
+	previousActive := c.activeJobID
+	c.activeJobID = job.ID
+	activity := c.snapshotActivityLocked(now)
+	c.mu.Unlock()
+
+	c.persistActivity(activity)
+	c.dispatchJobEvent("sync.job.start", job, nil)
+
+	runErr := req.Run(context.Background())
+	completedAt := time.Now()
+
+	c.mu.Lock()
+	live, exists := c.jobs[job.ID]
+	if exists {
+		live.CompletedAt = &completedAt
+		live.CurrentAction = ""
+		switch {
+		case runErr != nil:
+			live.Status = SyncJobFailed
+			live.Error = runErr.Error()
+		case live.ErrorCount > 0:
+			live.Status = SyncJobCompletedWithErrors
+			live.Error = ""
+		default:
+			live.Status = SyncJobCompleted
+			live.Error = ""
+		}
+		c.completedOrder = append(c.completedOrder, live.ID)
+	}
+	c.activeJobID = previousActive
+	c.pruneCompletedJobsLocked()
+	activity = c.snapshotActivityLocked(completedAt)
+	var result *SyncJob
+	if exists {
+		result = live.clone()
+	}
+	c.mu.Unlock()
+
+	c.persistActivity(activity)
+	eventJob := result
+	if eventJob == nil {
+		eventJob = job.clone()
+		if runErr != nil {
+			eventJob.Status = SyncJobFailed
+		}
+	}
+	if runErr != nil {
+		c.dispatchJobEvent("sync.job.error", eventJob, runErr)
+	} else {
+		c.dispatchJobEvent("sync.job.complete", eventJob, nil)
+	}
+
+	if runErr != nil {
+		return result, runErr
+	}
+	return result, nil
+}
+
+func (c *SyncJobCoordinator) IncrementActiveJobErrorCount(delta int) {
+	if delta <= 0 {
+		return
+	}
+	now := time.Now()
+
+	c.mu.Lock()
+	if c.activeJobID == "" {
+		c.mu.Unlock()
+		return
+	}
+	if job, exists := c.jobs[c.activeJobID]; exists && job != nil {
+		job.ErrorCount += delta
+	}
+	activity := c.snapshotActivityLocked(now)
+	c.mu.Unlock()
+
+	c.persistActivity(activity)
 }
 
 func (c *SyncJobCoordinator) GetJob(jobID string) (*SyncJob, bool) {
@@ -285,25 +432,15 @@ func (c *SyncJobCoordinator) runJob(req queuedSyncJob) {
 	if c.queuedCount > 0 {
 		c.queuedCount--
 	}
+	if job.RootJobID == "" {
+		job.RootJobID = job.ID
+	}
 	c.activeJobID = job.ID
 	activity := c.snapshotActivityLocked(startedAt)
 	c.mu.Unlock()
 
 	c.persistActivity(activity)
-	if c.events != nil {
-		c.events.Dispatch(events.Event{
-			Type:   "sync.job.start",
-			Source: job.Source,
-			Payload: events.GenericPayload{
-				Type: "sync.job.start",
-				Data: map[string]interface{}{
-					"job_id": job.ID,
-					"mode":   string(job.Mode),
-					"name":   job.Name,
-				},
-			},
-		})
-	}
+	c.dispatchJobEvent("sync.job.start", job, nil)
 
 	runErr := req.run(context.Background())
 	completedAt := time.Now()
@@ -314,10 +451,14 @@ func (c *SyncJobCoordinator) runJob(req queuedSyncJob) {
 	if exists {
 		job.CompletedAt = &completedAt
 		job.CurrentAction = ""
-		if runErr != nil {
+		switch {
+		case runErr != nil:
 			job.Status = SyncJobFailed
 			job.Error = runErr.Error()
-		} else {
+		case job.ErrorCount > 0:
+			job.Status = SyncJobCompletedWithErrors
+			job.Error = ""
+		default:
 			job.Status = SyncJobCompleted
 			job.Error = ""
 		}
@@ -330,32 +471,10 @@ func (c *SyncJobCoordinator) runJob(req queuedSyncJob) {
 	c.mu.Unlock()
 
 	c.persistActivity(activity)
-	if c.events != nil && completedJob != nil {
-		payload := map[string]interface{}{
-			"job_id": completedJob.ID,
-			"mode":   string(completedJob.Mode),
-			"name":   completedJob.Name,
-		}
-		if runErr != nil {
-			payload["error"] = runErr.Error()
-			c.events.Dispatch(events.Event{
-				Type:   "sync.job.error",
-				Source: completedJob.Source,
-				Payload: events.GenericPayload{
-					Type: "sync.job.error",
-					Data: payload,
-				},
-			})
-		} else {
-			c.events.Dispatch(events.Event{
-				Type:   "sync.job.complete",
-				Source: completedJob.Source,
-				Payload: events.GenericPayload{
-					Type: "sync.job.complete",
-					Data: payload,
-				},
-			})
-		}
+	if runErr != nil {
+		c.dispatchJobEvent("sync.job.error", completedJob, runErr)
+	} else {
+		c.dispatchJobEvent("sync.job.complete", completedJob, nil)
 	}
 }
 
@@ -390,7 +509,14 @@ func (c *SyncJobCoordinator) snapshotActivityLocked(now time.Time) RuntimeActivi
 			activity.ActiveJobName = activeJob.Name
 			activity.ActiveJobSource = activeJob.Source
 			activity.ActiveJobMode = activeJob.Mode
+			activity.ActiveJobKind = activeJob.Kind
+			activity.ActiveJobParentID = activeJob.ParentJobID
+			activity.ActiveJobRootID = activeJob.RootJobID
+			activity.ActiveJobStepID = activeJob.StepID
+			activity.ActiveJobStepIndex = activeJob.StepIndex
+			activity.ActiveJobTotalSteps = activeJob.TotalSteps
 			activity.ActiveJobAction = activeJob.CurrentAction
+			activity.ActiveJobErrorCount = activeJob.ErrorCount
 		}
 	}
 	c.activity = activity
@@ -421,6 +547,74 @@ func (c *SyncJobCoordinator) nextJobID(now time.Time) string {
 	return fmt.Sprintf("sync_%d_%d", now.UnixNano(), n)
 }
 
+func (c *SyncJobCoordinator) newJob(req SyncJobRequest) *SyncJob {
+	now := time.Now()
+	job := &SyncJob{
+		ID:          c.nextJobID(now),
+		Name:        strings.TrimSpace(req.Name),
+		Source:      strings.TrimSpace(req.Source),
+		Mode:        req.Mode,
+		Kind:        req.Kind,
+		ParentJobID: strings.TrimSpace(req.ParentJobID),
+		RootJobID:   strings.TrimSpace(req.RootJobID),
+		StepID:      strings.TrimSpace(req.StepID),
+		StepIndex:   req.StepIndex,
+		TotalSteps:  req.TotalSteps,
+		Status:      SyncJobQueued,
+		QueuedAt:    now,
+	}
+	if job.Source == "" {
+		job.Source = "manual"
+	}
+	if job.Kind == "" {
+		if job.ParentJobID == "" {
+			job.Kind = SyncJobKindWorkflow
+		} else {
+			job.Kind = SyncJobKindSync
+		}
+	}
+	if job.RootJobID == "" {
+		if job.ParentJobID != "" {
+			job.RootJobID = job.ParentJobID
+		} else {
+			job.RootJobID = job.ID
+		}
+	}
+	return job
+}
+
+func (c *SyncJobCoordinator) dispatchJobEvent(eventType string, job *SyncJob, runErr error) {
+	if c.events == nil || job == nil {
+		return
+	}
+
+	payload := map[string]interface{}{
+		"job_id":        job.ID,
+		"mode":          string(job.Mode),
+		"name":          job.Name,
+		"job_kind":      string(job.Kind),
+		"parent_job_id": job.ParentJobID,
+		"root_job_id":   job.RootJobID,
+		"step_id":       job.StepID,
+		"step_index":    job.StepIndex,
+		"total_steps":   job.TotalSteps,
+		"status":        string(job.Status),
+		"error_count":   job.ErrorCount,
+	}
+	if runErr != nil {
+		payload["error"] = runErr.Error()
+	}
+
+	c.events.Dispatch(events.Event{
+		Type:   events.EventType(eventType),
+		Source: job.Source,
+		Payload: events.GenericPayload{
+			Type: events.EventType(eventType),
+			Data: payload,
+		},
+	})
+}
+
 func syncJobRank(status SyncJobStatus) int {
 	switch status {
 	case SyncJobRunning:
@@ -429,9 +623,11 @@ func syncJobRank(status SyncJobStatus) int {
 		return 1
 	case SyncJobFailed:
 		return 2
-	case SyncJobCompleted:
+	case SyncJobCompletedWithErrors:
 		return 3
-	default:
+	case SyncJobCompleted:
 		return 4
+	default:
+		return 5
 	}
 }

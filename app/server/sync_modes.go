@@ -9,6 +9,7 @@ type SyncMode string
 
 const (
 	SyncModeNone         SyncMode = "none"
+	SyncModeWorkflow     SyncMode = "workflow"
 	SyncModePull         SyncMode = "pull"
 	SyncModePush         SyncMode = "push"
 	SyncModePullPush     SyncMode = "pull_push"
@@ -24,10 +25,12 @@ const (
 )
 
 func ParseSyncMode(raw string) (SyncMode, error) {
-	normalized := strings.ToLower(strings.TrimSpace(raw))
+	normalized := string(NormalizeSyncMode(raw))
 	switch normalized {
 	case string(SyncModeNone):
 		return SyncModeNone, nil
+	case string(SyncModeWorkflow):
+		return SyncModeWorkflow, nil
 	case string(SyncModePull), string(SyncTypeFull):
 		return SyncModePull, nil
 	case string(SyncModePush):
@@ -57,15 +60,41 @@ func ParseSyncMode(raw string) (SyncMode, error) {
 	}
 }
 
+func NormalizeSyncMode(raw string) SyncMode {
+	return SyncMode(strings.ToLower(strings.TrimSpace(raw)))
+}
+
+func WorkflowSyncModes() []SyncMode {
+	return []SyncMode{
+		SyncModePullAccounts,
+		SyncModePullCheckins,
+		SyncModePullRoutes,
+		SyncModePullProfile,
+		SyncModePushAccounts,
+		SyncModePushCheckins,
+	}
+}
+
+func IsWorkflowSyncMode(mode SyncMode) bool {
+	normalized := NormalizeSyncMode(string(mode))
+	for _, candidate := range WorkflowSyncModes() {
+		if normalized == candidate {
+			return true
+		}
+	}
+	return false
+}
+
 type SyncJobStatus string
 
 const (
-	SyncJobQueued    SyncJobStatus = "queued"
-	SyncJobRunning   SyncJobStatus = "running"
-	SyncJobCompleted SyncJobStatus = "completed"
-	SyncJobFailed    SyncJobStatus = "failed"
+	SyncJobQueued              SyncJobStatus = "queued"
+	SyncJobRunning             SyncJobStatus = "running"
+	SyncJobCompleted           SyncJobStatus = "completed"
+	SyncJobCompletedWithErrors SyncJobStatus = "completed_with_errors"
+	SyncJobFailed              SyncJobStatus = "failed"
 )
 
 func (s SyncJobStatus) IsTerminal() bool {
-	return s == SyncJobCompleted || s == SyncJobFailed
+	return s == SyncJobCompleted || s == SyncJobCompletedWithErrors || s == SyncJobFailed
 }

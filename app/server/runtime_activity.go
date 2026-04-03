@@ -10,14 +10,21 @@ import (
 )
 
 type RuntimeActivity struct {
-	ActiveJobID     string    `json:"active_job_id,omitempty"`
-	ActiveJobName   string    `json:"active_job_name,omitempty"`
-	ActiveJobSource string    `json:"active_job_source,omitempty"`
-	ActiveJobMode   SyncMode  `json:"active_job_mode,omitempty"`
-	ActiveJobAction string    `json:"active_job_action,omitempty"`
-	QueueDepth      int       `json:"queue_depth"`
-	LastHeartbeat   time.Time `json:"last_heartbeat"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ActiveJobID         string      `json:"active_job_id,omitempty"`
+	ActiveJobName       string      `json:"active_job_name,omitempty"`
+	ActiveJobSource     string      `json:"active_job_source,omitempty"`
+	ActiveJobMode       SyncMode    `json:"active_job_mode,omitempty"`
+	ActiveJobKind       SyncJobKind `json:"active_job_kind,omitempty"`
+	ActiveJobParentID   string      `json:"active_job_parent_id,omitempty"`
+	ActiveJobRootID     string      `json:"active_job_root_id,omitempty"`
+	ActiveJobStepID     string      `json:"active_job_step_id,omitempty"`
+	ActiveJobStepIndex  int         `json:"active_job_step_index,omitempty"`
+	ActiveJobTotalSteps int         `json:"active_job_total_steps,omitempty"`
+	ActiveJobAction     string      `json:"active_job_action,omitempty"`
+	ActiveJobErrorCount int         `json:"active_job_error_count,omitempty"`
+	QueueDepth          int         `json:"queue_depth"`
+	LastHeartbeat       time.Time   `json:"last_heartbeat"`
+	UpdatedAt           time.Time   `json:"updated_at"`
 }
 
 func (ra RuntimeActivity) IsActive() bool {

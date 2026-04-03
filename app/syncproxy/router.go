@@ -2,9 +2,13 @@ package syncproxy
 
 import (
 	"badgermaps/app"
+	"badgermaps/app/action"
+	"badgermaps/app/pull"
+	"badgermaps/app/push"
 	appserver "badgermaps/app/server"
 	"badgermaps/events"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -12,7 +16,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -44,13 +47,19 @@ func RunWithServerRouting(
 	if localRun == nil {
 		return fmt.Errorf("local sync runner is required")
 	}
-	if a == nil || a.Server == nil {
+	if a == nil {
 		return localRun()
+	}
+	if strings.TrimSpace(source) == "" {
+		source = "manual"
+	}
+	if a.Server == nil {
+		return runAsLocalWorkflowJob(a, mode, source, resourceID, localRun)
 	}
 
 	_, running := a.Server.GetServerStatus()
 	if !running {
-		return localRun()
+		return runAsLocalWorkflowJob(a, mode, source, resourceID, localRun)
 	}
 
 	baseURL := serverBaseURL(a)
@@ -97,7 +106,7 @@ func RunWithServerRouting(
 		}
 	}
 
-	return localRun()
+	return runAsLocalWorkflowJob(a, mode, source, resourceID, localRun)
 }
 
 func isHealthStatusError(err error) bool {
@@ -121,12 +130,20 @@ func newInternalHTTPClient(baseURL string) *http.Client {
 }
 
 func FetchServerJobsSnapshot(a *app.App) (*appserver.SyncJobListResponse, error) {
-	if a == nil || a.Server == nil {
+	if a == nil {
 		return nil, fmt.Errorf("server context unavailable")
 	}
-
-	_, running := a.Server.GetServerStatus()
+	running := false
+	if a.Server != nil {
+		_, running = a.Server.GetServerStatus()
+	}
 	if !running {
+		if queue := a.GetSyncCoordinator(); queue != nil {
+			return &appserver.SyncJobListResponse{
+				Activity: queue.GetActivity(),
+				Jobs:     queue.ListJobs(),
+			}, nil
+		}
 		return nil, fmt.Errorf("server is not running")
 	}
 
@@ -175,14 +192,17 @@ func runAsRemoteJob(
 	source string,
 	resourceID int,
 ) error {
-	if source == "" {
-		source = "manual"
+	profileName, steps, err := resolveWorkflowForMode(a, mode)
+	if err != nil {
+		return err
 	}
 
 	payload := appserver.SyncJobSubmitRequest{
-		Mode:       string(mode),
-		Source:     source,
-		ResourceID: resourceID,
+		Mode:            string(mode),
+		Source:          source,
+		ResourceID:      resourceID,
+		WorkflowProfile: profileName,
+		Steps:           steps,
 	}
 
 	body, err := json.Marshal(payload)
@@ -225,6 +245,9 @@ func runAsRemoteJob(
 		switch current.Status {
 		case appserver.SyncJobCompleted:
 			return nil
+		case appserver.SyncJobCompletedWithErrors:
+			a.Events.Dispatch(events.Warningf("server.proxy", "Workflow job %s completed with %d error(s)", current.ID, current.ErrorCount))
+			return nil
 		case appserver.SyncJobFailed:
 			if current.Error == "" {
 				return fmt.Errorf("server sync job %s failed", current.ID)
@@ -233,6 +256,180 @@ func runAsRemoteJob(
 		default:
 			time.Sleep(defaultJobPollInterval)
 		}
+	}
+}
+
+func runAsLocalWorkflowJob(
+	a *app.App,
+	mode appserver.SyncMode,
+	source string,
+	resourceID int,
+	localRun func() error,
+) error {
+	profileName, steps, err := resolveWorkflowForMode(a, mode)
+	if err != nil {
+		return err
+	}
+
+	queue := a.EnsureSyncCoordinator()
+	jobName := strings.TrimSpace(source)
+	if jobName == "" {
+		jobName = fmt.Sprintf("workflow:%s", mode)
+	}
+
+	job, err := queue.Submit(appserver.SyncJobRequest{
+		Name:   jobName,
+		Source: source,
+		Mode:   mode,
+		Kind:   appserver.SyncJobKindWorkflow,
+		Run: func(_ context.Context) error {
+			_, execErr := appserver.ExecuteWorkflowSteps(appserver.WorkflowExecutionOptions{
+				Queue:      queue,
+				Source:     source,
+				ParentMode: mode,
+				ResourceID: resourceID,
+				Steps:      steps,
+				RunSync: func(stepMode appserver.SyncMode, stepResourceID int) error {
+					if stepMode == mode && localRun != nil {
+						return localRun()
+					}
+					return runLocalSyncMode(a, stepMode, stepResourceID)
+				},
+				RunAction: func(cfg action.ActionConfig, step appserver.WorkflowStep) error {
+					execCtx := &action.ExecutionContext{
+						EventType: "workflow.step.action",
+						Source:    source,
+						Payload: map[string]interface{}{
+							"workflow_profile": profileName,
+							"step_id":          step.ID,
+							"step_name":        step.EffectiveName(),
+						},
+					}
+					return a.ExecuteActionSyncWithContext(cfg, execCtx)
+				},
+			})
+			return execErr
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to submit local workflow job: %w", err)
+	}
+
+	for {
+		current, exists := queue.GetJob(job.ID)
+		if !exists {
+			return fmt.Errorf("workflow job %s disappeared from local queue", job.ID)
+		}
+		switch current.Status {
+		case appserver.SyncJobCompleted:
+			return nil
+		case appserver.SyncJobCompletedWithErrors:
+			a.Events.Dispatch(events.Warningf("server.proxy", "Workflow job %s completed with %d error(s)", current.ID, current.ErrorCount))
+			return nil
+		case appserver.SyncJobFailed:
+			if strings.TrimSpace(current.Error) == "" {
+				return fmt.Errorf("workflow job %s failed", current.ID)
+			}
+			return fmt.Errorf("workflow job %s failed: %s", current.ID, current.Error)
+		default:
+			time.Sleep(defaultJobPollInterval)
+		}
+	}
+}
+
+func resolveWorkflowForMode(a *app.App, mode appserver.SyncMode) (string, []appserver.WorkflowStep, error) {
+	profileName := appserver.DefaultWorkflowProfileForMode(mode)
+	profiles := appserver.NormalizeWorkflowProfiles(nil)
+	if a != nil && a.Config != nil {
+		profiles = appserver.NormalizeWorkflowProfiles(a.Config.WorkflowProfiles)
+	}
+	if len(profiles) == 0 {
+		profiles = appserver.DefaultWorkflowProfiles()
+	}
+	if profile, ok := profiles[profileName]; ok {
+		if err := appserver.ValidateWorkflowProfile(profile); err != nil {
+			return "", nil, err
+		}
+		return profileName, profile.Steps, nil
+	}
+
+	fallbackID := strings.TrimSpace(string(mode))
+	if fallbackID == "" {
+		fallbackID = "step_1"
+	}
+	steps := []appserver.WorkflowStep{
+		{
+			ID:       fallbackID,
+			Name:     fallbackID,
+			Type:     appserver.WorkflowStepTypeSync,
+			SyncMode: mode,
+		},
+	}
+	if err := appserver.ValidateWorkflowSteps(steps); err != nil {
+		return "", nil, err
+	}
+	return "", steps, nil
+}
+
+func runLocalSyncMode(a *app.App, mode appserver.SyncMode, resourceID int) error {
+	switch mode {
+	case appserver.SyncModeNone:
+		return nil
+	case appserver.SyncModePull:
+		if err := pull.PullGroupAccounts(a, 0, nil); err != nil {
+			return err
+		}
+		if err := pull.PullGroupCheckins(a, nil); err != nil {
+			return err
+		}
+		if err := pull.PullGroupRoutes(a, nil); err != nil {
+			return err
+		}
+		_, err := pull.PullProfile(a, nil)
+		return err
+	case appserver.SyncModePullPush:
+		if err := runLocalSyncMode(a, appserver.SyncModePull, 0); err != nil {
+			return err
+		}
+		return runLocalSyncMode(a, appserver.SyncModePush, 0)
+	case appserver.SyncModePullAccounts:
+		return pull.PullGroupAccounts(a, 0, nil)
+	case appserver.SyncModePullCheckins:
+		return pull.PullGroupCheckins(a, nil)
+	case appserver.SyncModePullRoutes:
+		return pull.PullGroupRoutes(a, nil)
+	case appserver.SyncModePullProfile:
+		_, err := pull.PullProfile(a, nil)
+		return err
+	case appserver.SyncModePush:
+		if err := push.RunPushAccounts(a); err != nil {
+			return err
+		}
+		return push.RunPushCheckins(a)
+	case appserver.SyncModePushAccounts:
+		return push.RunPushAccounts(a)
+	case appserver.SyncModePushCheckins:
+		return push.RunPushCheckins(a)
+	case appserver.SyncModePullAccount:
+		if resourceID <= 0 {
+			return fmt.Errorf("resource id is required for mode %s", mode)
+		}
+		_, err := pull.PullAccount(a, resourceID)
+		return err
+	case appserver.SyncModePullCheckin:
+		if resourceID <= 0 {
+			return fmt.Errorf("resource id is required for mode %s", mode)
+		}
+		_, err := pull.PullCheckin(a, resourceID)
+		return err
+	case appserver.SyncModePullRoute:
+		if resourceID <= 0 {
+			return fmt.Errorf("resource id is required for mode %s", mode)
+		}
+		_, err := pull.PullRoute(a, resourceID)
+		return err
+	default:
+		return fmt.Errorf("unsupported sync mode: %s", mode)
 	}
 }
 
@@ -319,31 +516,27 @@ func serverHealthy(client *http.Client, baseURL string) (bool, error) {
 }
 
 func serverBaseURL(a *app.App) string {
-	host := strings.TrimSpace(a.State.ServerHost)
-	if host == "" && a.Config != nil {
-		host = strings.TrimSpace(a.Config.Server.Host)
+	host := resolveInternalHost(a.State.ServerHost)
+	if ip := net.ParseIP(host); ip != nil && ip.To4() == nil {
+		host = "[" + host + "]"
 	}
-	host = resolveInternalHost(host)
 
 	port := a.State.ServerPort
-	if port <= 0 && a.Config != nil {
-		port = a.Config.Server.Port
-	}
 	if port <= 0 {
 		port = 8080
 	}
 
 	scheme := "http"
-	if a.State.TLSEnabled || (a.Config != nil && a.Config.Server.TLSEnabled) {
+	if a.State.TLSEnabled {
 		scheme = "https"
 	}
 
-	return fmt.Sprintf("%s://%s", scheme, net.JoinHostPort(host, strconv.Itoa(port)))
+	return fmt.Sprintf("%s://%s:%d", scheme, host, port)
 }
 
 func resolveInternalHost(host string) string {
 	host = strings.TrimSpace(host)
-	host = strings.Trim(host, "[]")
+	host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
 	switch strings.ToLower(host) {
 	case "", "0.0.0.0", "::", "*":
 		return "127.0.0.1"

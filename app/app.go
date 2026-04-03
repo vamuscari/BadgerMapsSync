@@ -49,16 +49,15 @@ func defaultWebhookConfig() map[string]bool {
 }
 
 type Config struct {
-	API                   api.APIConfig        `yaml:"api"`
-	DB                    database.DBConfig    `yaml:"db"`
-	Server                ServerConfig         `yaml:"server"`
-	ThemePreference       string               `yaml:"theme_preference"`
-	MaxConcurrentRequests int                  `yaml:"max_concurrent_requests"`
-	CustomCheckins        bool                 `yaml:"custom_checkins"`
-	EventActions          []action.EventAction `yaml:"event_actions"`
-	CronJobs              []server.CronJob     `yaml:"cron_jobs"`
-	WebhookCatchAll       bool                 `yaml:"webhook_catch_all"`
-	LogFile               string               `yaml:"log_file"`
+	API                   api.APIConfig                     `yaml:"api"`
+	DB                    database.DBConfig                 `yaml:"db"`
+	Server                ServerConfig                      `yaml:"server"`
+	ThemePreference       string                            `yaml:"theme_preference"`
+	MaxConcurrentRequests int                               `yaml:"max_concurrent_requests"`
+	CustomCheckins        bool                              `yaml:"custom_checkins"`
+	WorkflowProfiles      map[string]server.WorkflowProfile `yaml:"workflow_profiles"`
+	WebhookCatchAll       bool                              `yaml:"webhook_catch_all"`
+	LogFile               string                            `yaml:"log_file"`
 }
 
 type App struct {
@@ -72,6 +71,7 @@ type App struct {
 	Server         *server.ServerManager
 	ActionExecutor *action.Executor
 	LogListener    *events.LogListener
+	syncQueue      *server.SyncJobCoordinator
 
 	MaxConcurrentRequests int
 
@@ -80,6 +80,7 @@ type App struct {
 	syncHistoryOnce bool
 	closeOnce       sync.Once
 	shuttingDown    atomic.Bool
+	coordMu         sync.Mutex
 }
 
 func (a *App) Close() {
@@ -91,6 +92,7 @@ func (a *App) Close() {
 			a.Events.WaitForDrain(2 * time.Second)
 		}
 
+		a.StopSyncCoordinator()
 		if a.DB != nil {
 			a.DB.Close()
 		}
@@ -114,6 +116,34 @@ func (a *App) GetDB() database.DB {
 func (a *App) GetAPI() *api.APIClient {
 	return a.API
 }
+
+func (a *App) EnsureSyncCoordinator() *server.SyncJobCoordinator {
+	a.coordMu.Lock()
+	defer a.coordMu.Unlock()
+
+	if a.syncQueue != nil {
+		return a.syncQueue
+	}
+	a.syncQueue = server.NewSyncJobCoordinator(a.State, a.Events)
+	return a.syncQueue
+}
+
+func (a *App) GetSyncCoordinator() *server.SyncJobCoordinator {
+	a.coordMu.Lock()
+	defer a.coordMu.Unlock()
+	return a.syncQueue
+}
+
+func (a *App) StopSyncCoordinator() {
+	a.coordMu.Lock()
+	queue := a.syncQueue
+	a.syncQueue = nil
+	a.coordMu.Unlock()
+
+	if queue != nil {
+		queue.Stop()
+	}
+}
 func NewApp() *App {
 	a := &App{
 		State: state.NewState(),
@@ -135,6 +165,7 @@ func NewApp() *App {
 			ThemePreference:       ThemePreferenceAuto,
 			MaxConcurrentRequests: 5,
 			CustomCheckins:        false,
+			WorkflowProfiles:      server.DefaultWorkflowProfiles(),
 		},
 	}
 	a.State.PIDFile = utils.GetConfigDirFile(".badgermaps.pid")
@@ -214,13 +245,16 @@ func (a *App) LoadConfig() error {
 		if err != nil {
 			return err
 		}
+		if err := validateLegacyConfigContract(data); err != nil {
+			return err
+		}
 		err = yaml.Unmarshal(data, a.Config)
 		if err != nil {
 			return err
 		}
-		a.migrateActionNames()
-		a.validateAndCleanActions()
-		a.ensureExecActionShellDefaults()
+	}
+	if err := a.ensureWorkflowProfiles(); err != nil {
+		return err
 	}
 	a.ensureServerWebhookDefaults()
 	a.ensureThemePreference()
@@ -256,29 +290,6 @@ func (a *App) LoadConfig() error {
 	}
 
 	a.ActionExecutor = action.NewExecutor(a.DB, a.API)
-	a.Events.Subscribe("*", func(event events.Event) {
-		execCtx := &action.ExecutionContext{
-			EventType: string(event.Type),
-			Source:    event.Source,
-			Payload:   event.Payload,
-		}
-		for _, eventAction := range a.Config.EventActions {
-			if eventAction.Event == string(event.Type) && (eventAction.Source == "" || eventAction.Source == event.Source) {
-				for _, actionConfig := range eventAction.Run {
-					if !actionConfig.IsEnabled() {
-						continue
-					}
-					ac := actionConfig
-					execCopy := execCtx
-					go func(cfg action.ActionConfig, ctx *action.ExecutionContext) {
-						if err := a.ExecuteActionWithContext(cfg, ctx); err != nil {
-							a.Events.Dispatch(events.Errorf("action", "Error executing action: %v", err))
-						}
-					}(ac, execCopy)
-				}
-			}
-		}
-	})
 
 	// Respect configured concurrency before enforcing the default bounds.
 	a.MaxConcurrentRequests = a.Config.MaxConcurrentRequests
@@ -307,54 +318,56 @@ func (a *App) writeYamlFile(path string) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-func (a *App) migrateActionNames() {
-	actionsModified := false
-	for i := range a.Config.EventActions {
-		if strings.HasPrefix(a.Config.EventActions[i].Name, "on_") {
-			a.Config.EventActions[i].Name = strings.TrimPrefix(a.Config.EventActions[i].Name, "on_")
-			actionsModified = true
+func (a *App) ensureWorkflowProfiles() error {
+	current := server.NormalizeWorkflowProfiles(a.Config.WorkflowProfiles)
+	defaults := server.DefaultWorkflowProfiles()
+	if current == nil {
+		current = map[string]server.WorkflowProfile{}
+	}
+
+	for name, profile := range defaults {
+		if _, exists := current[name]; !exists {
+			current[name] = profile
 		}
 	}
 
-	if actionsModified {
-		if err := a.SaveConfig(); err != nil {
-			a.Events.Dispatch(events.Warningf("config", "Failed to save config after migrating action names: %v", err))
-		} else {
-			a.Events.Dispatch(events.Infof("config", "Configuration updated to remove 'on_' prefix from action names."))
-		}
+	if err := server.ValidateWorkflowProfiles(current); err != nil {
+		return fmt.Errorf("workflow_profiles validation failed: %w", err)
 	}
+	a.Config.WorkflowProfiles = current
+	return nil
 }
 
-func (a *App) ensureExecActionShellDefaults() {
-	if a.ConfigFile == "" {
-		return
+func validateLegacyConfigContract(data []byte) error {
+	var raw map[string]interface{}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("failed to parse config for legacy validation: %w", err)
+	}
+	if raw == nil {
+		return nil
 	}
 
-	updated := false
-	for i := range a.Config.EventActions {
-		for j := range a.Config.EventActions[i].Run {
-			actionConfig := &a.Config.EventActions[i].Run[j]
-			if actionConfig.Type != "exec" {
-				continue
-			}
-			if actionConfig.Args == nil {
-				actionConfig.Args = make(map[string]interface{})
-			}
-			if _, ok := actionConfig.Args["use_shell"]; !ok {
-				actionConfig.Args["use_shell"] = true
-				updated = true
-			}
-		}
+	if value, exists := raw["event_actions"]; exists && !yamlValueEmpty(value) {
+		return fmt.Errorf("legacy config key 'event_actions' is no longer supported; manually rewrite actions into workflow_profiles and scheduled job steps")
 	}
-
-	if !updated {
-		return
+	if value, exists := raw["cron_jobs"]; exists && !yamlValueEmpty(value) {
+		return fmt.Errorf("legacy config key 'cron_jobs' is no longer supported; manually rewrite cron jobs into scheduled jobs with explicit workflow steps")
 	}
+	return nil
+}
 
-	if err := a.SaveConfig(); err != nil {
-		a.Events.Dispatch(events.Warningf("config", "Failed to save config after backfilling exec use_shell flag: %v", err))
-	} else {
-		a.Events.Dispatch(events.Infof("config", "Configuration updated to backfill exec action 'use_shell' flag."))
+func yamlValueEmpty(value interface{}) bool {
+	switch typed := value.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(typed) == ""
+	case []interface{}:
+		return len(typed) == 0
+	case map[string]interface{}:
+		return len(typed) == 0
+	default:
+		return false
 	}
 }
 
@@ -385,49 +398,6 @@ func NormalizeThemePreference(pref string) string {
 		return ThemePreferenceAuto
 	default:
 		return ThemePreferenceAuto
-	}
-}
-
-func (a *App) validateAndCleanActions() {
-	var validEventActions []action.EventAction
-	actionsModified := false
-
-	for _, eventAction := range a.Config.EventActions {
-		var validRuns []action.ActionConfig
-		for _, actionConfig := range eventAction.Run {
-			action, err := action.NewActionFromConfig(actionConfig)
-			if err != nil {
-				a.Events.Dispatch(events.Warningf("config", "Invalid action config for event '%s': %v. Removing.", eventAction.Name, err))
-				actionsModified = true
-				continue
-			}
-			if err := action.Validate(); err != nil {
-				a.Events.Dispatch(events.Warningf("config", "Invalid action for event '%s': %v. Removing.", eventAction.Name, err))
-				actionsModified = true
-				continue
-			}
-			validRuns = append(validRuns, actionConfig)
-		}
-
-		if len(validRuns) > 0 {
-			eventAction.Run = validRuns
-			validEventActions = append(validEventActions, eventAction)
-			if len(validRuns) < len(eventAction.Run) {
-				actionsModified = true // Some actions were removed from this event
-			}
-		} else {
-			a.Events.Dispatch(events.Warningf("config", "Event action '%s' has no valid actions left. Removing.", eventAction.Name))
-			actionsModified = true
-		}
-	}
-
-	if actionsModified {
-		a.Config.EventActions = validEventActions
-		if err := a.SaveConfig(); err != nil {
-			a.Events.Dispatch(events.Warningf("config", "Failed to save config after removing invalid actions: %v", err))
-		} else {
-			a.Events.Dispatch(events.Infof("config", "Configuration updated to remove invalid actions."))
-		}
 	}
 }
 
@@ -490,93 +460,18 @@ func (a *App) GetConfigFilePath() (string, bool, error) {
 }
 
 func (a *App) AddEventAction(event, source string, actionConfig action.ActionConfig) error {
-	key := event
-	if source != "" {
-		key = fmt.Sprintf("%s_%s", key, source)
-	}
-
-	// Find existing EventAction
-	for i := range a.Config.EventActions {
-		if a.Config.EventActions[i].Event == event && a.Config.EventActions[i].Source == source {
-			a.Config.EventActions[i].Run = append(a.Config.EventActions[i].Run, actionConfig)
-			err := a.SaveConfig()
-			if err == nil {
-				a.Events.Dispatch(events.Event{Type: "action.config.updated", Source: "events", Payload: events.ActionConfigUpdatedPayload{}})
-			}
-			return err
-		}
-	}
-
-	// Not found, create a new one
-	newEventAction := action.EventAction{
-		Name:   key,
-		Event:  event,
-		Source: source,
-		Run:    []action.ActionConfig{actionConfig},
-	}
-	a.Config.EventActions = append(a.Config.EventActions, newEventAction)
-	err := a.SaveConfig()
-	if err == nil {
-		a.Events.Dispatch(events.Event{Type: "action.config.created", Source: "events", Payload: events.ActionConfigCreatedPayload{}})
-	}
-	return err
+	return fmt.Errorf("event_actions is retired; add action steps under a workflow profile or scheduled job steps")
 }
 func (a *App) UpdateEventAction(eventName string, actionIndex int, actionConfig action.ActionConfig) error {
-	for i := range a.Config.EventActions {
-		if a.Config.EventActions[i].Name == eventName {
-			if actionIndex < 0 || actionIndex >= len(a.Config.EventActions[i].Run) {
-				return fmt.Errorf("invalid action index")
-			}
-			a.Config.EventActions[i].Run[actionIndex] = actionConfig
-			err := a.SaveConfig()
-			if err == nil {
-				a.Events.Dispatch(events.Event{Type: "action.config.updated", Source: "events", Payload: events.ActionConfigUpdatedPayload{}})
-			}
-			return err
-		}
-	}
-	return fmt.Errorf("event action not found: %s", eventName)
+	return fmt.Errorf("event_actions is retired; edit action steps under a workflow profile or scheduled job steps")
 }
 
 func (a *App) RemoveEventAction(eventName string, actionIndex int) error {
-	for i := range a.Config.EventActions {
-		if a.Config.EventActions[i].Name == eventName {
-			if actionIndex < 0 || actionIndex >= len(a.Config.EventActions[i].Run) {
-				return fmt.Errorf("invalid action index")
-			}
-			a.Config.EventActions[i].Run = append(a.Config.EventActions[i].Run[:actionIndex], a.Config.EventActions[i].Run[actionIndex+1:]...)
-
-			// If the event has no more actions, remove the event itself
-			if len(a.Config.EventActions[i].Run) == 0 {
-				a.Config.EventActions = append(a.Config.EventActions[:i], a.Config.EventActions[i+1:]...)
-			}
-
-			err := a.SaveConfig()
-			if err == nil {
-				a.Events.Dispatch(events.Event{Type: "action.config.deleted", Source: "events", Payload: events.ActionConfigDeletedPayload{}})
-			}
-			return err
-		}
-	}
-	return fmt.Errorf("event action not found: %s", eventName)
+	return fmt.Errorf("event_actions is retired; edit action steps under a workflow profile or scheduled job steps")
 }
 
 func (a *App) SetEventActionEnabled(eventName string, actionIndex int, enabled bool) error {
-	for i := range a.Config.EventActions {
-		if a.Config.EventActions[i].Name != eventName {
-			continue
-		}
-		if actionIndex < 0 || actionIndex >= len(a.Config.EventActions[i].Run) {
-			return fmt.Errorf("invalid action index")
-		}
-		a.Config.EventActions[i].Run[actionIndex].SetEnabled(enabled)
-		err := a.SaveConfig()
-		if err == nil {
-			a.Events.Dispatch(events.Event{Type: "action.config.updated", Source: "events", Payload: events.ActionConfigUpdatedPayload{}})
-		}
-		return err
-	}
-	return fmt.Errorf("event action not found: %s", eventName)
+	return fmt.Errorf("event_actions is retired; enable or disable action steps within workflow profiles or scheduled jobs")
 }
 
 func (a *App) ListScheduledJobs() ([]*server.ScheduledJob, error) {
@@ -696,6 +591,7 @@ func (a *App) UpsertScheduledJob(job *server.ScheduledJob) error {
 	jobCopy := *job
 	jobCopy.ID = jobID
 	jobCopy.Schedule = trimmedSchedule
+	jobCopy.WorkflowProfile = strings.TrimSpace(jobCopy.WorkflowProfile)
 	jobCopy.Timezone = server.NormalizeTimezone(jobCopy.Timezone)
 	if err := server.ValidateTimezone(jobCopy.Timezone); err != nil {
 		return err
@@ -703,8 +599,8 @@ func (a *App) UpsertScheduledJob(job *server.ScheduledJob) error {
 	if strings.TrimSpace(jobCopy.Name) == "" {
 		jobCopy.Name = jobID
 	}
-	if jobCopy.SyncType == "" {
-		jobCopy.SyncType = server.SyncTypePull
+	if err := server.ValidateScheduledJobDefinition(&jobCopy, a.Config.WorkflowProfiles); err != nil {
+		return err
 	}
 
 	jobsMap[jobID] = &jobCopy
@@ -777,7 +673,7 @@ func (a *App) ExecuteAction(actionConfig action.ActionConfig) error {
 	return a.ExecuteActionWithContext(actionConfig, nil)
 }
 
-func (a *App) ExecuteActionWithContext(actionConfig action.ActionConfig, execCtx *action.ExecutionContext) error {
+func (a *App) ExecuteActionSyncWithContext(actionConfig action.ActionConfig, execCtx *action.ExecutionContext) error {
 	logSource := resolveActionLogSource(execCtx)
 	actionInstance, err := action.NewActionFromConfig(actionConfig)
 	if err != nil {
@@ -790,24 +686,25 @@ func (a *App) ExecuteActionWithContext(actionConfig action.ActionConfig, execCtx
 		return err
 	}
 
-	a.Events.Dispatch(events.Debugf(logSource, "Executing action type '%s'", actionConfig.Type))
-
 	baseExecutor := a.ActionExecutor
 	if baseExecutor == nil {
 		baseExecutor = action.NewExecutor(a.DB, a.API)
 		a.ActionExecutor = baseExecutor
 	}
 	executorWithContext := baseExecutor.WithContext(execCtx)
-	actionType := actionConfig.Type
+	if err := actionInstance.Execute(executorWithContext); err != nil {
+		a.Events.Dispatch(events.Errorf(logSource, "action '%s' failed: %v", actionConfig.Type, err))
+		return err
+	}
+	a.Events.Dispatch(events.Debugf(logSource, "Action '%s' completed successfully", actionConfig.Type))
+	return nil
+}
 
-	go func(execCopy *action.Executor) { // run in a goroutine to not block the GUI
-		if err := actionInstance.Execute(execCopy); err != nil {
-			a.Events.Dispatch(events.Errorf(logSource, "action '%s' failed: %v", actionType, err))
-		} else {
-			a.Events.Dispatch(events.Debugf(logSource, "Action '%s' completed successfully", actionType))
-		}
-	}(executorWithContext)
-
+func (a *App) ExecuteActionWithContext(actionConfig action.ActionConfig, execCtx *action.ExecutionContext) error {
+	a.Events.Dispatch(events.Debugf(resolveActionLogSource(execCtx), "Executing action type '%s'", actionConfig.Type))
+	go func() { // run in a goroutine to not block the GUI
+		_ = a.ExecuteActionSyncWithContext(actionConfig, execCtx)
+	}()
 	return nil
 }
 

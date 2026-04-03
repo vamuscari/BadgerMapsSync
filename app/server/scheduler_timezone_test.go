@@ -122,7 +122,9 @@ func TestUpdateJobKeepsTimezoneWhenUpdateTimezoneIsEmpty(t *testing.T) {
 		ID:       "job-1",
 		Name:     "daily",
 		Schedule: "0 0 20 * * *",
-		SyncType: SyncTypePull,
+		Steps: []WorkflowStep{
+			{ID: "pull_accounts", Type: WorkflowStepTypeSync, SyncMode: SyncModePullAccounts},
+		},
 		Enabled:  false,
 		Timezone: "America/New_York",
 	}

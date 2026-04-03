@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"image/color"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,6 +16,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -440,26 +440,6 @@ func Launch(a *app.App, icon fyne.Resource) {
 	// Check if we should show welcome screen (first time setup or no config)
 	ui.showWelcome = (a.API == nil || a.API.APIKey == "") || (a.DB == nil || a.DB.GetType() == "")
 
-	// Subscribe to events to refresh the events tab
-	eventListener := func(e events.Event) {
-		if ui.app.State.Debug {
-			a.Events.Dispatch(events.Debugf("gui", "GUI received event: %s", e.Type))
-		}
-		fyne.Do(func() {
-			if ui.tabs != nil {
-				for _, tab := range ui.tabs.Items {
-					if tab.Text == "Actions" {
-						// Re-create the content of the events tab
-						tab.Content = ui.createActionsTab()
-						ui.tabs.Refresh()
-						break
-					}
-				}
-			}
-		})
-	}
-	a.Events.Subscribe("action.config.*", eventListener)
-
 	// Subscribe to logging and action events
 	logListener := func(e events.Event) {
 		var msg string
@@ -614,7 +594,6 @@ func (ui *Gui) createMainContent() fyne.CanvasObject {
 
 	syncTab := container.NewTabItemWithIcon("Sync Center", theme.DownloadIcon(), syncContent)
 	explorerTab := container.NewTabItemWithIcon("Explorer", theme.FolderIcon(), explorerContent)
-	actionsTab := container.NewTabItemWithIcon("Actions", theme.ViewRefreshIcon(), ui.createActionsTab())
 	jobsTab := container.NewTabItemWithIcon("Jobs", theme.HistoryIcon(), ui.createJobsTab())
 	serverTab := container.NewTabItemWithIcon("Server", theme.ComputerIcon(), ui.createServerTab())
 
@@ -622,7 +601,6 @@ func (ui *Gui) createMainContent() fyne.CanvasObject {
 		homeTab,
 		syncTab,
 		explorerTab,
-		actionsTab,
 		jobsTab,
 		serverTab,
 		configTab,
@@ -945,22 +923,11 @@ func (ui *Gui) RefreshHomeTab() {
 }
 
 func (ui *Gui) refreshActionsTab() {
-	if ui.tabs == nil {
-		return
-	}
-	for _, tab := range ui.tabs.Items {
-		if tab.Text == "Actions" {
-			tab.Content = ui.createActionsTab()
-			ui.tabs.Refresh()
-			return
-		}
-	}
+	ui.refreshJobsTab()
 }
 
 func (ui *Gui) RefreshActionsTab() {
-	fyne.Do(func() {
-		ui.refreshActionsTab()
-	})
+	ui.RefreshJobsTab()
 }
 
 func (ui *Gui) refreshJobsTab() {
@@ -1476,144 +1443,9 @@ func (ui *Gui) createPendingChangesTable(entityType string) fyne.CanvasObject {
 
 // createActionsTab creates the content for the "Actions" tab
 func (ui *Gui) createActionsTab() fyne.CanvasObject {
-	actionsContent := container.NewVBox()
-
-	eventActions := ui.app.Config.EventActions
-	sort.Slice(eventActions, func(i, j int) bool {
-		return eventActions[i].Name < eventActions[j].Name
-	})
-
-	if len(eventActions) == 0 {
-		empty := ui.newSectionCard(
-			"Actions",
-			"No event actions configured yet.",
-			widget.NewLabel("Use the button below to add automation."),
-		)
-		actionsContent.Add(empty)
-	}
-
-	for _, eventAction := range eventActions {
-		ea := eventAction // Capture loop variable
-		actionsContainer := container.NewVBox()
-		for i, action := range ea.Run {
-			ac := action
-			idx := i
-			var iconResource fyne.Resource
-			var labelText string
-			enabled := ac.IsEnabled()
-
-			switch ac.Type {
-			case "exec":
-				iconResource = theme.FileApplicationIcon()
-				labelText = fmt.Sprintf("Exec: %s", ac.Args["command"])
-			case "db":
-				iconResource = theme.StorageIcon()
-				labelText = func() string {
-					if ac.Args == nil {
-						return "DB action"
-					}
-					if cmd, ok := ac.Args["command"].(string); ok && cmd != "" {
-						return fmt.Sprintf("DB command: %s", cmd)
-					}
-					if fn, ok := ac.Args["function"].(string); ok && fn != "" {
-						return fmt.Sprintf("DB function: %s", fn)
-					}
-					if proc, ok := ac.Args["procedure"].(string); ok && proc != "" {
-						return fmt.Sprintf("DB procedure: %s", proc)
-					}
-					if query, ok := ac.Args["query"].(string); ok && query != "" {
-						trimmed := strings.TrimSpace(query)
-						runes := []rune(trimmed)
-						if len(runes) > 32 {
-							trimmed = string(runes[:32]) + "..."
-						}
-						return fmt.Sprintf("DB query: %s", trimmed)
-					}
-					return "DB action"
-				}()
-			case "api":
-				iconResource = theme.ComputerIcon()
-				labelText = fmt.Sprintf("API: %s", ac.Args["endpoint"])
-			default:
-				iconResource = theme.HelpIcon()
-				labelText = "Unknown action"
-			}
-			if !enabled {
-				labelText = fmt.Sprintf("[Paused] %s", labelText)
-			}
-
-			label := widget.NewLabel(labelText)
-			icon := widget.NewIcon(iconResource)
-
-			pauseIcon := theme.MediaPauseIcon()
-			pauseLabel := "Pause"
-			nextEnabled := false
-			if !enabled {
-				pauseIcon = theme.MediaPlayIcon()
-				pauseLabel = "Resume"
-				nextEnabled = true
-			}
-
-			toolbar := widget.NewToolbar(
-				widget.NewToolbarAction(theme.MediaSkipNextIcon(), func() {
-					ui.app.ExecuteAction(ac)
-				}),
-				widget.NewToolbarSeparator(),
-				widget.NewToolbarAction(pauseIcon, func() {
-					if err := ui.app.SetEventActionEnabled(ea.Name, idx, nextEnabled); err != nil {
-						ui.app.Events.Dispatch(events.Errorf("gui", "Error updating action state: %v", err))
-						return
-					}
-					ui.ShowToast(fmt.Sprintf("%s action", pauseLabel))
-					ui.refreshActionsTab()
-				}),
-				widget.NewToolbarSeparator(),
-				widget.NewToolbarAction(theme.DocumentCreateIcon(), func() {
-					ui.createActionPopup(&ea, idx)
-				}),
-				widget.NewToolbarSeparator(),
-				widget.NewToolbarAction(theme.DeleteIcon(), func() {
-					dialog.ShowConfirm("Delete Action", "Are you sure you want to delete this action?", func(confirm bool) {
-						if confirm {
-							err := ui.app.RemoveEventAction(ea.Name, idx)
-							if err != nil {
-								ui.app.Events.Dispatch(events.Errorf("gui", "Error removing action: %v", err))
-								return
-							}
-							ui.refreshActionsTab()
-						}
-					}, ui.window)
-				}),
-			)
-			actionsContainer.Add(container.NewBorder(nil, nil, icon, toolbar, label))
-		}
-
-		if len(actionsContainer.Objects) == 0 {
-			actionsContainer.Add(widget.NewLabel("No steps configured for this action."))
-		}
-
-		friendlyEvent := formatEventName(ea.Event)
-		friendlySource := "Any"
-		if strings.TrimSpace(ea.Source) != "" {
-			friendlySource = formatEventName(ea.Source)
-		}
-
-		cardTitle := friendlyEvent
-		subtitle := fmt.Sprintf("Source: %s", friendlySource)
-
-		card := ui.newSectionCard(
-			cardTitle,
-			subtitle,
-			actionsContainer,
-		)
-		actionsContent.Add(card)
-	}
-
-	addButton := widget.NewButtonWithIcon("Add Action", theme.ContentAddIcon(), func() {
-		ui.createActionPopup(nil, -1)
-	})
-
-	return container.NewBorder(nil, addButton, nil, nil, container.NewVScroll(actionsContent))
+	notice := widget.NewLabel("Global Actions are retired. Configure action steps under Jobs workflow steps.")
+	notice.Wrapping = fyne.TextWrapWord
+	return ui.newSectionCard("Actions", "Deprecated", notice)
 }
 
 func (ui *Gui) createJobsTab() fyne.CanvasObject {
@@ -1641,11 +1473,31 @@ func (ui *Gui) createJobsTab() fyne.CanvasObject {
 			}
 			effectiveTimezone, timezoneSource := ui.app.EffectiveScheduledJobTimezone(jb)
 			timezoneSummary := fmt.Sprintf("%s (%s)", effectiveTimezone, timezoneSource)
+			stepSummaries := make([]string, 0, len(jb.Steps))
+			for _, step := range jb.Steps {
+				stepLabel := step.EffectiveName()
+				if step.Type == appserver.WorkflowStepTypeSync {
+					stepLabel = fmt.Sprintf("%s (%s)", stepLabel, step.SyncMode)
+				}
+				stepSummaries = append(stepSummaries, stepLabel)
+			}
+			stepsText := strings.Join(stepSummaries, "\n- ")
+			if stepsText != "" {
+				stepsText = "- " + stepsText
+			} else {
+				stepsText = "(no steps)"
+			}
+			profileLabel := strings.TrimSpace(jb.WorkflowProfile)
+			if profileLabel == "" {
+				profileLabel = "(custom)"
+			}
 
 			summary := widget.NewLabel(fmt.Sprintf(
-				"Schedule: %s\nSync: %s\nRetries: %d (retry_on_error=%t)\nTimezone: %s\nState: %s",
+				"Schedule: %s\nWorkflow Profile: %s\nSteps (%d):\n%s\nRetries: %d (retry_on_error=%t)\nTimezone: %s\nState: %s",
 				jb.Schedule,
-				jb.SyncType,
+				profileLabel,
+				len(jb.Steps),
+				stepsText,
 				jb.MaxRetries,
 				jb.RetryOnError,
 				timezoneSummary,
@@ -1722,13 +1574,18 @@ func (ui *Gui) createJobsTab() fyne.CanvasObject {
 
 func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 	job := appserver.ScheduledJob{
-		Enabled:      true,
-		SyncType:     appserver.SyncTypePull,
-		MaxRetries:   1,
-		RetryOnError: false,
+		Enabled:         true,
+		MaxRetries:      1,
+		RetryOnError:    false,
+		WorkflowProfile: "pull_all",
 	}
 	if existing != nil {
 		job = *existing
+	}
+	if len(job.Steps) == 0 {
+		if profile, ok := ui.app.Config.WorkflowProfiles[job.WorkflowProfile]; ok {
+			job.Steps = append([]appserver.WorkflowStep(nil), profile.Steps...)
+		}
 	}
 
 	nameEntry := widget.NewEntry()
@@ -1746,23 +1603,48 @@ func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 	} else if strings.TrimSpace(rawScheduleValue) != "" {
 		advancedScheduleEntry.SetText(rawScheduleValue)
 	}
+	currentScheduleMode := scheduleParseMode
+	scheduleModeSelector := widget.NewRadioGroup([]string{"Fields", "Advanced"}, nil)
+	scheduleModeSelector.Horizontal = true
+	scheduleFieldsContainer := container.NewVBox(cronWidget.Object())
+	scheduleAdvancedContainer := container.NewVBox(advancedScheduleEntry)
 
-	syncTypeOptions := []string{
-		string(appserver.SyncTypePull),
-		string(appserver.SyncTypePush),
-		string(appserver.SyncTypePullPush),
-		string(appserver.SyncTypeAccounts),
-		string(appserver.SyncTypeCheckins),
-		string(appserver.SyncTypeRoutes),
-		string(appserver.SyncTypeFull),
-		string(appserver.SyncTypeNone),
+	updateScheduleEditorVisibility := func() {
+		if currentScheduleMode == ParseModeRaw {
+			scheduleFieldsContainer.Hide()
+			scheduleAdvancedContainer.Show()
+		} else {
+			scheduleFieldsContainer.Show()
+			scheduleAdvancedContainer.Hide()
+		}
 	}
-	syncTypeSelect := widget.NewSelect(syncTypeOptions, nil)
-	selectedSyncType := string(job.SyncType)
-	if strings.TrimSpace(selectedSyncType) == "" {
-		selectedSyncType = string(appserver.SyncTypePull)
+
+	suppressScheduleModeChange := false
+	setScheduleMode := func(mode ParseMode) {
+		currentScheduleMode = mode
+		suppressScheduleModeChange = true
+		if mode == ParseModeRaw {
+			scheduleModeSelector.SetSelected("Advanced")
+		} else {
+			scheduleModeSelector.SetSelected("Fields")
+		}
+		suppressScheduleModeChange = false
+		updateScheduleEditorVisibility()
 	}
-	syncTypeSelect.SetSelected(selectedSyncType)
+	scheduleModeSelector.OnChanged = func(selected string) {
+		if suppressScheduleModeChange {
+			return
+		}
+		switch strings.TrimSpace(selected) {
+		case "Advanced":
+			currentScheduleMode = ParseModeRaw
+		default:
+			currentScheduleMode = ParseModeFields
+		}
+		updateScheduleEditorVisibility()
+	}
+
+	profileSelect := widget.NewSelect([]string{workflowProfileCustom}, nil)
 
 	enabledCheck := widget.NewCheck("Enabled", nil)
 	enabledCheck.SetChecked(job.Enabled)
@@ -1793,13 +1675,451 @@ func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 		}
 	}
 	scheduleHelp.Wrapping = fyne.TextWrapWord
+	setScheduleMode(currentScheduleMode)
+	scheduleEditorContainer := container.NewVBox(scheduleFieldsContainer, scheduleAdvancedContainer)
+
+	canonicalSteps := cloneWorkflowSteps(job.Steps)
+	advancedJSON, err := workflowStepsToJSON(canonicalSteps)
+	if err != nil {
+		advancedJSON = "[]"
+	}
+	stepsEntry := widget.NewMultiLineEntry()
+	stepsEntry.SetPlaceHolder("Workflow steps JSON. Example: [{\"id\":\"pull_accounts\",\"type\":\"sync\",\"sync_type\":\"pull_accounts\"}]")
+	stepsEntry.Wrapping = fyne.TextWrapWord
+	stepsEntry.SetMinRowsVisible(12)
+	stepsEntry.SetText(advancedJSON)
+
+	builderDrafts, builderErr := workflowBuilderDraftsFromSteps(canonicalSteps)
+	initialBuilderCompatible := builderErr == nil
+	if !initialBuilderCompatible {
+		builderDrafts = []workflowBuilderDraftStep{}
+	}
+
+	currentEditorMode := workflowEditorModeBuilder
+	if existing != nil && !initialBuilderCompatible {
+		currentEditorMode = workflowEditorModeAdvanced
+	}
+	modeSelector := widget.NewRadioGroup([]string{workflowEditorModeBuilder, workflowEditorModeAdvanced}, nil)
+	modeSelector.Horizontal = true
+
+	editorStatus := widget.NewLabel("")
+	editorStatus.Wrapping = fyne.TextWrapWord
+	editorStatus.Hide()
+
+	builderCompatibilityWarning := widget.NewLabel("")
+	builderCompatibilityWarning.Wrapping = fyne.TextWrapWord
+	builderCompatibilityWarning.Hide()
+	if existing != nil && !initialBuilderCompatible {
+		builderCompatibilityWarning.SetText(fmt.Sprintf("Builder unavailable for current steps: %v", builderErr))
+		builderCompatibilityWarning.Show()
+	}
+
+	builderPanel := container.NewVBox()
+	advancedPanel := container.NewVBox(
+		widget.NewLabel("Advanced mode: edit workflow steps as JSON."),
+		stepsEntry,
+	)
+	editorContainer := container.NewVBox(modeSelector, builderCompatibilityWarning, editorStatus, builderPanel, advancedPanel)
+
+	setEditorStatus := func(message string) {
+		message = strings.TrimSpace(message)
+		if message == "" {
+			editorStatus.SetText("")
+			editorStatus.Hide()
+			return
+		}
+		editorStatus.SetText(message)
+		editorStatus.Show()
+	}
+
+	syncBuilderToCanonical := func(showStatus bool) error {
+		jsonText, steps, err := workflowBuilderDraftsToJSON(builderDrafts)
+		if err != nil {
+			if showStatus {
+				setEditorStatus(err.Error())
+			}
+			return err
+		}
+		canonicalSteps = cloneWorkflowSteps(steps)
+		stepsEntry.SetText(jsonText)
+		if showStatus {
+			setEditorStatus("")
+		}
+		return nil
+	}
+
+	parseAdvancedJSON := func(requireBuilderShape bool, showStatus bool) error {
+		steps, err := parseWorkflowStepsJSON(stepsEntry.Text)
+		if err != nil {
+			if showStatus {
+				setEditorStatus(err.Error())
+			}
+			return err
+		}
+		if requireBuilderShape {
+			drafts, convErr := workflowBuilderDraftsFromSteps(steps)
+			if convErr != nil {
+				if showStatus {
+					setEditorStatus(fmt.Sprintf("Cannot switch to Builder: %v", convErr))
+				}
+				return convErr
+			}
+			builderDrafts = drafts
+		}
+		canonicalSteps = cloneWorkflowSteps(steps)
+		jsonText, jsonErr := workflowStepsToJSON(steps)
+		if jsonErr == nil {
+			stepsEntry.SetText(jsonText)
+		}
+		if showStatus {
+			setEditorStatus("")
+		}
+		return nil
+	}
+
+	syncModeOptions := workflowBuilderSyncModeOptions()
+
+	var renderBuilderPanel func()
+	renderBuilderPanel = func() {
+		rows := make([]fyne.CanvasObject, 0, len(builderDrafts)+2)
+		rows = append(rows, widget.NewLabel("Builder mode: create and reorder workflow steps visually."))
+
+		if len(builderDrafts) == 0 {
+			empty := widget.NewLabel("No steps yet. Add a step to begin.")
+			empty.Wrapping = fyne.TextWrapWord
+			rows = append(rows, empty)
+		}
+
+		for i := range builderDrafts {
+			idx := i
+			draft := &builderDrafts[idx]
+
+			stepIndexLabel := widget.NewLabel(fmt.Sprintf("Step %d", idx+1))
+			moveUpBtn := widget.NewButtonWithIcon("", theme.MoveUpIcon(), func() {
+				if idx <= 0 {
+					return
+				}
+				builderDrafts[idx-1], builderDrafts[idx] = builderDrafts[idx], builderDrafts[idx-1]
+				_ = syncBuilderToCanonical(true)
+				renderBuilderPanel()
+			})
+			moveDownBtn := widget.NewButtonWithIcon("", theme.MoveDownIcon(), func() {
+				if idx >= len(builderDrafts)-1 {
+					return
+				}
+				builderDrafts[idx+1], builderDrafts[idx] = builderDrafts[idx], builderDrafts[idx+1]
+				_ = syncBuilderToCanonical(true)
+				renderBuilderPanel()
+			})
+			deleteBtn := widget.NewButtonWithIcon("", theme.DeleteIcon(), func() {
+				builderDrafts = append(builderDrafts[:idx], builderDrafts[idx+1:]...)
+				_ = syncBuilderToCanonical(true)
+				renderBuilderPanel()
+			})
+			header := container.NewHBox(stepIndexLabel, layout.NewSpacer(), moveUpBtn, moveDownBtn, deleteBtn)
+
+			idEntry := widget.NewEntry()
+			idEntry.SetText(draft.ID)
+			idEntry.Disable()
+
+			stepNameEntry := widget.NewEntry()
+			stepNameEntry.SetPlaceHolder("Optional name")
+			stepNameEntry.SetText(draft.Name)
+			stepNameEntry.OnChanged = func(value string) {
+				draft.Name = value
+				_ = syncBuilderToCanonical(false)
+			}
+
+			typeSelect := widget.NewSelect([]string{string(appserver.WorkflowStepTypeSync), string(appserver.WorkflowStepTypeAction)}, nil)
+			typeSelect.SetSelected(string(draft.Type))
+			typeSelect.OnChanged = func(value string) {
+				if strings.TrimSpace(value) == "" {
+					return
+				}
+				draft.Type = appserver.WorkflowStepType(value)
+				if draft.Type == appserver.WorkflowStepTypeSync {
+					if !appserver.IsWorkflowSyncMode(draft.SyncMode) {
+						draft.SyncMode = appserver.SyncModePullAccounts
+					}
+				} else {
+					if strings.TrimSpace(draft.ActionType) == "" {
+						draft.ActionType = workflowActionTypeExec
+					}
+				}
+				draft.ID = nextWorkflowBuilderStepID(builderDrafts, *draft, idx)
+				_ = syncBuilderToCanonical(true)
+				renderBuilderPanel()
+			}
+
+			commonForm := widget.NewForm(
+				widget.NewFormItem("ID (auto)", idEntry),
+				widget.NewFormItem("Name", stepNameEntry),
+				widget.NewFormItem("Type", typeSelect),
+			)
+
+			var detail fyne.CanvasObject
+			switch draft.Type {
+			case appserver.WorkflowStepTypeSync:
+				syncModeSelect := widget.NewSelect(syncModeOptions, nil)
+				syncModeSelect.SetSelected(string(draft.SyncMode))
+				syncModeSelect.OnChanged = func(value string) {
+					draft.SyncMode = appserver.SyncMode(value)
+					draft.ID = nextWorkflowBuilderStepID(builderDrafts, *draft, idx)
+					_ = syncBuilderToCanonical(false)
+					renderBuilderPanel()
+				}
+				detail = widget.NewForm(widget.NewFormItem("Sync Type", syncModeSelect))
+			case appserver.WorkflowStepTypeAction:
+				enabledCheck := widget.NewCheck("Enabled", nil)
+				enabledCheck.SetChecked(draft.ActionEnabled)
+				enabledCheck.OnChanged = func(enabled bool) {
+					draft.ActionEnabled = enabled
+					_ = syncBuilderToCanonical(false)
+				}
+
+				actionTypeSelect := widget.NewSelect([]string{workflowActionTypeExec, workflowActionTypeDB}, nil)
+				selectedActionType := strings.TrimSpace(draft.ActionType)
+				if selectedActionType == "" {
+					selectedActionType = workflowActionTypeExec
+					draft.ActionType = selectedActionType
+				}
+				actionTypeSelect.SetSelected(selectedActionType)
+				actionTypeSelect.OnChanged = func(value string) {
+					draft.ActionType = strings.TrimSpace(value)
+					draft.ID = nextWorkflowBuilderStepID(builderDrafts, *draft, idx)
+					_ = syncBuilderToCanonical(true)
+					renderBuilderPanel()
+				}
+
+				actionForm := widget.NewForm(
+					widget.NewFormItem("Enabled", enabledCheck),
+					widget.NewFormItem("Action Type", actionTypeSelect),
+				)
+
+				var actionDetails fyne.CanvasObject
+				switch strings.TrimSpace(draft.ActionType) {
+				case workflowActionTypeExec:
+					commandEntry := widget.NewEntry()
+					commandEntry.SetPlaceHolder("Command")
+					commandEntry.SetText(draft.ExecCommand)
+					commandEntry.OnChanged = func(value string) {
+						draft.ExecCommand = value
+						_ = syncBuilderToCanonical(false)
+					}
+
+					useShellCheck := widget.NewCheck("Use shell", nil)
+					useShellCheck.SetChecked(draft.ExecUseShell)
+					useShellCheck.OnChanged = func(enabled bool) {
+						draft.ExecUseShell = enabled
+						_ = syncBuilderToCanonical(true)
+						renderBuilderPanel()
+					}
+
+					execFormItems := []*widget.FormItem{
+						widget.NewFormItem("Command", commandEntry),
+						widget.NewFormItem("Use Shell", useShellCheck),
+					}
+					if !draft.ExecUseShell {
+						argsEntry := widget.NewMultiLineEntry()
+						argsEntry.SetPlaceHolder("One arg per line")
+						argsEntry.SetText(draft.ExecArgsText)
+						argsEntry.Wrapping = fyne.TextWrapWord
+						argsEntry.OnChanged = func(value string) {
+							draft.ExecArgsText = value
+							_ = syncBuilderToCanonical(false)
+						}
+						execFormItems = append(execFormItems, widget.NewFormItem("Args", argsEntry))
+					}
+					actionDetails = widget.NewForm(execFormItems...)
+				default:
+					opSelect := widget.NewSelect(workflowDBOperationKeys, nil)
+					selectedOp := strings.TrimSpace(draft.DBOperation)
+					if selectedOp == "" {
+						selectedOp = "command"
+						draft.DBOperation = selectedOp
+					}
+					opSelect.SetSelected(selectedOp)
+					opSelect.OnChanged = func(value string) {
+						draft.DBOperation = strings.TrimSpace(value)
+						_ = syncBuilderToCanonical(false)
+					}
+
+					dbValueEntry := widget.NewEntry()
+					dbValueEntry.SetPlaceHolder("DB operation value")
+					dbValueEntry.SetText(draft.DBValue)
+					dbValueEntry.OnChanged = func(value string) {
+						draft.DBValue = value
+						_ = syncBuilderToCanonical(false)
+					}
+
+					dbArgsEntry := widget.NewMultiLineEntry()
+					dbArgsEntry.SetPlaceHolder("Optional args JSON")
+					dbArgsEntry.SetText(draft.DBArgsText)
+					dbArgsEntry.Wrapping = fyne.TextWrapWord
+					dbArgsEntry.OnChanged = func(value string) {
+						draft.DBArgsText = value
+						_ = syncBuilderToCanonical(false)
+					}
+
+					actionDetails = widget.NewForm(
+						widget.NewFormItem("Operation", opSelect),
+						widget.NewFormItem("Value", dbValueEntry),
+						widget.NewFormItem("Args JSON (optional)", dbArgsEntry),
+					)
+				}
+
+				detail = container.NewVBox(actionForm, actionDetails)
+			}
+
+			stepCard := ui.newSectionCard(fmt.Sprintf("Step %d", idx+1), "", container.NewVBox(header, commonForm, detail))
+			rows = append(rows, stepCard)
+		}
+
+		addStepBtn := widget.NewButtonWithIcon("Add Step", theme.ContentAddIcon(), func() {
+			builderDrafts = append(builderDrafts, defaultBuilderDraftStep(builderDrafts))
+			_ = syncBuilderToCanonical(true)
+			renderBuilderPanel()
+		})
+		rows = append(rows, addStepBtn)
+
+		builderPanel.Objects = rows
+		builderPanel.Refresh()
+	}
+
+	updateEditorModeVisibility := func() {
+		if currentEditorMode == workflowEditorModeBuilder {
+			builderPanel.Show()
+			advancedPanel.Hide()
+		} else {
+			builderPanel.Hide()
+			advancedPanel.Show()
+		}
+	}
+
+	suppressModeChange := false
+	setModeSelection := func(mode string) {
+		currentEditorMode = mode
+		suppressModeChange = true
+		modeSelector.SetSelected(mode)
+		suppressModeChange = false
+		updateEditorModeVisibility()
+	}
+
+	modeSelector.OnChanged = func(selection string) {
+		if suppressModeChange {
+			return
+		}
+		selection = strings.TrimSpace(selection)
+		if selection == "" || selection == currentEditorMode {
+			return
+		}
+		if selection == workflowEditorModeBuilder {
+			if err := parseAdvancedJSON(true, true); err != nil {
+				ui.ShowToast(fmt.Sprintf("Cannot switch to Builder: %v", err))
+				setModeSelection(currentEditorMode)
+				return
+			}
+			builderCompatibilityWarning.Hide()
+			renderBuilderPanel()
+			setModeSelection(workflowEditorModeBuilder)
+			return
+		}
+
+		if err := syncBuilderToCanonical(false); err != nil {
+			setEditorStatus(err.Error())
+		}
+		setModeSelection(workflowEditorModeAdvanced)
+	}
+
+	currentProfileSelection := strings.TrimSpace(job.WorkflowProfile)
+	if currentProfileSelection == "" {
+		currentProfileSelection = workflowProfileCustom
+	}
+	profileOptions := sortedWorkflowProfileOptions(ui.app.Config.WorkflowProfiles, currentProfileSelection)
+	profileSelect.Options = profileOptions
+	suppressProfileChange := false
+	profileSelect.OnChanged = func(value string) {
+		if suppressProfileChange {
+			return
+		}
+		selected := strings.TrimSpace(value)
+		if selected == "" {
+			selected = workflowProfileCustom
+		}
+		if selected == currentProfileSelection {
+			return
+		}
+		if selected == workflowProfileCustom {
+			currentProfileSelection = workflowProfileCustom
+			return
+		}
+
+		pendingSelection := selected
+		dialog.ShowConfirm(
+			"Apply Workflow Profile",
+			fmt.Sprintf("Replace current workflow steps with profile '%s'?", pendingSelection),
+			func(confirm bool) {
+				nextProfile, nextSteps, replaced, applyErr := applyWorkflowProfileTemplateSelection(
+					currentProfileSelection,
+					pendingSelection,
+					canonicalSteps,
+					ui.app.Config.WorkflowProfiles,
+					confirm,
+				)
+				if applyErr != nil {
+					ui.ShowToast(fmt.Sprintf("Error applying profile: %v", applyErr))
+					nextProfile = currentProfileSelection
+				}
+
+				if !replaced {
+					suppressProfileChange = true
+					profileSelect.SetSelected(nextProfile)
+					suppressProfileChange = false
+					currentProfileSelection = nextProfile
+					return
+				}
+
+				canonicalSteps = cloneWorkflowSteps(nextSteps)
+				jsonText, jsonErr := workflowStepsToJSON(canonicalSteps)
+				if jsonErr == nil {
+					stepsEntry.SetText(jsonText)
+				}
+				drafts, convErr := workflowBuilderDraftsFromSteps(canonicalSteps)
+				if convErr == nil {
+					builderDrafts = drafts
+					builderCompatibilityWarning.Hide()
+					if currentEditorMode == workflowEditorModeBuilder {
+						renderBuilderPanel()
+					}
+				} else {
+					builderCompatibilityWarning.SetText(fmt.Sprintf("Builder unavailable for selected profile steps: %v", convErr))
+					builderCompatibilityWarning.Show()
+					setModeSelection(workflowEditorModeAdvanced)
+				}
+				currentProfileSelection = nextProfile
+				suppressProfileChange = true
+				profileSelect.SetSelected(currentProfileSelection)
+				suppressProfileChange = false
+				setEditorStatus("")
+			},
+			ui.window,
+		)
+	}
+
+	suppressProfileChange = true
+	profileSelect.SetSelected(currentProfileSelection)
+	suppressProfileChange = false
+
+	renderBuilderPanel()
+	setModeSelection(currentEditorMode)
 
 	form := widget.NewForm(
 		widget.NewFormItem("Name", nameEntry),
-		widget.NewFormItem("Schedule (cron fields)", cronWidget.Object()),
-		widget.NewFormItem("Schedule (advanced raw, optional)", advancedScheduleEntry),
+		widget.NewFormItem("Schedule Mode", scheduleModeSelector),
+		widget.NewFormItem("Schedule Editor", scheduleEditorContainer),
 		widget.NewFormItem("", scheduleHelp),
-		widget.NewFormItem("Sync Type", syncTypeSelect),
+		widget.NewFormItem("Workflow Profile Template", profileSelect),
+		widget.NewFormItem("Workflow Steps", editorContainer),
 		widget.NewFormItem("Timezone Override (optional)", timezoneEntry),
 		widget.NewFormItem("", widget.NewLabel("Leave blank to inherit the global server timezone (or OS local if unset).")),
 		widget.NewFormItem("Max Retries", maxRetriesEntry),
@@ -1812,7 +2132,10 @@ func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 		title = "Edit Job"
 	}
 
-	d := dialog.NewCustomConfirm(title, "Save", "Cancel", form, func(confirm bool) {
+	formScroll := container.NewVScroll(form)
+	formScroll.SetMinSize(fyne.NewSize(500, 560))
+
+	d := dialog.NewCustomConfirm(title, "Save", "Cancel", formScroll, func(confirm bool) {
 		if !confirm {
 			return
 		}
@@ -1823,14 +2146,13 @@ func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 			return
 		}
 
-		schedule, err := ConsolidateScheduleFromEditor(scheduleParseMode, cronWidget, advancedScheduleEntry.Text)
+		scheduleRaw := ""
+		if currentScheduleMode == ParseModeRaw {
+			scheduleRaw = advancedScheduleEntry.Text
+		}
+		schedule, err := ConsolidateScheduleFromEditor(currentScheduleMode, cronWidget, scheduleRaw)
 		if err != nil {
 			ui.ShowToast(fmt.Sprintf("Invalid cron expression: %v", err))
-			return
-		}
-
-		if strings.TrimSpace(syncTypeSelect.Selected) == "" {
-			ui.ShowToast("Sync type is required.")
 			return
 		}
 
@@ -1844,10 +2166,27 @@ func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 			maxRetries = value
 		}
 
+		switch currentEditorMode {
+		case workflowEditorModeBuilder:
+			if err := syncBuilderToCanonical(true); err != nil {
+				ui.ShowToast(fmt.Sprintf("Invalid workflow steps: %v", err))
+				return
+			}
+		default:
+			if err := parseAdvancedJSON(false, true); err != nil {
+				ui.ShowToast(fmt.Sprintf("Invalid workflow steps JSON: %v", err))
+				return
+			}
+		}
+
 		updated := job
 		updated.Name = name
 		updated.Schedule = schedule
-		updated.SyncType = appserver.SyncType(syncTypeSelect.Selected)
+		updated.WorkflowProfile = strings.TrimSpace(currentProfileSelection)
+		if updated.WorkflowProfile == workflowProfileCustom {
+			updated.WorkflowProfile = ""
+		}
+		updated.Steps = cloneWorkflowSteps(canonicalSteps)
 		updated.Timezone = strings.TrimSpace(timezoneEntry.Text)
 		updated.Enabled = enabledCheck.Checked
 		updated.RetryOnError = retryCheck.Checked
@@ -1862,7 +2201,7 @@ func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 		ui.refreshJobsTab()
 	}, ui.window)
 
-	d.Resize(fyne.NewSize(520, 0))
+	d.Resize(fyne.NewSize(560, 700))
 	d.Show()
 }
 

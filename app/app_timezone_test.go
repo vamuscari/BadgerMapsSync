@@ -110,8 +110,10 @@ func TestScheduledJobEditsAreBlockedWhileServerRunning(t *testing.T) {
 			ID:       "job_1",
 			Name:     "nightly",
 			Schedule: "0 0 20 * * *",
-			SyncType: server.SyncTypePull,
-			Enabled:  true,
+			Steps: []server.WorkflowStep{
+				{ID: "pull_accounts", Type: server.WorkflowStepTypeSync, SyncMode: server.SyncModePullAccounts},
+			},
+			Enabled: true,
 		},
 	}
 	if err := server.SaveScheduledJobs(a.State, jobs); err != nil {
@@ -126,8 +128,10 @@ func TestScheduledJobEditsAreBlockedWhileServerRunning(t *testing.T) {
 		ID:       "job_2",
 		Name:     "hourly",
 		Schedule: "0 0 * * * *",
-		SyncType: server.SyncTypePull,
-		Enabled:  true,
+		Steps: []server.WorkflowStep{
+			{ID: "pull_accounts", Type: server.WorkflowStepTypeSync, SyncMode: server.SyncModePullAccounts},
+		},
+		Enabled: true,
 	}); err == nil || !strings.Contains(err.Error(), "stop the server first") {
 		t.Fatalf("expected running-server guard error from upsert, got %v", err)
 	}

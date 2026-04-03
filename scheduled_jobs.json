@@ -1,0 +1,55 @@
+{
+  "job_1775230264287017000": {
+    "id": "job_1775230264287017000",
+    "name": "Nightly Pull",
+    "schedule": "0 0 0 * * *",
+    "workflow_profile": "pull_all",
+    "steps": [
+      {
+        "id": "pull_accounts",
+        "name": "Pull Accounts",
+        "type": "sync",
+        "sync_type": "pull_accounts",
+        "action": {
+          "Type": "",
+          "Args": null
+        }
+      },
+      {
+        "id": "pull_checkins",
+        "name": "Pull Check-ins",
+        "type": "sync",
+        "sync_type": "pull_checkins",
+        "action": {
+          "Type": "",
+          "Args": null
+        }
+      },
+      {
+        "id": "pull_routes",
+        "name": "Pull Routes",
+        "type": "sync",
+        "sync_type": "pull_routes",
+        "action": {
+          "Type": "",
+          "Args": null
+        }
+      },
+      {
+        "id": "pull_profile",
+        "name": "Pull Profile",
+        "type": "sync",
+        "sync_type": "pull_profile",
+        "action": {
+          "Type": "",
+          "Args": null
+        }
+      }
+    ],
+    "enabled": true,
+    "run_count": 0,
+    "error_count": 0,
+    "retry_on_error": false,
+    "max_retries": 1
+  }
+}
