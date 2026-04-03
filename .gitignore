@@ -27,6 +27,7 @@ go.work.sum
 # env file
 .env
 *.yaml
+*.json
 
 # Any sqlite dbs
 *.db
@@ -47,6 +48,7 @@ BadgerMapsSync
 
 # System Files 
 \.DS_Store
+.DS_Store
 
 
 # Build cache
