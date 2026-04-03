@@ -9,7 +9,9 @@ CREATE TABLE IF NOT EXISTS SyncHistory (
     ItemsProcessed INTEGER DEFAULT 0,
     ErrorCount INTEGER DEFAULT 0,
     StartedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    StartedAtTimezone TEXT NOT NULL DEFAULT 'UTC',
     CompletedAt DATETIME,
+    CompletedAtTimezone TEXT,
     DurationSeconds INTEGER,
     Summary TEXT,
     Details TEXT

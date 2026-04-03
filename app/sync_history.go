@@ -182,15 +182,16 @@ func (a *App) startSyncHistoryRun(key, runType, direction, source, summary strin
 	}
 
 	entry := &database.SyncHistoryEntry{
-		CorrelationID:  run.correlationID,
-		RunType:        runType,
-		Direction:      direction,
-		Source:         source,
-		Initiator:      "manual",
-		Status:         "running",
-		ItemsProcessed: 0,
-		ErrorCount:     0,
-		Summary:        summary,
+		CorrelationID:     run.correlationID,
+		RunType:           runType,
+		Direction:         direction,
+		Source:            source,
+		Initiator:         "manual",
+		Status:            "running",
+		ItemsProcessed:    0,
+		ErrorCount:        0,
+		StartedAtTimezone: a.ServerTimezoneLocation().String(),
+		Summary:           summary,
 	}
 
 	if _, err := database.InsertSyncHistory(a.DB, entry); err != nil {
@@ -284,7 +285,17 @@ func (a *App) completeSyncHistoryRun(key, status string, itemsProcessed, errorCo
 		summary = fmt.Sprintf("Sync %s", status)
 	}
 
-	if err := database.CompleteSyncHistory(a.DB, correlationID, status, itemsProcessed, errorCount, durationSeconds, summary, details); err != nil {
+	if err := database.CompleteSyncHistory(
+		a.DB,
+		correlationID,
+		status,
+		itemsProcessed,
+		errorCount,
+		a.ServerTimezoneLocation().String(),
+		durationSeconds,
+		summary,
+		details,
+	); err != nil {
 		if a.shouldSuppressSyncHistoryFinalizeError(err) {
 			return
 		}

@@ -7,7 +7,8 @@ INSERT INTO SyncHistory (
     Status,
     ItemsProcessed,
     ErrorCount,
+    StartedAtTimezone,
     Summary,
     Details
 ) OUTPUT INSERTED.HistoryId
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);

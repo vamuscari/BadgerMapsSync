@@ -3,9 +3,11 @@ package server
 import (
 	"badgermaps/api"
 	"badgermaps/app"
+	appserver "badgermaps/app/server"
 	"badgermaps/app/state"
 	"badgermaps/database"
 	"bytes"
+	"context"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -214,6 +216,77 @@ func TestWebhookLoggingMiddleware(t *testing.T) {
 	if loggedBody != `{"key":"value"}` {
 		t.Errorf("Expected body to be '{\"key\":\"value\"}', got '%s'", loggedBody)
 	}
+}
+
+func TestHandleInternalSyncJobsIncludesCurrentAction(t *testing.T) {
+	a := app.NewApp()
+	*a.State.ConfigFile = filepath.Join(t.TempDir(), "config.yaml")
+
+	presenter := NewCliPresenter(a)
+	queue := appserver.NewSyncJobCoordinator(a.State, a.Events)
+	defer queue.Stop()
+	presenter.syncQueue = queue
+
+	runGate := make(chan struct{})
+	job, err := queue.Submit(appserver.SyncJobRequest{
+		Name:   "internal-jobs-test",
+		Source: "test",
+		Mode:   appserver.SyncModePull,
+		Run: func(_ context.Context) error {
+			<-runGate
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to queue test job: %v", err)
+	}
+
+	waitForQueueJobStatus(t, queue, job.ID, appserver.SyncJobRunning)
+	queue.SetActiveJobAction("Pulling accounts")
+
+	req := httptest.NewRequest(http.MethodGet, "/internal/jobs", nil)
+	rr := httptest.NewRecorder()
+	presenter.HandleInternalSyncJobs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	var snapshot appserver.SyncJobListResponse
+	if err := json.NewDecoder(rr.Body).Decode(&snapshot); err != nil {
+		t.Fatalf("failed to decode internal jobs response: %v", err)
+	}
+	if snapshot.Activity.ActiveJobAction != "Pulling accounts" {
+		t.Fatalf("expected active job action in activity, got %q", snapshot.Activity.ActiveJobAction)
+	}
+
+	foundAction := ""
+	for _, listed := range snapshot.Jobs {
+		if listed != nil && listed.ID == job.ID {
+			foundAction = listed.CurrentAction
+			break
+		}
+	}
+	if foundAction != "Pulling accounts" {
+		t.Fatalf("expected queued job action in snapshot, got %q", foundAction)
+	}
+
+	close(runGate)
+	waitForQueueJobStatus(t, queue, job.ID, appserver.SyncJobCompleted)
+}
+
+func waitForQueueJobStatus(t *testing.T, queue *appserver.SyncJobCoordinator, jobID string, expected appserver.SyncJobStatus) {
+	t.Helper()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		job, exists := queue.GetJob(jobID)
+		if exists && job.Status == expected {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for job %s to reach status %s", jobID, expected)
 }
 
 func TestMain(m *testing.M) {

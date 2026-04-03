@@ -14,6 +14,7 @@ type RuntimeActivity struct {
 	ActiveJobName   string    `json:"active_job_name,omitempty"`
 	ActiveJobSource string    `json:"active_job_source,omitempty"`
 	ActiveJobMode   SyncMode  `json:"active_job_mode,omitempty"`
+	ActiveJobAction string    `json:"active_job_action,omitempty"`
 	QueueDepth      int       `json:"queue_depth"`
 	LastHeartbeat   time.Time `json:"last_heartbeat"`
 	UpdatedAt       time.Time `json:"updated_at"`

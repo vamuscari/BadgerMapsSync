@@ -7,6 +7,7 @@ BadgerMapsSync is a command-line interface (CLI) and graphical user interface (G
 -   **Two-Way Data Sync**: Pull data from the BadgerMaps API to a local database and push local changes back to the API.
 -   **Multiple Database Backends**: Supports SQLite, PostgreSQL, and Microsoft SQL Server.
 -   **Webhook Server**: Run in server mode to listen for real-time updates from BadgerMaps webhooks.
+-   **Timezone-Aware Scheduling**: Configure a global server timezone and optional per-job overrides for scheduled jobs.
 -   **Event-Driven Actions**: Configure custom actions to be triggered by specific events (e.g., `PullComplete`, `PushComplete`).
 -   **Cross-Platform GUI**: A user-friendly graphical interface built with Fyne for managing data and configurations.
 -   **Interactive Setup**: An interactive configuration wizard to get you started quickly.
@@ -26,10 +27,14 @@ The application includes a graphical user interface (GUI) built with the Fyne to
 - **Pull**: Pull data from the BadgerMaps API, either all at once or by specific IDs.
 - **Push**: Push local changes to the BadgerMaps API.
 - **Explorer**: A database explorer to view the contents of the local database. Supports per-column menus (sort/filter), resizable columns, and quick presets.
-- **Server**: Configure and start the webhook server (TLS, host/port, request logging).
+- **Server**: Configure and start the webhook server (host/port, global timezone, TLS, request logging) and view active/queued jobs.
 - **Configuration**: Configure API credentials, database settings, and application preferences.
 - **Debug**: Inspect debug information.
-- **Log View + Details**: Real‑time logs with a right‑pane details viewer.
+- **Log View + Details + Jobs**: Real-time logs, details, and active/queued server jobs in the right-pane slide-out.
+
+### Server and Timezone
+
+For detailed server scheduling and timezone behavior, including cron format, job timezone precedence, and sync history timezone fields, see [Server and Timezone Guide](docs/server-timezone.md).
 
 ### Screenshots
 

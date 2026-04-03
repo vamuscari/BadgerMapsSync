@@ -2,7 +2,8 @@ UPDATE SyncHistory
 SET Status = ?,
     ItemsProcessed = ?,
     ErrorCount = ?,
-    CompletedAt = SYSDATETIME(),
+    CompletedAt = SYSUTCDATETIME(),
+    CompletedAtTimezone = ?,
     DurationSeconds = ?,
     Summary = ?,
     Details = ?

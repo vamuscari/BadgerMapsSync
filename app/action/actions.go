@@ -57,8 +57,20 @@ type Action interface {
 
 // ActionConfig is a generic struct for unmarshalling actions from YAML.
 type ActionConfig struct {
-	Type string                 `yaml:"type"`
-	Args map[string]interface{} `yaml:"args"`
+	Type    string                 `yaml:"type"`
+	Args    map[string]interface{} `yaml:"args"`
+	Enabled *bool                  `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+}
+
+func (c ActionConfig) IsEnabled() bool {
+	return c.Enabled == nil || *c.Enabled
+}
+
+func (c *ActionConfig) SetEnabled(enabled bool) {
+	if c == nil {
+		return
+	}
+	c.Enabled = &enabled
 }
 
 // ExecutionContext carries event metadata into action executions.

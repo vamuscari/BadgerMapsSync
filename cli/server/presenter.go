@@ -93,6 +93,7 @@ func (p *CliPresenter) RunServerWithContext(ctx context.Context, config *ServerC
 		&schedulerSyncExecutor{presenter: p},
 		syncQueue,
 		p.App.Config.CronJobs,
+		p.App.Config.Server.Timezone,
 	)
 	if err := scheduler.Start(); err != nil {
 		return fmt.Errorf("failed to start scheduler: %w", err)
@@ -137,6 +138,7 @@ func (p *CliPresenter) RunServerWithContext(ctx context.Context, config *ServerC
 	}
 
 	mux.Handle("/internal/jobs/sync", p.withLocalOnly(http.HandlerFunc(p.HandleInternalSyncJob)))
+	mux.Handle("/internal/jobs", p.withLocalOnly(http.HandlerFunc(p.HandleInternalSyncJobs)))
 	mux.Handle("/internal/jobs/", p.withLocalOnly(http.HandlerFunc(p.HandleInternalSyncJobStatus)))
 	mux.Handle("/internal/activity", p.withLocalOnly(http.HandlerFunc(p.HandleInternalActivity)))
 
@@ -247,20 +249,31 @@ func (e *schedulerSyncExecutor) PullRoute(id int) error {
 	return e.presenter.runSyncMode(appserver.SyncModePullRoute, id)
 }
 
+func (p *CliPresenter) setActiveJobAction(action string) {
+	if p.syncQueue == nil {
+		return
+	}
+	p.syncQueue.SetActiveJobAction(action)
+}
+
 func (p *CliPresenter) runSyncMode(mode appserver.SyncMode, resourceID int) error {
 	switch mode {
 	case appserver.SyncModeNone:
 		return nil
 	case appserver.SyncModePull:
+		p.setActiveJobAction("Pulling accounts")
 		if err := pull.PullGroupAccounts(p.App, resourceID, nil); err != nil {
 			return err
 		}
+		p.setActiveJobAction("Pulling check-ins")
 		if err := pull.PullGroupCheckins(p.App, nil); err != nil {
 			return err
 		}
+		p.setActiveJobAction("Pulling routes")
 		if err := pull.PullGroupRoutes(p.App, nil); err != nil {
 			return err
 		}
+		p.setActiveJobAction("Pulling profile")
 		_, err := pull.PullProfile(p.App, nil)
 		return err
 	case appserver.SyncModePullPush:
@@ -269,39 +282,50 @@ func (p *CliPresenter) runSyncMode(mode appserver.SyncMode, resourceID int) erro
 		}
 		return p.runSyncMode(appserver.SyncModePush, 0)
 	case appserver.SyncModePullAccounts:
+		p.setActiveJobAction("Pulling accounts")
 		return pull.PullGroupAccounts(p.App, 0, nil)
 	case appserver.SyncModePullCheckins:
+		p.setActiveJobAction("Pulling check-ins")
 		return pull.PullGroupCheckins(p.App, nil)
 	case appserver.SyncModePullRoutes:
+		p.setActiveJobAction("Pulling routes")
 		return pull.PullGroupRoutes(p.App, nil)
 	case appserver.SyncModePullProfile:
+		p.setActiveJobAction("Pulling profile")
 		_, err := pull.PullProfile(p.App, nil)
 		return err
 	case appserver.SyncModePush:
+		p.setActiveJobAction("Pushing accounts")
 		if err := push.RunPushAccounts(p.App); err != nil {
 			return err
 		}
+		p.setActiveJobAction("Pushing check-ins")
 		return push.RunPushCheckins(p.App)
 	case appserver.SyncModePushAccounts:
+		p.setActiveJobAction("Pushing accounts")
 		return push.RunPushAccounts(p.App)
 	case appserver.SyncModePushCheckins:
+		p.setActiveJobAction("Pushing check-ins")
 		return push.RunPushCheckins(p.App)
 	case appserver.SyncModePullAccount:
 		if resourceID <= 0 {
 			return fmt.Errorf("resource id is required for mode %s", mode)
 		}
+		p.setActiveJobAction(fmt.Sprintf("Pulling account %d", resourceID))
 		_, err := pull.PullAccount(p.App, resourceID)
 		return err
 	case appserver.SyncModePullCheckin:
 		if resourceID <= 0 {
 			return fmt.Errorf("resource id is required for mode %s", mode)
 		}
+		p.setActiveJobAction(fmt.Sprintf("Pulling check-in %d", resourceID))
 		_, err := pull.PullCheckin(p.App, resourceID)
 		return err
 	case appserver.SyncModePullRoute:
 		if resourceID <= 0 {
 			return fmt.Errorf("resource id is required for mode %s", mode)
 		}
+		p.setActiveJobAction(fmt.Sprintf("Pulling route %d", resourceID))
 		_, err := pull.PullRoute(p.App, resourceID)
 		return err
 	default:
@@ -387,6 +411,25 @@ func (p *CliPresenter) HandleInternalSyncJobStatus(w http.ResponseWriter, r *htt
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(job)
+}
+
+func (p *CliPresenter) HandleInternalSyncJobs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if p.syncQueue == nil {
+		http.Error(w, "Sync queue unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	response := appserver.SyncJobListResponse{
+		Activity: p.syncQueue.GetActivity(),
+		Jobs:     p.syncQueue.ListJobs(),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 func (p *CliPresenter) HandleInternalActivity(w http.ResponseWriter, r *http.Request) {

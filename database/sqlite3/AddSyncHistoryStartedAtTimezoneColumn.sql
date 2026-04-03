@@ -1,0 +1,2 @@
+ALTER TABLE SyncHistory
+ADD COLUMN StartedAtTimezone TEXT NOT NULL DEFAULT 'UTC';

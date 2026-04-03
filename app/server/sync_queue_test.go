@@ -65,6 +65,75 @@ func TestSyncJobCoordinatorSerializesJobs(t *testing.T) {
 	}
 }
 
+func TestSyncJobCoordinatorTracksActiveJobAction(t *testing.T) {
+	s := state.NewState()
+	*s.ConfigFile = filepath.Join(t.TempDir(), "config.yaml")
+
+	queue := NewSyncJobCoordinator(s, nil)
+	defer queue.Stop()
+
+	runGate := make(chan struct{})
+	job, err := queue.Submit(SyncJobRequest{
+		Name:   "tracked",
+		Source: "test",
+		Mode:   SyncModePull,
+		Run: func(_ context.Context) error {
+			<-runGate
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to queue job: %v", err)
+	}
+
+	waitForRunningJob(t, queue, job.ID)
+
+	queue.SetActiveJobAction("Pulling accounts")
+
+	activeJob, exists := queue.GetJob(job.ID)
+	if !exists {
+		t.Fatalf("expected job %s to exist", job.ID)
+	}
+	if activeJob.CurrentAction != "Pulling accounts" {
+		t.Fatalf("expected current action to be tracked, got %q", activeJob.CurrentAction)
+	}
+
+	activity := queue.GetActivity()
+	if activity.ActiveJobAction != "Pulling accounts" {
+		t.Fatalf("expected runtime activity action to match, got %q", activity.ActiveJobAction)
+	}
+
+	close(runGate)
+	waitForTerminalJob(t, queue, job.ID)
+
+	completedJob, exists := queue.GetJob(job.ID)
+	if !exists {
+		t.Fatalf("expected completed job %s to exist", job.ID)
+	}
+	if completedJob.CurrentAction != "" {
+		t.Fatalf("expected completed job action to be cleared, got %q", completedJob.CurrentAction)
+	}
+
+	activity = queue.GetActivity()
+	if activity.ActiveJobAction != "" {
+		t.Fatalf("expected runtime activity action to be cleared, got %q", activity.ActiveJobAction)
+	}
+}
+
+func waitForRunningJob(t *testing.T, queue *SyncJobCoordinator, jobID string) {
+	t.Helper()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		job, exists := queue.GetJob(jobID)
+		if exists && job.Status == SyncJobRunning {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for job %s to start running", jobID)
+}
+
 func waitForTerminalJob(t *testing.T, queue *SyncJobCoordinator, jobID string) {
 	t.Helper()
 

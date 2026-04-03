@@ -72,7 +72,12 @@ The server exposes internal local-only endpoints for queue/activity visibility:
 - `GET /internal/jobs/{id}`
 - `GET /internal/activity`
 
-The GUI Server tab uses these endpoints to show active, queued, and recent jobs. Access is restricted to local requests.
+The runtime payload includes:
+
+- Per-job `current_action` when a sync job is actively executing a stage.
+- Activity-level `active_job_action` for quick status display.
+
+The GUI Server tab uses these endpoints to show active, queued, and recent jobs. The right-pane slide-out `Jobs` section uses the same endpoint and focuses on active and queued jobs with live action updates while running. Access is restricted to local requests.
 
 ## Sync History Timezone Fields
 

@@ -2,6 +2,7 @@ package server
 
 import (
 	"badgermaps/app"
+	appserver "badgermaps/app/server"
 	"badgermaps/events"
 	"badgermaps/utils"
 	"bufio"
@@ -34,8 +35,14 @@ func interactiveServerSetup(a *app.App) error {
 
 	a.State.ServerHost = utils.PromptString(reader, "Server Host", a.State.ServerHost)
 	a.State.ServerPort = utils.PromptInt(reader, "Server Port", a.State.ServerPort)
+	a.State.ServerTimezone = utils.PromptString(reader, "Global Timezone (IANA, optional)", a.State.ServerTimezone)
 	a.State.TLSEnabled = utils.PromptBool(reader, "Enable TLS/HTTPS", a.State.TLSEnabled)
 	a.State.ServerLogRequests = utils.PromptBool(reader, "Log all incoming requests", a.State.ServerLogRequests)
+
+	a.State.ServerTimezone = appserver.NormalizeTimezone(a.State.ServerTimezone)
+	if err := appserver.ValidateTimezone(a.State.ServerTimezone); err != nil {
+		return err
+	}
 
 	if a.State.TLSEnabled {
 		a.State.TLSCert = utils.PromptString(reader, "TLS Certificate File", a.State.TLSCert)
@@ -44,6 +51,7 @@ func interactiveServerSetup(a *app.App) error {
 
 	a.Config.Server.Host = a.State.ServerHost
 	a.Config.Server.Port = a.State.ServerPort
+	a.Config.Server.Timezone = a.State.ServerTimezone
 	a.Config.Server.TLSEnabled = a.State.TLSEnabled
 	a.Config.Server.TLSCert = a.State.TLSCert
 	a.Config.Server.TLSKey = a.State.TLSKey

@@ -69,6 +69,19 @@ var legacyColumnMigrations = []columnMigration{
 	},
 }
 
+var syncHistoryTimezoneColumnMigrations = []columnMigration{
+	{
+		Table:   "SyncHistory",
+		Column:  "StartedAtTimezone",
+		Command: "AddSyncHistoryStartedAtTimezoneColumn",
+	},
+	{
+		Table:   "SyncHistory",
+		Column:  "CompletedAtTimezone",
+		Command: "AddSyncHistoryCompletedAtTimezoneColumn",
+	},
+}
+
 func applyColumnMigrations(db DB, migrations []columnMigration, s *state.State) error {
 	sqlDB := db.GetDB()
 	if sqlDB == nil {
@@ -517,6 +530,10 @@ func (db *SQLiteConfig) EnforceSchema(s *state.State) error {
 		}
 	}
 
+	if err := applyColumnMigrations(db, syncHistoryTimezoneColumnMigrations, s); err != nil {
+		return err
+	}
+
 	// Insert initial data for FieldMaps
 	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Inserting initial data for FieldMaps... ")
@@ -894,6 +911,10 @@ func (db *PostgreSQLConfig) EnforceSchema(s *state.State) error {
 		if (s.Verbose || s.Debug) && !s.Quiet {
 			fmt.Println(color.GreenString("OK"))
 		}
+	}
+
+	if err := applyColumnMigrations(db, syncHistoryTimezoneColumnMigrations, s); err != nil {
+		return err
 	}
 
 	// Insert initial data for FieldMaps
@@ -1427,6 +1448,9 @@ func (db *MSSQLConfig) EnforceSchema(s *state.State) error {
 	}
 
 	if err := applyColumnMigrations(db, legacyColumnMigrations, s); err != nil {
+		return err
+	}
+	if err := applyColumnMigrations(db, syncHistoryTimezoneColumnMigrations, s); err != nil {
 		return err
 	}
 	if err := addMSSQLMissingColumnsRecursively(db, s); err != nil {
@@ -2080,7 +2104,7 @@ func GetExpectedSchema() map[string][]string {
 		},
 		"SyncHistory": {
 			"HistoryId", "CorrelationId", "RunType", "Direction", "Source", "Initiator", "Status", "ItemsProcessed", "ErrorCount",
-			"StartedAt", "CompletedAt", "DurationSeconds", "Summary", "Details",
+			"StartedAt", "StartedAtTimezone", "CompletedAt", "CompletedAtTimezone", "DurationSeconds", "Summary", "Details",
 		},
 		"UserProfiles": {
 			"ProfileId", "Email", "FirstName", "LastName", "IsManager", "IsHideReferralIOSBanner",

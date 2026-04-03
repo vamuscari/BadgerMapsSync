@@ -1,6 +1,7 @@
 package database
 
 import (
+	"badgermaps/app/state"
 	"database/sql"
 	"fmt"
 	"strconv"
@@ -10,20 +11,22 @@ import (
 
 // SyncHistoryEntry represents a row in the SyncHistory table.
 type SyncHistoryEntry struct {
-	HistoryID       int64
-	CorrelationID   string
-	RunType         string
-	Direction       string
-	Source          string
-	Initiator       string
-	Status          string
-	ItemsProcessed  int
-	ErrorCount      int
-	StartedAt       time.Time
-	CompletedAt     *time.Time
-	DurationSeconds int
-	Summary         string
-	Details         string
+	HistoryID           int64
+	CorrelationID       string
+	RunType             string
+	Direction           string
+	Source              string
+	Initiator           string
+	Status              string
+	ItemsProcessed      int
+	ErrorCount          int
+	StartedAt           time.Time
+	StartedAtTimezone   string
+	CompletedAt         *time.Time
+	CompletedAtTimezone string
+	DurationSeconds     int
+	Summary             string
+	Details             string
 }
 
 // InsertSyncHistory creates a new sync history record and returns the new history ID.
@@ -46,6 +49,10 @@ func InsertSyncHistory(db DB, entry *SyncHistoryEntry) (int64, error) {
 	if entry.Status == "" {
 		entry.Status = "running"
 	}
+	if err := ensureSyncHistoryTimezoneColumns(db); err != nil {
+		return 0, err
+	}
+	entry.StartedAtTimezone = normalizeSyncHistoryTimezone(entry.StartedAtTimezone)
 
 	sqlText := db.GetSQL("InsertSyncHistory")
 	if sqlText == "" {
@@ -62,6 +69,7 @@ func InsertSyncHistory(db DB, entry *SyncHistoryEntry) (int64, error) {
 		entry.Status,
 		entry.ItemsProcessed,
 		entry.ErrorCount,
+		entry.StartedAtTimezone,
 		entry.Summary,
 		entry.Details,
 	}
@@ -119,10 +127,14 @@ func UpdateSyncHistoryMetrics(db DB, correlationID string, itemsProcessed int, s
 }
 
 // CompleteSyncHistory finalizes a sync history record with completion details.
-func CompleteSyncHistory(db DB, correlationID, status string, itemsProcessed, errorCount int, durationSeconds int64, summary, details string) error {
+func CompleteSyncHistory(db DB, correlationID, status string, itemsProcessed, errorCount int, completedAtTZ string, durationSeconds int64, summary, details string) error {
 	if db == nil || db.GetDB() == nil {
 		return fmt.Errorf("database connection is not initialized")
 	}
+	if err := ensureSyncHistoryTimezoneColumns(db); err != nil {
+		return err
+	}
+	completedAtTZ = normalizeSyncHistoryTimezone(completedAtTZ)
 
 	sqlText := db.GetSQL("CompleteSyncHistory")
 	if sqlText == "" {
@@ -133,13 +145,13 @@ func CompleteSyncHistory(db DB, correlationID, status string, itemsProcessed, er
 
 	switch db.GetType() {
 	case "postgres":
-		_, err := sqlDB.Exec(sqlText, status, itemsProcessed, errorCount, durationSeconds, summary, details, correlationID)
+		_, err := sqlDB.Exec(sqlText, status, itemsProcessed, errorCount, completedAtTZ, durationSeconds, summary, details, correlationID)
 		return err
 	case "mssql":
-		_, err := sqlDB.Exec(sqlText, status, itemsProcessed, errorCount, durationSeconds, summary, details, correlationID)
+		_, err := sqlDB.Exec(sqlText, status, itemsProcessed, errorCount, completedAtTZ, durationSeconds, summary, details, correlationID)
 		return err
 	default:
-		_, err := sqlDB.Exec(sqlText, status, itemsProcessed, errorCount, durationSeconds, summary, details, correlationID)
+		_, err := sqlDB.Exec(sqlText, status, itemsProcessed, errorCount, completedAtTZ, durationSeconds, summary, details, correlationID)
 		return err
 	}
 }
@@ -151,6 +163,9 @@ func GetRecentSyncHistory(db DB, limit int) ([]SyncHistoryEntry, error) {
 	}
 	if limit <= 0 {
 		limit = 20
+	}
+	if err := ensureSyncHistoryTimezoneColumns(db); err != nil {
+		return nil, err
 	}
 
 	sqlText := db.GetSQL("GetRecentSyncHistory")
@@ -173,6 +188,8 @@ func GetRecentSyncHistory(db DB, limit int) ([]SyncHistoryEntry, error) {
 			entry     SyncHistoryEntry
 			started   any
 			completed any
+			startedTZ sql.NullString
+			endedTZ   sql.NullString
 			duration  sql.NullInt64
 		)
 
@@ -187,7 +204,9 @@ func GetRecentSyncHistory(db DB, limit int) ([]SyncHistoryEntry, error) {
 			&entry.ItemsProcessed,
 			&entry.ErrorCount,
 			&started,
+			&startedTZ,
 			&completed,
+			&endedTZ,
 			&duration,
 			&entry.Summary,
 			&entry.Details,
@@ -196,8 +215,13 @@ func GetRecentSyncHistory(db DB, limit int) ([]SyncHistoryEntry, error) {
 		}
 
 		entry.StartedAt = normaliseToTime(started)
+		entry.StartedAtTimezone = normalizeSyncHistoryTimezone(startedTZ.String)
 		if completedTime := normaliseToNullableTime(completed); completedTime != nil {
 			entry.CompletedAt = completedTime
+		}
+		entry.CompletedAtTimezone = strings.TrimSpace(endedTZ.String)
+		if entry.CompletedAt != nil && entry.CompletedAtTimezone == "" {
+			entry.CompletedAtTimezone = "UTC"
 		}
 		if duration.Valid {
 			entry.DurationSeconds = int(duration.Int64)
@@ -207,6 +231,21 @@ func GetRecentSyncHistory(db DB, limit int) ([]SyncHistoryEntry, error) {
 	}
 
 	return entries, rows.Err()
+}
+
+func ensureSyncHistoryTimezoneColumns(db DB) error {
+	if db == nil {
+		return fmt.Errorf("database connection is not initialized")
+	}
+	return applyColumnMigrations(db, syncHistoryTimezoneColumnMigrations, &state.State{Quiet: true})
+}
+
+func normalizeSyncHistoryTimezone(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "UTC"
+	}
+	return trimmed
 }
 
 func normaliseToTime(value any) time.Time {

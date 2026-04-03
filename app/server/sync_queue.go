@@ -5,6 +5,8 @@ import (
 	"badgermaps/events"
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,15 +18,16 @@ const (
 )
 
 type SyncJob struct {
-	ID          string        `json:"id"`
-	Name        string        `json:"name,omitempty"`
-	Source      string        `json:"source"`
-	Mode        SyncMode      `json:"mode"`
-	Status      SyncJobStatus `json:"status"`
-	QueuedAt    time.Time     `json:"queued_at"`
-	StartedAt   *time.Time    `json:"started_at,omitempty"`
-	CompletedAt *time.Time    `json:"completed_at,omitempty"`
-	Error       string        `json:"error,omitempty"`
+	ID            string        `json:"id"`
+	Name          string        `json:"name,omitempty"`
+	Source        string        `json:"source"`
+	Mode          SyncMode      `json:"mode"`
+	Status        SyncJobStatus `json:"status"`
+	CurrentAction string        `json:"current_action,omitempty"`
+	QueuedAt      time.Time     `json:"queued_at"`
+	StartedAt     *time.Time    `json:"started_at,omitempty"`
+	CompletedAt   *time.Time    `json:"completed_at,omitempty"`
+	Error         string        `json:"error,omitempty"`
 }
 
 func (j *SyncJob) clone() *SyncJob {
@@ -194,6 +197,67 @@ func (c *SyncJobCoordinator) GetActivity() RuntimeActivity {
 	return c.activity
 }
 
+func (c *SyncJobCoordinator) SetActiveJobAction(action string) {
+	now := time.Now()
+	trimmed := strings.TrimSpace(action)
+
+	c.mu.Lock()
+	if c.activeJobID == "" {
+		c.mu.Unlock()
+		return
+	}
+
+	job, exists := c.jobs[c.activeJobID]
+	if !exists {
+		c.mu.Unlock()
+		return
+	}
+
+	job.CurrentAction = trimmed
+	activity := c.snapshotActivityLocked(now)
+	c.mu.Unlock()
+
+	c.persistActivity(activity)
+}
+
+func (c *SyncJobCoordinator) ListJobs() []*SyncJob {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	jobs := make([]*SyncJob, 0, len(c.jobs))
+	for _, job := range c.jobs {
+		jobs = append(jobs, job.clone())
+	}
+
+	sort.SliceStable(jobs, func(i, j int) bool {
+		left := jobs[i]
+		right := jobs[j]
+
+		leftRank := syncJobRank(left.Status)
+		rightRank := syncJobRank(right.Status)
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+
+		switch left.Status {
+		case SyncJobRunning:
+			if left.StartedAt == nil || right.StartedAt == nil {
+				return left.QueuedAt.Before(right.QueuedAt)
+			}
+			return left.StartedAt.Before(*right.StartedAt)
+		case SyncJobQueued:
+			return left.QueuedAt.Before(right.QueuedAt)
+		default:
+			if left.CompletedAt == nil || right.CompletedAt == nil {
+				return left.QueuedAt.After(right.QueuedAt)
+			}
+			return left.CompletedAt.After(*right.CompletedAt)
+		}
+	})
+
+	return jobs
+}
+
 func (c *SyncJobCoordinator) worker() {
 	defer close(c.workerDone)
 
@@ -217,6 +281,7 @@ func (c *SyncJobCoordinator) runJob(req queuedSyncJob) {
 	}
 	job.Status = SyncJobRunning
 	job.StartedAt = &startedAt
+	job.CurrentAction = ""
 	if c.queuedCount > 0 {
 		c.queuedCount--
 	}
@@ -248,6 +313,7 @@ func (c *SyncJobCoordinator) runJob(req queuedSyncJob) {
 	job, exists = c.jobs[req.job.ID]
 	if exists {
 		job.CompletedAt = &completedAt
+		job.CurrentAction = ""
 		if runErr != nil {
 			job.Status = SyncJobFailed
 			job.Error = runErr.Error()
@@ -324,6 +390,7 @@ func (c *SyncJobCoordinator) snapshotActivityLocked(now time.Time) RuntimeActivi
 			activity.ActiveJobName = activeJob.Name
 			activity.ActiveJobSource = activeJob.Source
 			activity.ActiveJobMode = activeJob.Mode
+			activity.ActiveJobAction = activeJob.CurrentAction
 		}
 	}
 	c.activity = activity
@@ -352,4 +419,19 @@ func (c *SyncJobCoordinator) pruneCompletedJobsLocked() {
 func (c *SyncJobCoordinator) nextJobID(now time.Time) string {
 	n := c.jobCounterSeed.Add(1)
 	return fmt.Sprintf("sync_%d_%d", now.UnixNano(), n)
+}
+
+func syncJobRank(status SyncJobStatus) int {
+	switch status {
+	case SyncJobRunning:
+		return 0
+	case SyncJobQueued:
+		return 1
+	case SyncJobFailed:
+		return 2
+	case SyncJobCompleted:
+		return 3
+	default:
+		return 4
+	}
 }

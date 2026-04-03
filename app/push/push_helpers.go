@@ -30,20 +30,20 @@ func GetFilteredPendingChanges(a *app.App, entityType string, options PushFilter
 		if err != nil {
 			return nil, fmt.Errorf("error getting pending account changes: %w", err)
 		}
-		return filterAndSortAccountChanges(accountChanges, options), nil
+		return filterAndSortAccountChanges(a, accountChanges, options), nil
 	case "checkins":
 		checkinChanges, err = database.GetPendingCheckinChanges(a.DB)
 		if err != nil {
 			return nil, fmt.Errorf("error getting pending check-in changes: %w", err)
 		}
-		return filterAndSortCheckinChanges(checkinChanges, options), nil
+		return filterAndSortCheckinChanges(a, checkinChanges, options), nil
 	default:
 		return nil, fmt.Errorf("unsupported entity type for filtering: %s", entityType)
 	}
 }
 
 // filterAndSortAccountChanges applies the given filters and sorting to a slice of account changes.
-func filterAndSortAccountChanges(changes []database.AccountPendingChange, options PushFilterOptions) []database.AccountPendingChange {
+func filterAndSortAccountChanges(a *app.App, changes []database.AccountPendingChange, options PushFilterOptions) []database.AccountPendingChange {
 	var filtered []database.AccountPendingChange
 
 	for _, change := range changes {
@@ -54,7 +54,7 @@ func filterAndSortAccountChanges(changes []database.AccountPendingChange, option
 			continue
 		}
 		if options.Date != "" {
-			changeDate := change.CreatedAt.Format("2006-01-02")
+			changeDate := dateInDisplayTimezone(a, change.CreatedAt)
 			if changeDate != options.Date {
 				continue
 			}
@@ -94,7 +94,7 @@ func filterAndSortAccountChanges(changes []database.AccountPendingChange, option
 }
 
 // filterAndSortCheckinChanges applies the given filters and sorting to a slice of check-in changes.
-func filterAndSortCheckinChanges(changes []database.CheckinPendingChange, options PushFilterOptions) []database.CheckinPendingChange {
+func filterAndSortCheckinChanges(a *app.App, changes []database.CheckinPendingChange, options PushFilterOptions) []database.CheckinPendingChange {
 	var filtered []database.CheckinPendingChange
 
 	for _, change := range changes {
@@ -105,8 +105,8 @@ func filterAndSortCheckinChanges(changes []database.CheckinPendingChange, option
 			continue
 		}
 		if options.Date != "" {
-			changeDate, err := time.Parse("2006-01-02", options.Date)
-			if err == nil && !isSameDay(change.CreatedAt, changeDate) {
+			changeDate := dateInDisplayTimezone(a, change.CreatedAt)
+			if changeDate != options.Date {
 				continue
 			}
 		}
@@ -144,8 +144,9 @@ func filterAndSortCheckinChanges(changes []database.CheckinPendingChange, option
 	return filtered
 }
 
-// isSameDay checks if two timestamps occur on the same day.
-func isSameDay(t1, t2 time.Time) bool {
-	return t1.Year() == t2.Year() && t1.Month() == t2.Month() && t1.Day() == t2.Day()
+func dateInDisplayTimezone(a *app.App, ts time.Time) string {
+	if a == nil {
+		return ts.Format("2006-01-02")
+	}
+	return a.DateInDisplayTimezone(ts)
 }
-

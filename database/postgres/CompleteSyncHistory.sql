@@ -2,8 +2,9 @@ UPDATE "SyncHistory"
 SET "Status" = $1,
     "ItemsProcessed" = $2,
     "ErrorCount" = $3,
-    "CompletedAt" = CURRENT_TIMESTAMP,
-    "DurationSeconds" = $4,
-    "Summary" = $5,
-    "Details" = $6
-WHERE "CorrelationId" = $7;
+    "CompletedAt" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
+    "CompletedAtTimezone" = $4,
+    "DurationSeconds" = $5,
+    "Summary" = $6,
+    "Details" = $7
+WHERE "CorrelationId" = $8;

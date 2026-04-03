@@ -270,6 +270,14 @@ func (r *logEntryRenderer) Destroy() {}
 
 var rightPaneWidth float32 = 360
 
+type rightPaneSection string
+
+const (
+	rightPaneSectionDetails rightPaneSection = "details"
+	rightPaneSectionLog     rightPaneSection = "log"
+	rightPaneSectionJobs    rightPaneSection = "jobs"
+)
+
 // SetDefaultRightPaneWidth allows external utilities (e.g., screenshot generator)
 // to adjust the default width of the right details pane.
 func SetDefaultRightPaneWidth(w float32) {
@@ -291,11 +299,18 @@ type Gui struct {
 	logBinding            binding.StringList
 	logView               *widget.List
 	detailsView           fyne.CanvasObject
+	rightPaneSection      rightPaneSection
+	rightPaneJobsView     fyne.CanvasObject
+	rightPaneJobsActivity *widget.Label
+	rightPaneJobsList     *widget.List
+	rightPaneJobsLines    []string
 	rightPaneContent      *fyne.Container
 	rightPaneOverlay      *fyne.Container
 	rightPaneBackdrop     fyne.CanvasObject
 	rightPaneToggleButton *widget.Button
 	rightPaneVisible      bool
+	rightPaneJobsStopMu   sync.Mutex
+	rightPaneJobsStopCh   chan struct{}
 	configTab             fyne.CanvasObject
 	progressBar           *widget.ProgressBar
 	progressContainer     *fyne.Container
@@ -645,6 +660,7 @@ func (ui *Gui) createMainContent() fyne.CanvasObject {
 	}
 
 	// Initialize details view
+	ui.rightPaneSection = rightPaneSectionDetails
 	ui.detailsView = container.NewCenter(widget.NewLabel("Select an item to see details"))
 	ui.rightPaneContent = container.NewMax(ui.detailsView)
 
@@ -968,21 +984,160 @@ func (ui *Gui) RefreshJobsTab() {
 
 func (ui *Gui) createRightPaneHeader() fyne.CanvasObject {
 	detailsButton := widget.NewButtonWithIcon("Details", theme.ListIcon(), func() {
-		ui.terminalVisible = false
-		if ui.detailsView != nil {
-			ui.setRightPaneContent(ui.detailsView)
-		}
+		ui.selectRightPaneSection(rightPaneSectionDetails)
 		ui.showRightPane()
 	})
 
 	logButton := widget.NewButtonWithIcon("Log", theme.ComputerIcon(), func() {
-		ui.terminalVisible = true
-		ui.setRightPaneContent(ui.logView)
+		ui.selectRightPaneSection(rightPaneSectionLog)
 		ui.showRightPane()
 	})
 
-	buttonRow := container.NewHBox(detailsButton, logButton)
+	jobsButton := widget.NewButtonWithIcon("Jobs", theme.HistoryIcon(), func() {
+		ui.selectRightPaneSection(rightPaneSectionJobs)
+		ui.showRightPane()
+	})
+
+	buttonRow := container.NewHBox(detailsButton, logButton, jobsButton)
 	return container.NewBorder(nil, nil, nil, nil, buttonRow)
+}
+
+func (ui *Gui) selectRightPaneSection(section rightPaneSection) {
+	ui.rightPaneSection = section
+	switch section {
+	case rightPaneSectionLog:
+		ui.terminalVisible = true
+		if ui.logView != nil {
+			ui.setRightPaneContent(ui.logView)
+		}
+	case rightPaneSectionJobs:
+		ui.terminalVisible = false
+		ui.setRightPaneContent(ui.ensureRightPaneJobsView())
+	default:
+		ui.terminalVisible = false
+		if ui.detailsView != nil {
+			ui.setRightPaneContent(ui.detailsView)
+		}
+	}
+	ui.manageRightPaneJobsAutoRefresh()
+}
+
+func (ui *Gui) ensureRightPaneJobsView() fyne.CanvasObject {
+	if ui.rightPaneJobsView != nil {
+		return ui.rightPaneJobsView
+	}
+
+	ui.rightPaneJobsLines = []string{"Start the server to view active and queued jobs."}
+	ui.rightPaneJobsList = widget.NewList(
+		func() int {
+			return len(ui.rightPaneJobsLines)
+		},
+		func() fyne.CanvasObject {
+			label := widget.NewLabel("template")
+			label.Wrapping = fyne.TextWrapWord
+			return label
+		},
+		func(id widget.ListItemID, object fyne.CanvasObject) {
+			object.(*widget.Label).SetText(ui.rightPaneJobsLines[id])
+		},
+	)
+	jobsListContainer := container.NewVScroll(ui.rightPaneJobsList)
+	jobsListContainer.SetMinSize(fyne.NewSize(0, 220))
+
+	ui.rightPaneJobsActivity = widget.NewLabel("Server jobs will appear here once the server is active.")
+	ui.rightPaneJobsActivity.Wrapping = fyne.TextWrapWord
+
+	refreshButton := widget.NewButtonWithIcon("Refresh Job List", theme.ViewRefreshIcon(), func() {
+		ui.refreshRightPaneJobs()
+	})
+
+	ui.rightPaneJobsView = ui.newSectionCard(
+		"Jobs",
+		"View active and queued server sync jobs.",
+		ui.rightPaneJobsActivity,
+		jobsListContainer,
+		container.NewCenter(refreshButton),
+	)
+
+	ui.refreshRightPaneJobs()
+	return ui.rightPaneJobsView
+}
+
+func (ui *Gui) refreshRightPaneJobs() {
+	if ui.rightPaneJobsActivity == nil || ui.rightPaneJobsList == nil {
+		return
+	}
+
+	displayLoc := ui.app.ServerTimezoneLocation()
+	timezoneLabel := displayLoc.String()
+	snapshot, err := ui.presenter.FetchServerJobsSnapshot()
+	if err != nil {
+		ui.rightPaneJobsActivity.SetText(fmt.Sprintf("Unable to load server jobs: %v (display TZ: %s)", err, timezoneLabel))
+		ui.rightPaneJobsLines = []string{"Start the server to view active and queued jobs."}
+		ui.rightPaneJobsList.Refresh()
+		return
+	}
+
+	ui.rightPaneJobsActivity.SetText(formatServerActivityLine(snapshot.Activity, displayLoc))
+	filtered := filterActiveAndQueuedJobs(snapshot.Jobs)
+	if len(filtered) == 0 {
+		ui.rightPaneJobsLines = []string{"No active or queued jobs."}
+		ui.rightPaneJobsList.Refresh()
+		return
+	}
+
+	lines := make([]string, 0, len(filtered))
+	for _, job := range filtered {
+		lines = append(lines, formatServerJobLine(job, displayLoc))
+	}
+	ui.rightPaneJobsLines = lines
+	ui.rightPaneJobsList.Refresh()
+}
+
+func (ui *Gui) manageRightPaneJobsAutoRefresh() {
+	if ui.rightPaneVisible && ui.rightPaneSection == rightPaneSectionJobs {
+		ui.startRightPaneJobsAutoRefresh()
+		return
+	}
+	ui.stopRightPaneJobsAutoRefresh()
+}
+
+func (ui *Gui) startRightPaneJobsAutoRefresh() {
+	ui.rightPaneJobsStopMu.Lock()
+	defer ui.rightPaneJobsStopMu.Unlock()
+
+	if ui.rightPaneJobsStopCh != nil {
+		return
+	}
+
+	stopCh := make(chan struct{})
+	ui.rightPaneJobsStopCh = stopCh
+
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopCh:
+				return
+			case <-ticker.C:
+				fyne.Do(func() {
+					ui.refreshRightPaneJobs()
+				})
+			}
+		}
+	}()
+}
+
+func (ui *Gui) stopRightPaneJobsAutoRefresh() {
+	ui.rightPaneJobsStopMu.Lock()
+	defer ui.rightPaneJobsStopMu.Unlock()
+
+	if ui.rightPaneJobsStopCh == nil {
+		return
+	}
+	close(ui.rightPaneJobsStopCh)
+	ui.rightPaneJobsStopCh = nil
 }
 
 func (ui *Gui) createDisabledTabView(configTab *container.TabItem) fyne.CanvasObject {
@@ -1009,7 +1164,7 @@ func (ui *Gui) toggleRightPane() {
 		return
 	}
 	if len(ui.rightPaneContent.Objects) == 0 {
-		ui.setRightPaneContent(ui.detailsView)
+		ui.selectRightPaneSection(ui.rightPaneSection)
 	}
 	ui.showRightPane()
 }
@@ -1025,6 +1180,7 @@ func (ui *Gui) showRightPane() {
 	ui.rightPaneOverlay.Refresh()
 	ui.rightPaneVisible = true
 	ui.updateRightPaneToggle()
+	ui.manageRightPaneJobsAutoRefresh()
 }
 
 func (ui *Gui) hideRightPane() {
@@ -1037,6 +1193,7 @@ func (ui *Gui) hideRightPane() {
 	}
 	ui.rightPaneVisible = false
 	ui.updateRightPaneToggle()
+	ui.manageRightPaneJobsAutoRefresh()
 }
 
 func (ui *Gui) setRightPaneContent(content fyne.CanvasObject) {
@@ -1072,8 +1229,10 @@ func (ui *Gui) setDetails(details fyne.CanvasObject, reveal bool) {
 		return
 	}
 	ui.detailsView = display
+	ui.rightPaneSection = rightPaneSectionDetails
 	ui.terminalVisible = false
 	ui.setRightPaneContent(ui.detailsView)
+	ui.manageRightPaneJobsAutoRefresh()
 	if reveal {
 		ui.showRightPane()
 	} else {
@@ -1576,9 +1735,17 @@ func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 	nameEntry.SetPlaceHolder("Nightly pull")
 	nameEntry.SetText(job.Name)
 
-	scheduleEntry := widget.NewEntry()
-	scheduleEntry.SetPlaceHolder("0 0 0 * * *")
-	scheduleEntry.SetText(job.Schedule)
+	cronWidget := NewCronWidget()
+	advancedScheduleEntry := widget.NewEntry()
+	advancedScheduleEntry.SetPlaceHolder("Advanced schedule, e.g. @daily")
+	advancedScheduleEntry.SetText(strings.TrimSpace(job.Schedule))
+
+	scheduleParseMode, parsedFields, rawScheduleValue, scheduleParseErr := ResolveCronScheduleForEditor(job.Schedule)
+	if scheduleParseMode == ParseModeFields {
+		cronWidget.SetFields(parsedFields)
+	} else if strings.TrimSpace(rawScheduleValue) != "" {
+		advancedScheduleEntry.SetText(rawScheduleValue)
+	}
 
 	syncTypeOptions := []string{
 		string(appserver.SyncTypePull),
@@ -1614,9 +1781,24 @@ func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 	timezoneEntry.SetPlaceHolder("Optional override, e.g. America/New_York")
 	timezoneEntry.SetText(job.Timezone)
 
+	scheduleHelp := widget.NewLabel("Use six cron fields (second minute hour day month weekday), or set an advanced raw schedule like @daily/@every. Advanced raw takes precedence when provided.")
+	if scheduleParseMode == ParseModeRaw {
+		if scheduleParseErr != nil {
+			scheduleHelp.SetText(fmt.Sprintf(
+				"Existing schedule is treated as advanced raw because it could not be mapped to cron fields: %v",
+				scheduleParseErr,
+			))
+		} else {
+			scheduleHelp.SetText("Existing schedule is in advanced raw mode. Keep the advanced value, or clear it to use cron fields.")
+		}
+	}
+	scheduleHelp.Wrapping = fyne.TextWrapWord
+
 	form := widget.NewForm(
 		widget.NewFormItem("Name", nameEntry),
-		widget.NewFormItem("Schedule (cron, includes seconds)", scheduleEntry),
+		widget.NewFormItem("Schedule (cron fields)", cronWidget.Object()),
+		widget.NewFormItem("Schedule (advanced raw, optional)", advancedScheduleEntry),
+		widget.NewFormItem("", scheduleHelp),
 		widget.NewFormItem("Sync Type", syncTypeSelect),
 		widget.NewFormItem("Timezone Override (optional)", timezoneEntry),
 		widget.NewFormItem("", widget.NewLabel("Leave blank to inherit the global server timezone (or OS local if unset).")),
@@ -1636,19 +1818,17 @@ func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
 		}
 
 		name := strings.TrimSpace(nameEntry.Text)
-		schedule := strings.TrimSpace(scheduleEntry.Text)
 		if name == "" {
 			ui.ShowToast("Job name is required.")
 			return
 		}
-		if schedule == "" {
-			ui.ShowToast("Cron schedule is required.")
-			return
-		}
-		if err := appserver.TestCronExpression(schedule); err != nil {
+
+		schedule, err := ConsolidateScheduleFromEditor(scheduleParseMode, cronWidget, advancedScheduleEntry.Text)
+		if err != nil {
 			ui.ShowToast(fmt.Sprintf("Invalid cron expression: %v", err))
 			return
 		}
+
 		if strings.TrimSpace(syncTypeSelect.Selected) == "" {
 			ui.ShowToast("Sync type is required.")
 			return
@@ -3427,11 +3607,16 @@ func formatServerActivityLine(activity appserver.RuntimeActivity, location *time
 	heartbeatText := formatTimestampInLocation(heartbeat, location, "2006-01-02 15:04:05")
 
 	if activity.ActiveJobID != "" {
+		actionSummary := "n/a"
+		if trimmedAction := strings.TrimSpace(activity.ActiveJobAction); trimmedAction != "" {
+			actionSummary = trimmedAction
+		}
 		return fmt.Sprintf(
-			"Active: %s (%s, %s) | Queue depth: %d | Heartbeat: %s | TZ: %s",
+			"Active: %s (%s, %s) | Action: %s | Queue depth: %d | Heartbeat: %s | TZ: %s",
 			activity.ActiveJobName,
 			activity.ActiveJobMode,
 			activity.ActiveJobID,
+			actionSummary,
 			activity.QueueDepth,
 			heartbeatText,
 			timezoneLabel,
@@ -3469,7 +3654,23 @@ func formatServerJobLine(job *appserver.SyncJob, location *time.Location) string
 	if strings.TrimSpace(job.Error) != "" {
 		line = fmt.Sprintf("%s | error=%s", line, job.Error)
 	}
+	if trimmedAction := strings.TrimSpace(job.CurrentAction); trimmedAction != "" {
+		line = fmt.Sprintf("%s | action=%s", line, trimmedAction)
+	}
 	return line
+}
+
+func filterActiveAndQueuedJobs(jobs []*appserver.SyncJob) []*appserver.SyncJob {
+	filtered := make([]*appserver.SyncJob, 0, len(jobs))
+	for _, job := range jobs {
+		if job == nil {
+			continue
+		}
+		if job.Status == appserver.SyncJobRunning || job.Status == appserver.SyncJobQueued {
+			filtered = append(filtered, job)
+		}
+	}
+	return filtered
 }
 
 func formatSyncTimestamp(value *time.Time, location *time.Location) string {

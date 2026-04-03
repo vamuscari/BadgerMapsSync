@@ -14,6 +14,7 @@ type State struct {
 	PIDFile           string
 	ServerHost        string
 	ServerPort        int
+	ServerTimezone    string
 	TLSEnabled        bool
 	TLSCert           string
 	TLSKey            string

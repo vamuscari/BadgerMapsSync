@@ -30,6 +30,8 @@ func TestMain(m *testing.M) {
 
 func TestSQLFiles(t *testing.T) {
 	baseExpectedFiles := []string{
+		"AddSyncHistoryStartedAtTimezoneColumn.sql",
+		"AddSyncHistoryCompletedAtTimezoneColumn.sql",
 		"CheckColumnExists.sql",
 		"CheckIndexExists.sql",
 		"CheckTableExists.sql",

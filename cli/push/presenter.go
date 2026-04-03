@@ -62,7 +62,16 @@ func (p *CliPresenter) HandleList(entityType, status, date string, accountID int
 		}
 		fmt.Fprintln(w, "ID\tAccount ID\tType\tStatus\tCreated At\tChanges")
 		for _, c := range changes {
-			fmt.Fprintf(w, "%d\t%d\t%s\t%s\t%s\t%s\n", c.ChangeId, c.AccountId, c.ChangeType, c.Status, c.CreatedAt.Format(time.RFC3339), c.Changes)
+			fmt.Fprintf(
+				w,
+				"%d\t%d\t%s\t%s\t%s\t%s\n",
+				c.ChangeId,
+				c.AccountId,
+				c.ChangeType,
+				c.Status,
+				p.App.FormatTimestampInDisplayTimezone(c.CreatedAt, time.RFC3339),
+				c.Changes,
+			)
 		}
 	case "checkins":
 		changes, ok := results.([]database.CheckinPendingChange)
@@ -85,7 +94,7 @@ func (p *CliPresenter) HandleList(entityType, status, date string, accountID int
 				c.EndpointType.String,
 				c.Type.String,
 				c.Status,
-				c.CreatedAt.Format(time.RFC3339),
+				p.App.FormatTimestampInDisplayTimezone(c.CreatedAt, time.RFC3339),
 				c.Comments.String,
 			)
 		}

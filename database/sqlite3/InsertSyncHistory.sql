@@ -7,6 +7,7 @@ INSERT INTO SyncHistory (
     Status,
     ItemsProcessed,
     ErrorCount,
+    StartedAtTimezone,
     Summary,
     Details
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);

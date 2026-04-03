@@ -8,8 +8,10 @@ CREATE TABLE IF NOT EXISTS SyncHistory (
     Status VARCHAR(40) NOT NULL,
     ItemsProcessed INTEGER DEFAULT 0,
     ErrorCount INTEGER DEFAULT 0,
-    StartedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    StartedAt TIMESTAMP DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
+    StartedAtTimezone VARCHAR(128) NOT NULL DEFAULT 'UTC',
     CompletedAt TIMESTAMP,
+    CompletedAtTimezone VARCHAR(128),
     DurationSeconds INTEGER,
     Summary TEXT,
     Details TEXT

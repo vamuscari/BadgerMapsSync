@@ -120,6 +120,53 @@ func newInternalHTTPClient(baseURL string) *http.Client {
 	}
 }
 
+func FetchServerJobsSnapshot(a *app.App) (*appserver.SyncJobListResponse, error) {
+	if a == nil || a.Server == nil {
+		return nil, fmt.Errorf("server context unavailable")
+	}
+
+	_, running := a.Server.GetServerStatus()
+	if !running {
+		return nil, fmt.Errorf("server is not running")
+	}
+
+	baseURL := serverBaseURL(a)
+	client := newInternalHTTPClient(baseURL)
+
+	req, err := http.NewRequest(http.MethodGet, baseURL+"/internal/jobs", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create jobs request: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		activity, activityErr := appserver.ReadRuntimeActivity(a.State)
+		if activityErr != nil {
+			return nil, fmt.Errorf("failed to fetch jobs: %w", err)
+		}
+		return &appserver.SyncJobListResponse{
+			Activity: activity,
+			Jobs:     []*appserver.SyncJob{},
+		}, nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to fetch jobs (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var snapshot appserver.SyncJobListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&snapshot); err != nil {
+		return nil, fmt.Errorf("failed to decode jobs response: %w", err)
+	}
+
+	if snapshot.Jobs == nil {
+		snapshot.Jobs = []*appserver.SyncJob{}
+	}
+	return &snapshot, nil
+}
+
 func runAsRemoteJob(
 	a *app.App,
 	client *http.Client,

@@ -873,8 +873,8 @@ func (p *GuiPresenter) HandleViewConfig() {
 
 // --- Server Handlers ---
 
-// HandleSaveServerConfig persists server host, TLS, and logging settings.
-func (p *GuiPresenter) HandleSaveServerConfig(host, portStr string, tlsEnabled bool, tlsCert, tlsKey string, logRequests bool) {
+// HandleSaveServerConfig persists server host, timezone, TLS, and logging settings.
+func (p *GuiPresenter) HandleSaveServerConfig(host, portStr, timezone string, tlsEnabled bool, tlsCert, tlsKey string, logRequests bool) {
 	p.app.Events.Dispatch(events.Debugf("presenter", "HandleSaveServerConfig called"))
 	p.app.Events.Dispatch(events.Infof("presenter", "Saving server configuration..."))
 
@@ -888,9 +888,16 @@ func (p *GuiPresenter) HandleSaveServerConfig(host, portStr string, tlsEnabled b
 
 	trimmedCert := strings.TrimSpace(tlsCert)
 	trimmedKey := strings.TrimSpace(tlsKey)
+	trimmedTimezone := appserver.NormalizeTimezone(timezone)
+	if err := appserver.ValidateTimezone(trimmedTimezone); err != nil {
+		p.app.Events.Dispatch(events.Warningf("presenter", "Invalid timezone '%s': %v", trimmedTimezone, err))
+		p.view.ShowToast("Error: Invalid timezone. Use an IANA value like America/New_York.")
+		return
+	}
 
 	p.app.Config.Server.Host = trimmedHost
 	p.app.Config.Server.Port = serverPort
+	p.app.Config.Server.Timezone = trimmedTimezone
 	p.app.Config.Server.TLSEnabled = tlsEnabled
 	p.app.Config.Server.TLSCert = trimmedCert
 	p.app.Config.Server.TLSKey = trimmedKey
@@ -898,6 +905,7 @@ func (p *GuiPresenter) HandleSaveServerConfig(host, portStr string, tlsEnabled b
 
 	p.app.State.ServerHost = trimmedHost
 	p.app.State.ServerPort = serverPort
+	p.app.State.ServerTimezone = trimmedTimezone
 	p.app.State.TLSEnabled = tlsEnabled
 	p.app.State.TLSCert = trimmedCert
 	p.app.State.TLSKey = trimmedKey
@@ -907,6 +915,11 @@ func (p *GuiPresenter) HandleSaveServerConfig(host, portStr string, tlsEnabled b
 		errWrapped := fmt.Errorf("failed to save server configuration: %w", err)
 		p.app.Events.Dispatch(events.Errorf("presenter", errWrapped.Error()))
 		p.view.ShowToast("Error: Failed to save server settings.")
+		return
+	}
+
+	if _, running := p.app.Server.GetServerStatus(); running {
+		p.view.ShowToast("Success: Server settings saved. Restart server to apply timezone changes.")
 		return
 	}
 
@@ -950,6 +963,10 @@ func (p *GuiPresenter) HandleUpdateServerWebhooks(accountEnabled, checkinEnabled
 		return
 	}
 	p.view.ShowToast("Webhook settings saved.")
+}
+
+func (p *GuiPresenter) FetchServerJobsSnapshot() (*appserver.SyncJobListResponse, error) {
+	return syncproxy.FetchServerJobsSnapshot(p.app)
 }
 
 // --- Status Handlers ---

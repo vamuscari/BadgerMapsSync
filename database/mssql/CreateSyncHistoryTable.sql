@@ -10,7 +10,9 @@ CREATE TABLE SyncHistory (
     ItemsProcessed INT DEFAULT 0,
     ErrorCount INT DEFAULT 0,
     StartedAt DATETIME2 DEFAULT SYSUTCDATETIME(),
+    StartedAtTimezone NVARCHAR(128) NOT NULL DEFAULT 'UTC',
     CompletedAt DATETIME2,
+    CompletedAtTimezone NVARCHAR(128),
     DurationSeconds INT,
     Summary NVARCHAR(MAX),
     Details NVARCHAR(MAX)
