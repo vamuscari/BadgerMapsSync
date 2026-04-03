@@ -70,18 +70,21 @@ func ExecuteWorkflowSteps(opts WorkflowExecutionOptions) (int, error) {
 			if !step.Action.IsEnabled() {
 				continue
 			}
+			actionType, commandText := actionLogMetadata(step.Action)
 			runAction := func() error {
 				return opts.RunAction(step.Action, step)
 			}
 			if opts.Queue != nil {
 				_, err := opts.Queue.RunChildJob(SyncChildJobRequest{
-					Name:       stepName,
-					Source:     source,
-					Mode:       opts.ParentMode,
-					Kind:       SyncJobKindAction,
-					StepID:     step.ID,
-					StepIndex:  idx + 1,
-					TotalSteps: totalSteps,
+					Name:        stepName,
+					Source:      source,
+					Mode:        opts.ParentMode,
+					Kind:        SyncJobKindAction,
+					StepID:      step.ID,
+					StepIndex:   idx + 1,
+					TotalSteps:  totalSteps,
+					ActionType:  actionType,
+					CommandText: commandText,
 					Run: func(_ context.Context) error {
 						return runAction()
 					},
@@ -108,5 +111,97 @@ func resourceIDForSyncStep(mode SyncMode, fallback int) int {
 		return fallback
 	default:
 		return 0
+	}
+}
+
+func actionLogMetadata(cfg action.ActionConfig) (string, string) {
+	actionType := strings.TrimSpace(cfg.Type)
+	if actionType == "" {
+		return "", ""
+	}
+
+	pickByPriority := func(keys ...string) string {
+		for _, key := range keys {
+			value := actionArgToString(cfg.Args[key])
+			if strings.TrimSpace(value) != "" {
+				return strings.TrimSpace(value)
+			}
+		}
+		return ""
+	}
+
+	var commandText string
+	switch strings.ToLower(actionType) {
+	case "exec":
+		command := actionArgToString(cfg.Args["command"])
+		args := actionArgToSlice(cfg.Args["args"])
+		commandText = strings.TrimSpace(command)
+		if len(args) > 0 {
+			if commandText != "" {
+				commandText += " "
+			}
+			commandText += strings.Join(args, " ")
+		}
+	case "db":
+		commandText = pickByPriority("command", "query", "procedure", "function")
+	default:
+		commandText = pickByPriority("command", "query", "procedure", "function")
+	}
+
+	return actionType, strings.TrimSpace(commandText)
+}
+
+func actionArgToString(value any) string {
+	if value == nil {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case []byte:
+		return string(typed)
+	case fmt.Stringer:
+		return typed.String()
+	default:
+		return fmt.Sprintf("%v", typed)
+	}
+}
+
+func actionArgToSlice(value any) []string {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case []string:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			result = append(result, item)
+		}
+		return result
+	case []interface{}:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			text := strings.TrimSpace(actionArgToString(item))
+			if text == "" {
+				continue
+			}
+			result = append(result, text)
+		}
+		return result
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return nil
+		}
+		return []string{trimmed}
+	default:
+		text := strings.TrimSpace(actionArgToString(typed))
+		if text == "" {
+			return nil
+		}
+		return []string{text}
 	}
 }

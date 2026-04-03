@@ -1977,6 +1977,7 @@ func RequiredTables() []string {
 		"FieldMaps",
 		"Configurations",
 		"SyncHistory",
+		"JobLog",
 		"CommandLog",
 		"WebhookLog",
 	}
@@ -2105,6 +2106,11 @@ func GetExpectedSchema() map[string][]string {
 		"SyncHistory": {
 			"HistoryId", "CorrelationId", "RunType", "Direction", "Source", "Initiator", "Status", "ItemsProcessed", "ErrorCount",
 			"StartedAt", "StartedAtTimezone", "CompletedAt", "CompletedAtTimezone", "DurationSeconds", "Summary", "Details",
+		},
+		"JobLog": {
+			"HistoryId", "CorrelationId", "ParentCorrelationId", "RootCorrelationId", "RunType", "Direction", "Source", "Initiator",
+			"JobKind", "Mode", "StepId", "StepIndex", "TotalSteps", "ActionType", "CommandText", "Status", "ItemsProcessed",
+			"ErrorCount", "StartedAt", "StartedAtTimezone", "CompletedAt", "CompletedAtTimezone", "DurationSeconds", "Summary", "Details",
 		},
 		"UserProfiles": {
 			"ProfileId", "Email", "FirstName", "LastName", "IsManager", "IsHideReferralIOSBanner",

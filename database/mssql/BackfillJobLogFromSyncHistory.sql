@@ -1,0 +1,56 @@
+INSERT INTO JobLog (
+    CorrelationId,
+    ParentCorrelationId,
+    RootCorrelationId,
+    RunType,
+    Direction,
+    Source,
+    Initiator,
+    JobKind,
+    Mode,
+    StepId,
+    StepIndex,
+    TotalSteps,
+    ActionType,
+    CommandText,
+    Status,
+    ItemsProcessed,
+    ErrorCount,
+    StartedAt,
+    StartedAtTimezone,
+    CompletedAt,
+    CompletedAtTimezone,
+    DurationSeconds,
+    Summary,
+    Details
+)
+SELECT sh.CorrelationId,
+       NULL,
+       sh.CorrelationId,
+       sh.RunType,
+       sh.Direction,
+       sh.Source,
+       sh.Initiator,
+       'sync',
+       sh.Direction,
+       NULL,
+       0,
+       0,
+       NULL,
+       NULL,
+       sh.Status,
+       sh.ItemsProcessed,
+       sh.ErrorCount,
+       sh.StartedAt,
+       COALESCE(NULLIF(sh.StartedAtTimezone, ''), 'UTC'),
+       sh.CompletedAt,
+       COALESCE(NULLIF(sh.CompletedAtTimezone, ''), 'UTC'),
+       sh.DurationSeconds,
+       sh.Summary,
+       sh.Details
+FROM SyncHistory sh
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM JobLog jl
+    WHERE jl.CorrelationId = sh.CorrelationId
+);

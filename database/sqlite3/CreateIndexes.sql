@@ -7,3 +7,6 @@ CREATE INDEX IF NOT EXISTS idx_route_waypoints_route_id ON RouteWaypoints(RouteI
 CREATE INDEX IF NOT EXISTS idx_account_locations_account_id ON AccountLocations(AccountId);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_synchistory_correlation ON SyncHistory(CorrelationId);
 CREATE INDEX IF NOT EXISTS idx_synchistory_started_at ON SyncHistory(StartedAt DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_joblog_correlation ON JobLog(CorrelationId);
+CREATE INDEX IF NOT EXISTS idx_joblog_started_at ON JobLog(StartedAt DESC);
+CREATE INDEX IF NOT EXISTS idx_joblog_root_correlation ON JobLog(RootCorrelationId);

@@ -1,0 +1,28 @@
+SELECT HistoryId,
+       CorrelationId,
+       ParentCorrelationId,
+       RootCorrelationId,
+       RunType,
+       Direction,
+       Source,
+       Initiator,
+       JobKind,
+       Mode,
+       StepId,
+       StepIndex,
+       TotalSteps,
+       ActionType,
+       CommandText,
+       Status,
+       ItemsProcessed,
+       ErrorCount,
+       StartedAt,
+       StartedAtTimezone,
+       CompletedAt,
+       CompletedAtTimezone,
+       DurationSeconds,
+       Summary,
+       Details
+FROM JobLog
+ORDER BY StartedAt DESC
+OFFSET 0 ROWS FETCH NEXT {{LIMIT}} ROWS ONLY;

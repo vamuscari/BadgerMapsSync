@@ -3248,10 +3248,11 @@ func (ui *Gui) createExplorerTab() fyne.CanvasObject {
 			{Label: "Failed Check-ins", Filters: []ExplorerFilterClause{{Column: "Status", Mode: FilterModeEquals, Value: "failed"}}},
 			{Label: "Completed Check-ins", Filters: []ExplorerFilterClause{{Column: "Status", Mode: FilterModeEquals, Value: "completed"}}},
 		},
-		"SyncHistory": {
+		"JobLog": {
 			{Label: "Pull Runs", Filters: []ExplorerFilterClause{{Column: "Direction", Mode: FilterModeEquals, Value: "pull"}}},
 			{Label: "Push Runs", Filters: []ExplorerFilterClause{{Column: "Direction", Mode: FilterModeEquals, Value: "push"}}},
 			{Label: "Failed Runs", Filters: []ExplorerFilterClause{{Column: "Status", Mode: FilterModeEquals, Value: "failed"}}},
+			{Label: "Action Steps", Filters: []ExplorerFilterClause{{Column: "JobKind", Mode: FilterModeEquals, Value: "action"}}},
 		},
 	}
 
@@ -4751,8 +4752,8 @@ func (ui *Gui) formatExplorerCellValue(tableName, columnName string, value inter
 		return ""
 	}
 
-	// Render SyncHistory absolute timestamps in the configured server timezone.
-	if strings.EqualFold(tableName, "SyncHistory") &&
+	// Render JobLog absolute timestamps in the configured server timezone.
+	if strings.EqualFold(tableName, "JobLog") &&
 		(strings.EqualFold(columnName, "StartedAt") || strings.EqualFold(columnName, "CompletedAt")) {
 		if parsed, ok := parseExplorerTimestamp(value); ok {
 			return ui.formatTimestampInDisplayTimezone(parsed, "2006-01-02 15:04:05")

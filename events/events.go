@@ -74,6 +74,7 @@ func (p GenericPayload) EventType() EventType {
 // PullStartPayload is for when a pull operation begins.
 type PullStartPayload struct {
 	ResourceID interface{}
+	JobID      string `json:"job_id,omitempty"`
 }
 
 func (p PullStartPayload) EventType() EventType { return "pull.start" }
@@ -81,6 +82,7 @@ func (p PullStartPayload) EventType() EventType { return "pull.start" }
 // ResourceIDsFetchedPayload is for when the initial list of IDs has been fetched.
 type ResourceIDsFetchedPayload struct {
 	Count int
+	JobID string `json:"job_id,omitempty"`
 }
 
 func (p ResourceIDsFetchedPayload) EventType() EventType { return "pull.ids_fetched" }
@@ -112,6 +114,7 @@ type CompletionPayload struct {
 	Error      error
 	Count      int
 	ResourceID interface{} `json:"resource_id,omitempty"`
+	JobID      string      `json:"job_id,omitempty"`
 }
 
 func (p CompletionPayload) EventType() EventType { return "process.complete" }
@@ -120,6 +123,7 @@ func (p CompletionPayload) EventType() EventType { return "process.complete" }
 type ErrorPayload struct {
 	Error      error
 	ResourceID interface{} `json:"resource_id,omitempty"`
+	JobID      string      `json:"job_id,omitempty"`
 }
 
 func (p ErrorPayload) EventType() EventType { return "error" }
@@ -127,13 +131,16 @@ func (p ErrorPayload) EventType() EventType { return "error" }
 // --- Push Payloads ---
 
 // PushScanStartPayload is for when a push scan begins.
-type PushScanStartPayload struct{}
+type PushScanStartPayload struct {
+	JobID string `json:"job_id,omitempty"`
+}
 
 func (p PushScanStartPayload) EventType() EventType { return "push.scan.start" }
 
 // PushScanCompletePayload is for when a push scan is complete.
 type PushScanCompletePayload struct {
 	Changes interface{}
+	JobID   string `json:"job_id,omitempty"`
 }
 
 func (p PushScanCompletePayload) EventType() EventType { return "push.scan.complete" }
@@ -162,6 +169,7 @@ func (p PushItemErrorPayload) EventType() EventType { return "push.item.error" }
 // PushCompletePayload is for when a push operation is complete.
 type PushCompletePayload struct {
 	ErrorCount int
+	JobID      string `json:"job_id,omitempty"`
 }
 
 func (p PushCompletePayload) EventType() EventType { return "push.complete" }

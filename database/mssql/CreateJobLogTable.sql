@@ -1,0 +1,28 @@
+IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='JobLog' AND xtype='U')
+CREATE TABLE JobLog (
+    HistoryId INT IDENTITY(1,1) PRIMARY KEY,
+    CorrelationId NVARCHAR(128) NOT NULL UNIQUE,
+    ParentCorrelationId NVARCHAR(128),
+    RootCorrelationId NVARCHAR(128),
+    RunType NVARCHAR(40) NOT NULL,
+    Direction NVARCHAR(40) NOT NULL,
+    Source NVARCHAR(80),
+    Initiator NVARCHAR(40),
+    JobKind NVARCHAR(40),
+    Mode NVARCHAR(40),
+    StepId NVARCHAR(128),
+    StepIndex INT DEFAULT 0,
+    TotalSteps INT DEFAULT 0,
+    ActionType NVARCHAR(40),
+    CommandText NVARCHAR(MAX),
+    Status NVARCHAR(40) NOT NULL,
+    ItemsProcessed INT DEFAULT 0,
+    ErrorCount INT DEFAULT 0,
+    StartedAt DATETIME2 DEFAULT SYSUTCDATETIME(),
+    StartedAtTimezone NVARCHAR(128) NOT NULL DEFAULT 'UTC',
+    CompletedAt DATETIME2,
+    CompletedAtTimezone NVARCHAR(128),
+    DurationSeconds INT,
+    Summary NVARCHAR(MAX),
+    Details NVARCHAR(MAX)
+);

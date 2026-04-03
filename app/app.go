@@ -75,12 +75,17 @@ type App struct {
 
 	MaxConcurrentRequests int
 
-	syncHistoryRuns map[string]*syncHistoryRun
-	syncHistoryMu   sync.Mutex
-	syncHistoryOnce bool
-	closeOnce       sync.Once
-	shuttingDown    atomic.Bool
-	coordMu         sync.Mutex
+	jobLogRuns    map[string]*jobLogRun
+	jobLogTargets map[string]*jobLogMetricTarget
+	jobLogJobMeta map[string]*jobLogJobMeta
+	jobLogMetrics map[string]*jobLogMetricSnapshot
+	jobLogPending map[string]*jobLogPendingCompletion
+	jobLogDone    map[string]*jobLogMetricTerminal
+	jobLogMu      sync.Mutex
+	jobLogOnce    bool
+	closeOnce     sync.Once
+	shuttingDown  atomic.Bool
+	coordMu       sync.Mutex
 }
 
 func (a *App) Close() {
@@ -134,6 +139,15 @@ func (a *App) GetSyncCoordinator() *server.SyncJobCoordinator {
 	return a.syncQueue
 }
 
+func (a *App) ActiveSyncJobID() string {
+	queue := a.GetSyncCoordinator()
+	if queue == nil {
+		return ""
+	}
+	activity := queue.GetActivity()
+	return strings.TrimSpace(activity.ActiveJobID)
+}
+
 func (a *App) StopSyncCoordinator() {
 	a.coordMu.Lock()
 	queue := a.syncQueue
@@ -171,7 +185,12 @@ func NewApp() *App {
 	a.State.PIDFile = utils.GetConfigDirFile(".badgermaps.pid")
 	a.Events = events.NewEventDispatcher()
 	a.Server = server.NewServerManager(a.State)
-	a.syncHistoryRuns = make(map[string]*syncHistoryRun)
+	a.jobLogRuns = make(map[string]*jobLogRun)
+	a.jobLogTargets = make(map[string]*jobLogMetricTarget)
+	a.jobLogJobMeta = make(map[string]*jobLogJobMeta)
+	a.jobLogMetrics = make(map[string]*jobLogMetricSnapshot)
+	a.jobLogPending = make(map[string]*jobLogPendingCompletion)
+	a.jobLogDone = make(map[string]*jobLogMetricTerminal)
 
 	return a
 }
@@ -286,6 +305,12 @@ func (a *App) LoadConfig() error {
 			a.DB = nil
 		} else {
 			a.DB.TestConnection()
+			if err := database.EnsureJobLogSetup(a.DB); err != nil {
+				a.Events.Dispatch(events.Errorf("db", "Failed to ensure JobLog schema: %v", err))
+				a.DB.Close()
+				a.DB = nil
+				return err
+			}
 		}
 	}
 
@@ -298,7 +323,7 @@ func (a *App) LoadConfig() error {
 		a.MaxConcurrentRequests = 5
 	}
 
-	a.ensureSyncHistoryTracking()
+	a.ensureJobLogTracking()
 
 	return nil
 }
@@ -423,6 +448,12 @@ func (a *App) ReloadDB() error {
 		a.DB = nil
 		return fmt.Errorf("failed to test database connection: %w", err)
 	}
+	if err := database.EnsureJobLogSetup(a.DB); err != nil {
+		a.DB.Close()
+		a.DB = nil
+		return fmt.Errorf("failed to ensure JobLog schema: %w", err)
+	}
+	a.ensureJobLogTracking()
 	return nil
 }
 

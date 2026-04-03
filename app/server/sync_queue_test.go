@@ -196,6 +196,76 @@ func TestRunChildJobErrorEventUsesFinalizedStatus(t *testing.T) {
 	}
 }
 
+func TestRunChildJobActionEventIncludesActionMetadata(t *testing.T) {
+	s := state.NewState()
+	*s.ConfigFile = filepath.Join(t.TempDir(), "config.yaml")
+
+	dispatcher := events.NewEventDispatcher()
+	queue := NewSyncJobCoordinator(s, dispatcher)
+	defer queue.Stop()
+
+	actionStartEvents := make(chan events.GenericPayload, 1)
+	dispatcher.Subscribe("sync.job.start", func(e events.Event) {
+		payload, ok := e.Payload.(events.GenericPayload)
+		if !ok {
+			return
+		}
+		if kind, _ := payload.Data["job_kind"].(string); kind != string(SyncJobKindAction) {
+			return
+		}
+		select {
+		case actionStartEvents <- payload:
+		default:
+		}
+	})
+
+	parentJob, err := queue.Submit(SyncJobRequest{
+		Name:   "parent",
+		Source: "test",
+		Mode:   SyncModeWorkflow,
+		Kind:   SyncJobKindWorkflow,
+		Run: func(_ context.Context) error {
+			_, runErr := queue.RunChildJob(SyncChildJobRequest{
+				Name:        "action_step",
+				Source:      "test",
+				Mode:        SyncModeWorkflow,
+				Kind:        SyncJobKindAction,
+				StepID:      "action_step",
+				StepIndex:   1,
+				TotalSteps:  1,
+				ActionType:  "exec",
+				CommandText: "echo hello world",
+				Run: func(_ context.Context) error {
+					return nil
+				},
+			})
+			return runErr
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to queue parent job: %v", err)
+	}
+
+	waitForTerminalJob(t, queue, parentJob.ID)
+	if drained := dispatcher.WaitForDrain(2 * time.Second); !drained {
+		t.Fatalf("timed out waiting for event dispatcher to drain")
+	}
+
+	var actionPayload events.GenericPayload
+	select {
+	case actionPayload = <-actionStartEvents:
+	default:
+		t.Fatalf("expected action sync.job.start payload")
+	}
+
+	if got, _ := actionPayload.Data["action_type"].(string); got != "exec" {
+		t.Fatalf("expected action_type %q, got %q", "exec", got)
+	}
+	if got, _ := actionPayload.Data["command_text"].(string); got != "echo hello world" {
+		t.Fatalf("expected command_text %q, got %q", "echo hello world", got)
+	}
+}
+
 func waitForRunningJob(t *testing.T, queue *SyncJobCoordinator, jobID string) {
 	t.Helper()
 

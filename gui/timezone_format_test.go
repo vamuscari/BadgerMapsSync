@@ -64,12 +64,12 @@ func TestFormatServerActivityLineIncludesTimezone(t *testing.T) {
 	}
 }
 
-func TestFormatExplorerCellValueSyncHistoryTimestampStringUsesServerTimezone(t *testing.T) {
+func TestFormatExplorerCellValueJobLogTimestampStringUsesServerTimezone(t *testing.T) {
 	a := app.NewApp()
 	a.Config.Server.Timezone = "America/New_York"
 	ui := &Gui{app: a}
 
-	got := ui.formatExplorerCellValue("SyncHistory", "StartedAt", "2026-04-02 20:30:00")
+	got := ui.formatExplorerCellValue("JobLog", "StartedAt", "2026-04-02 20:30:00")
 	if want := "2026-04-02 16:30:00 [America/New_York]"; got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
@@ -80,7 +80,7 @@ func TestFormatExplorerCellValueLeavesNonTimestampColumnsUntouched(t *testing.T)
 	a.Config.Server.Timezone = "America/New_York"
 	ui := &Gui{app: a}
 
-	got := ui.formatExplorerCellValue("SyncHistory", "Status", "completed")
+	got := ui.formatExplorerCellValue("JobLog", "Status", "completed")
 	if want := "completed"; got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}

@@ -36,6 +36,8 @@ type SyncJob struct {
 	StepID        string        `json:"step_id,omitempty"`
 	StepIndex     int           `json:"step_index,omitempty"`
 	TotalSteps    int           `json:"total_steps,omitempty"`
+	ActionType    string        `json:"action_type,omitempty"`
+	CommandText   string        `json:"command_text,omitempty"`
 	Status        SyncJobStatus `json:"status"`
 	CurrentAction string        `json:"current_action,omitempty"`
 	QueuedAt      time.Time     `json:"queued_at"`
@@ -71,6 +73,8 @@ type SyncJobRequest struct {
 	StepID      string
 	StepIndex   int
 	TotalSteps  int
+	ActionType  string
+	CommandText string
 	Run         func(context.Context) error
 }
 
@@ -84,6 +88,8 @@ type SyncChildJobRequest struct {
 	StepID      string
 	StepIndex   int
 	TotalSteps  int
+	ActionType  string
+	CommandText string
 	Run         func(context.Context) error
 }
 
@@ -207,6 +213,8 @@ func (c *SyncJobCoordinator) RunChildJob(req SyncChildJobRequest) (*SyncJob, err
 		StepID:      strings.TrimSpace(req.StepID),
 		StepIndex:   req.StepIndex,
 		TotalSteps:  req.TotalSteps,
+		ActionType:  strings.TrimSpace(req.ActionType),
+		CommandText: strings.TrimSpace(req.CommandText),
 		Status:      SyncJobRunning,
 		QueuedAt:    now,
 		StartedAt:   &now,
@@ -560,6 +568,8 @@ func (c *SyncJobCoordinator) newJob(req SyncJobRequest) *SyncJob {
 		StepID:      strings.TrimSpace(req.StepID),
 		StepIndex:   req.StepIndex,
 		TotalSteps:  req.TotalSteps,
+		ActionType:  strings.TrimSpace(req.ActionType),
+		CommandText: strings.TrimSpace(req.CommandText),
 		Status:      SyncJobQueued,
 		QueuedAt:    now,
 	}
@@ -598,6 +608,8 @@ func (c *SyncJobCoordinator) dispatchJobEvent(eventType string, job *SyncJob, ru
 		"step_id":       job.StepID,
 		"step_index":    job.StepIndex,
 		"total_steps":   job.TotalSteps,
+		"action_type":   job.ActionType,
+		"command_text":  job.CommandText,
 		"status":        string(job.Status),
 		"error_count":   job.ErrorCount,
 	}

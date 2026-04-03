@@ -599,7 +599,7 @@ type LastSyncInfo struct {
 // getLastSyncInfo gets information about the last sync
 func (d *SmartDashboard) getLastSyncInfo() LastSyncInfo {
 	if d.ui.app.DB == nil || !d.ui.app.DB.IsConnected() {
-		d.ui.app.Events.Dispatch(events.Debugf("dashboard", "Sync history unavailable because database is not connected"))
+		d.ui.app.Events.Dispatch(events.Debugf("dashboard", "Job log unavailable because database is not connected"))
 		return LastSyncInfo{
 			Time:   "Unavailable",
 			Status: "Connect the database to track sync runs",
@@ -607,40 +607,44 @@ func (d *SmartDashboard) getLastSyncInfo() LastSyncInfo {
 	}
 
 	// Guard against missing schema on first run
-	if exists, err := d.ui.app.DB.TableExists("SyncHistory"); err != nil || !exists {
-		d.ui.app.Events.Dispatch(events.Debugf("dashboard", "SyncHistory table missing or unavailable"))
+	if exists, err := d.ui.app.DB.TableExists("JobLog"); err != nil || !exists {
+		d.ui.app.Events.Dispatch(events.Debugf("dashboard", "JobLog table missing or unavailable"))
 		return LastSyncInfo{
 			Time:   "Never",
-			Status: "No sync history recorded yet",
+			Status: "No job log recorded yet",
 		}
 	}
 
-	entries, err := database.GetRecentSyncHistory(d.ui.app.DB, 10)
+	entries, err := database.GetRecentJobLog(d.ui.app.DB, 10)
 	if err != nil {
-		d.ui.app.Events.Dispatch(events.Errorf("dashboard", "Failed to load sync history: %v", err))
+		d.ui.app.Events.Dispatch(events.Errorf("dashboard", "Failed to load job log: %v", err))
 		return LastSyncInfo{
 			Time:   "Unknown",
-			Status: "Unable to load sync history",
+			Status: "Unable to load job log",
 		}
 	}
 
-	var inProgress *database.SyncHistoryEntry
+	var inProgress *database.JobLogEntry
 	for i := range entries {
-		entry := entries[i]
+		entry := &entries[i]
+		if !isTopLevelSyncJobLogEntry(*entry) {
+			continue
+		}
+
 		switch strings.ToLower(entry.Status) {
 		case "running":
 			if inProgress == nil {
-				inProgress = &entry
+				inProgress = entry
 			}
 			continue
 		case "completed", "completed_with_errors", "failed":
-			return d.syncInfoFromEntry(entry)
+			return d.syncInfoFromEntry(*entry)
 		default:
 			if entry.CompletedAt != nil {
-				return d.syncInfoFromEntry(entry)
+				return d.syncInfoFromEntry(*entry)
 			}
 			if inProgress == nil {
-				inProgress = &entry
+				inProgress = entry
 			}
 		}
 	}
@@ -659,7 +663,7 @@ func (d *SmartDashboard) getLastSyncInfo() LastSyncInfo {
 
 	return LastSyncInfo{
 		Time:   "Never",
-		Status: "No sync history recorded yet",
+		Status: "No job log recorded yet",
 	}
 }
 
@@ -673,7 +677,7 @@ func (d *SmartDashboard) getAPIStatus() string {
 	return "Not Configured"
 }
 
-func (d *SmartDashboard) syncInfoFromEntry(entry database.SyncHistoryEntry) LastSyncInfo {
+func (d *SmartDashboard) syncInfoFromEntry(entry database.JobLogEntry) LastSyncInfo {
 	when := entry.StartedAt
 	if entry.CompletedAt != nil {
 		when = *entry.CompletedAt
@@ -685,7 +689,7 @@ func (d *SmartDashboard) syncInfoFromEntry(entry database.SyncHistoryEntry) Last
 	}
 }
 
-func (d *SmartDashboard) describeSyncStatus(entry database.SyncHistoryEntry) string {
+func (d *SmartDashboard) describeSyncStatus(entry database.JobLogEntry) string {
 	if entry.Summary != "" {
 		return entry.Summary
 	}
@@ -699,6 +703,13 @@ func (d *SmartDashboard) describeSyncStatus(entry database.SyncHistoryEntry) str
 		status = fmt.Sprintf("%s with %d error(s)", status, entry.ErrorCount)
 	}
 	return status
+}
+
+func isTopLevelSyncJobLogEntry(entry database.JobLogEntry) bool {
+	if strings.TrimSpace(entry.ParentCorrelationID) != "" {
+		return false
+	}
+	return !strings.EqualFold(strings.TrimSpace(entry.JobKind), "action")
 }
 
 func humanizeToken(token string) string {

@@ -522,9 +522,9 @@ func (sc *SyncCenter) CreateContent() fyne.CanvasObject {
 	sc.serverStatusLabel.TextSize = theme.TextSize()
 	sc.RefreshServerStatusLabel()
 
-	syncHistoryButton := widget.NewButtonWithIcon("Sync History", theme.NavigateNextIcon(), func() {
-		if !sc.ui.OpenExplorerTable("SyncHistory") {
-			sc.ui.app.Events.Dispatch(events.Debugf("sync_center", "unable to navigate to sync history"))
+	jobLogButton := widget.NewButtonWithIcon("Job Log", theme.NavigateNextIcon(), func() {
+		if !sc.ui.OpenExplorerTable("JobLog") {
+			sc.ui.app.Events.Dispatch(events.Debugf("sync_center", "unable to navigate to job log"))
 		}
 	})
 	pendingChangesButton := widget.NewButtonWithIcon("Pending Changes", theme.NavigateNextIcon(), func() {
@@ -536,7 +536,7 @@ func (sc *SyncCenter) CreateContent() fyne.CanvasObject {
 		container.NewTabItemWithIcon("Pull", theme.DownloadIcon(), sc.controlsCard),
 		container.NewTabItemWithIcon("Push", theme.UploadIcon(), sc.pushCard),
 		container.NewTabItemWithIcon("Navigation", theme.NavigateNextIcon(), container.NewVBox(
-			syncHistoryButton,
+			jobLogButton,
 			pendingChangesButton,
 		)),
 	)

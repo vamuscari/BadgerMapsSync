@@ -12,18 +12,19 @@ import (
 
 // RunPushAccounts orchestrates pushing pending account changes to the API.
 func RunPushAccounts(a *app.App) error {
-	a.Events.Dispatch(events.Event{Type: "push.scan.start", Source: "accounts", Payload: events.PushScanStartPayload{}})
+	jobID := strings.TrimSpace(a.ActiveSyncJobID())
+	a.Events.Dispatch(events.Event{Type: "push.scan.start", Source: "accounts", Payload: events.PushScanStartPayload{JobID: jobID}})
 	changes, err := database.GetPendingAccountChanges(a.DB)
 	if err != nil {
 		err = fmt.Errorf("error getting pending account changes: %w", err)
-		a.Events.Dispatch(events.Event{Type: "push.error", Source: "accounts", Payload: events.ErrorPayload{Error: err}})
+		a.Events.Dispatch(events.Event{Type: "push.error", Source: "accounts", Payload: events.ErrorPayload{Error: err, JobID: jobID}})
 		return err
 	}
 
-	a.Events.Dispatch(events.Event{Type: "push.scan.complete", Source: "accounts", Payload: events.PushScanCompletePayload{Changes: changes}})
+	a.Events.Dispatch(events.Event{Type: "push.scan.complete", Source: "accounts", Payload: events.PushScanCompletePayload{Changes: changes, JobID: jobID}})
 	if len(changes) == 0 {
 		a.Events.Dispatch(events.Infof("push", "No pending account changes to push."))
-		a.Events.Dispatch(events.Event{Type: "push.complete", Source: "accounts", Payload: events.PushCompletePayload{ErrorCount: 0}})
+		a.Events.Dispatch(events.Event{Type: "push.complete", Source: "accounts", Payload: events.PushCompletePayload{ErrorCount: 0, JobID: jobID}})
 		return nil
 	}
 
@@ -60,25 +61,26 @@ func RunPushAccounts(a *app.App) error {
 			database.UpdatePendingChangeStatus(a.DB, "AccountsPendingChanges", change.ChangeId, "completed")
 		}
 	}
-	a.Events.Dispatch(events.Event{Type: "push.complete", Source: "accounts", Payload: events.PushCompletePayload{ErrorCount: errorCount}})
+	a.Events.Dispatch(events.Event{Type: "push.complete", Source: "accounts", Payload: events.PushCompletePayload{ErrorCount: errorCount, JobID: jobID}})
 	a.Events.Dispatch(events.Infof("push", "Finished pushing account changes."))
 	return nil
 }
 
 // RunPushCheckins orchestrates pushing pending check-in changes to the API.
 func RunPushCheckins(a *app.App) error {
-	a.Events.Dispatch(events.Event{Type: "push.scan.start", Source: "checkins", Payload: events.PushScanStartPayload{}})
+	jobID := strings.TrimSpace(a.ActiveSyncJobID())
+	a.Events.Dispatch(events.Event{Type: "push.scan.start", Source: "checkins", Payload: events.PushScanStartPayload{JobID: jobID}})
 	changes, err := database.GetPendingCheckinChanges(a.DB)
 	if err != nil {
 		err = fmt.Errorf("error getting pending check-in changes: %w", err)
-		a.Events.Dispatch(events.Event{Type: "push.error", Source: "checkins", Payload: events.ErrorPayload{Error: err}})
+		a.Events.Dispatch(events.Event{Type: "push.error", Source: "checkins", Payload: events.ErrorPayload{Error: err, JobID: jobID}})
 		return err
 	}
 
-	a.Events.Dispatch(events.Event{Type: "push.scan.complete", Source: "checkins", Payload: events.PushScanCompletePayload{Changes: changes}})
+	a.Events.Dispatch(events.Event{Type: "push.scan.complete", Source: "checkins", Payload: events.PushScanCompletePayload{Changes: changes, JobID: jobID}})
 	if len(changes) == 0 {
 		a.Events.Dispatch(events.Infof("push", "No pending check-in changes to push."))
-		a.Events.Dispatch(events.Event{Type: "push.complete", Source: "checkins", Payload: events.PushCompletePayload{ErrorCount: 0}})
+		a.Events.Dispatch(events.Event{Type: "push.complete", Source: "checkins", Payload: events.PushCompletePayload{ErrorCount: 0, JobID: jobID}})
 		return nil
 	}
 
@@ -169,7 +171,7 @@ func RunPushCheckins(a *app.App) error {
 			database.UpdatePendingChangeStatus(a.DB, "AccountCheckinsPendingChanges", change.ChangeId, "completed")
 		}
 	}
-	a.Events.Dispatch(events.Event{Type: "push.complete", Source: "checkins", Payload: events.PushCompletePayload{ErrorCount: errorCount}})
+	a.Events.Dispatch(events.Event{Type: "push.complete", Source: "checkins", Payload: events.PushCompletePayload{ErrorCount: errorCount, JobID: jobID}})
 	a.Events.Dispatch(events.Infof("push", "Finished pushing check-in changes."))
 	return nil
 }

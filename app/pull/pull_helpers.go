@@ -15,18 +15,26 @@ import (
 	"github.com/guregu/null/v6"
 )
 
+func metricJobID(a *app.App) string {
+	if a == nil {
+		return ""
+	}
+	return strings.TrimSpace(a.ActiveSyncJobID())
+}
+
 func PullAccount(a *app.App, accountID int) (account *models.Account, err error) {
-	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "account", Payload: events.PullStartPayload{ResourceID: accountID}})
+	jobID := metricJobID(a)
+	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "account", Payload: events.PullStartPayload{ResourceID: accountID, JobID: jobID}})
 	a.Events.Dispatch(events.Infof("pull", "Pulling account with ID: %d", accountID))
 
 	defer func() {
 		success := err == nil
-		payload := events.CompletionPayload{Success: success, ResourceID: accountID}
+		payload := events.CompletionPayload{Success: success, ResourceID: accountID, JobID: jobID}
 		if success {
 			payload.Count = 1
 		} else {
 			payload.Error = err
-			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "account", Payload: events.ErrorPayload{Error: err, ResourceID: accountID}})
+			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "account", Payload: events.ErrorPayload{Error: err, ResourceID: accountID, JobID: jobID}})
 		}
 		a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "account", Payload: payload})
 	}()
@@ -46,18 +54,19 @@ func PullAccount(a *app.App, accountID int) (account *models.Account, err error)
 }
 
 func PullGroupAccounts(a *app.App, top int, progressCallback func(current, total int)) (err error) {
-	a.Events.Dispatch(events.Event{Type: "pull.group.start", Source: "accounts"})
+	jobID := metricJobID(a)
+	a.Events.Dispatch(events.Event{Type: "pull.group.start", Source: "accounts", Payload: events.PullStartPayload{JobID: jobID}})
 
 	defer func() {
 		if err != nil {
-			a.Events.Dispatch(events.Event{Type: "pull.group.error", Source: "accounts", Payload: events.ErrorPayload{Error: err}})
+			a.Events.Dispatch(events.Event{Type: "pull.group.error", Source: "accounts", Payload: events.ErrorPayload{Error: err, JobID: jobID}})
 		}
 	}()
 
 	accountIDsResp, err := a.API.GetAccountIDs()
 	if err != nil {
 		err = fmt.Errorf("error getting account IDs: %w", err)
-		a.Events.Dispatch(events.Event{Type: "pull.error", Source: "accounts", Payload: events.ErrorPayload{Error: err}})
+		a.Events.Dispatch(events.Event{Type: "pull.error", Source: "accounts", Payload: events.ErrorPayload{Error: err, JobID: jobID}})
 		return err
 	}
 	accountIDs := accountIDsResp.Data
@@ -66,7 +75,7 @@ func PullGroupAccounts(a *app.App, top int, progressCallback func(current, total
 		accountIDs = accountIDs[:top]
 	}
 	total := len(accountIDs)
-	a.Events.Dispatch(events.Event{Type: "pull.ids_fetched", Source: "accounts", Payload: events.ResourceIDsFetchedPayload{Count: total}})
+	a.Events.Dispatch(events.Event{Type: "pull.ids_fetched", Source: "accounts", Payload: events.ResourceIDsFetchedPayload{Count: total, JobID: jobID}})
 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, a.MaxConcurrentRequests)
@@ -85,7 +94,7 @@ func PullGroupAccounts(a *app.App, top int, progressCallback func(current, total
 			accountResp, err := a.API.GetAccountDetailed(accountID)
 			if err != nil {
 				err = fmt.Errorf("error getting detailed account info for ID %d: %w", accountID, err)
-				a.Events.Dispatch(events.Event{Type: "pull.error", Source: "accounts", Payload: events.ErrorPayload{Error: err, ResourceID: accountID}})
+				a.Events.Dispatch(events.Event{Type: "pull.error", Source: "accounts", Payload: events.ErrorPayload{Error: err, ResourceID: accountID, JobID: jobID}})
 				errorChan <- err
 				return
 			}
@@ -94,7 +103,7 @@ func PullGroupAccounts(a *app.App, top int, progressCallback func(current, total
 
 			if err := StoreAccountDetailed(a, account); err != nil {
 				err = fmt.Errorf("error storing account %d: %w", accountID, err)
-				a.Events.Dispatch(events.Event{Type: "pull.error", Source: "accounts", Payload: events.ErrorPayload{Error: err, ResourceID: accountID}})
+				a.Events.Dispatch(events.Event{Type: "pull.error", Source: "accounts", Payload: events.ErrorPayload{Error: err, ResourceID: accountID, JobID: jobID}})
 				errorChan <- err
 			} else {
 				a.Events.Dispatch(events.Event{Type: "pull.store.success", Source: "accounts", Payload: events.StoreSuccessPayload{Data: account}})
@@ -120,7 +129,7 @@ func PullGroupAccounts(a *app.App, top int, progressCallback func(current, total
 
 	successTotal := int(successCount.Load())
 	success := err == nil
-	a.Events.Dispatch(events.Event{Type: "pull.group.complete", Source: "accounts", Payload: events.CompletionPayload{Success: success, Error: err, Count: successTotal}})
+	a.Events.Dispatch(events.Event{Type: "pull.group.complete", Source: "accounts", Payload: events.CompletionPayload{Success: success, Error: err, Count: successTotal, JobID: jobID}})
 	if success {
 		a.Events.Dispatch(events.Infof("pull", "Successfully pulled all accounts"))
 	} else {
@@ -130,17 +139,18 @@ func PullGroupAccounts(a *app.App, top int, progressCallback func(current, total
 }
 
 func PullCheckin(a *app.App, checkinID int) (checkin *models.Checkin, err error) {
-	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "check-in", Payload: events.PullStartPayload{ResourceID: checkinID}})
+	jobID := metricJobID(a)
+	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "check-in", Payload: events.PullStartPayload{ResourceID: checkinID, JobID: jobID}})
 	a.Events.Dispatch(events.Infof("pull", "Pulling checkin with ID: %d", checkinID))
 
 	defer func() {
 		success := err == nil
-		payload := events.CompletionPayload{Success: success, ResourceID: checkinID}
+		payload := events.CompletionPayload{Success: success, ResourceID: checkinID, JobID: jobID}
 		if success {
 			payload.Count = 1
 		} else {
 			payload.Error = err
-			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "check-in", Payload: events.ErrorPayload{Error: err, ResourceID: checkinID}})
+			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "check-in", Payload: events.ErrorPayload{Error: err, ResourceID: checkinID, JobID: jobID}})
 		}
 		a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "check-in", Payload: payload})
 	}()
@@ -150,18 +160,19 @@ func PullCheckin(a *app.App, checkinID int) (checkin *models.Checkin, err error)
 
 // PullCheckinsForAccount pulls all check-ins for a specific account ID.
 func PullCheckinsForAccount(a *app.App, accountID int) (err error) {
-	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "checkins", Payload: events.PullStartPayload{ResourceID: accountID}})
+	jobID := metricJobID(a)
+	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "checkins", Payload: events.PullStartPayload{ResourceID: accountID, JobID: jobID}})
 	a.Events.Dispatch(events.Infof("pull", "Pulling check-ins for account ID: %d", accountID))
 
 	count := 0
 	defer func() {
 		success := err == nil
-		payload := events.CompletionPayload{Success: success, ResourceID: accountID}
+		payload := events.CompletionPayload{Success: success, ResourceID: accountID, JobID: jobID}
 		if success {
 			payload.Count = count
 		} else {
 			payload.Error = err
-			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "checkins", Payload: events.ErrorPayload{Error: err, ResourceID: accountID}})
+			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "checkins", Payload: events.ErrorPayload{Error: err, ResourceID: accountID, JobID: jobID}})
 		}
 		a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "checkins", Payload: payload})
 	}()
@@ -184,23 +195,24 @@ func PullCheckinsForAccount(a *app.App, accountID int) (err error) {
 }
 
 func PullGroupCheckins(a *app.App, progressCallback func(current, total int)) (err error) {
-	a.Events.Dispatch(events.Event{Type: "pull.group.start", Source: "checkins"})
+	jobID := metricJobID(a)
+	a.Events.Dispatch(events.Event{Type: "pull.group.start", Source: "checkins", Payload: events.PullStartPayload{JobID: jobID}})
 
 	defer func() {
 		if err != nil {
-			a.Events.Dispatch(events.Event{Type: "pull.group.error", Source: "checkins", Payload: events.ErrorPayload{Error: err}})
+			a.Events.Dispatch(events.Event{Type: "pull.group.error", Source: "checkins", Payload: events.ErrorPayload{Error: err, JobID: jobID}})
 		}
 	}()
 
 	accountIDsResp, err := a.API.GetAccountIDs()
 	if err != nil {
 		err = fmt.Errorf("error getting account IDs: %w", err)
-		a.Events.Dispatch(events.Event{Type: "pull.error", Source: "checkins", Payload: events.ErrorPayload{Error: err}})
+		a.Events.Dispatch(events.Event{Type: "pull.error", Source: "checkins", Payload: events.ErrorPayload{Error: err, JobID: jobID}})
 		return err
 	}
 	accountIDs := accountIDsResp.Data
 	total := len(accountIDs)
-	a.Events.Dispatch(events.Event{Type: "pull.ids_fetched", Source: "checkins", Payload: events.ResourceIDsFetchedPayload{Count: total}})
+	a.Events.Dispatch(events.Event{Type: "pull.ids_fetched", Source: "checkins", Payload: events.ResourceIDsFetchedPayload{Count: total, JobID: jobID}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -228,7 +240,7 @@ func PullGroupCheckins(a *app.App, progressCallback func(current, total int)) (e
 			checkinsResp, err := a.API.GetCheckinsForAccount(accountID)
 			if err != nil {
 				err = fmt.Errorf("error getting checkins for account ID %d: %w", accountID, err)
-				a.Events.Dispatch(events.Event{Type: "pull.error", Source: "checkins", Payload: events.ErrorPayload{Error: err, ResourceID: accountID}})
+				a.Events.Dispatch(events.Event{Type: "pull.error", Source: "checkins", Payload: events.ErrorPayload{Error: err, ResourceID: accountID, JobID: jobID}})
 				errorChan <- err
 				cancel() // Cancel context on first error
 				return
@@ -244,7 +256,7 @@ func PullGroupCheckins(a *app.App, progressCallback func(current, total int)) (e
 				}
 				if err := StoreCheckin(a, checkin); err != nil {
 					err = fmt.Errorf("error storing checkin %d: %w", checkin.CheckinId.Int64, err)
-					a.Events.Dispatch(events.Event{Type: "pull.error", Source: "checkins", Payload: events.ErrorPayload{Error: err, ResourceID: checkin.CheckinId.Int64}})
+					a.Events.Dispatch(events.Event{Type: "pull.error", Source: "checkins", Payload: events.ErrorPayload{Error: err, ResourceID: checkin.CheckinId.Int64, JobID: jobID}})
 					errorChan <- err
 					cancel() // Cancel context on first error
 				} else {
@@ -272,7 +284,7 @@ func PullGroupCheckins(a *app.App, progressCallback func(current, total int)) (e
 
 	successTotal := int(successCount.Load())
 	success := err == nil
-	a.Events.Dispatch(events.Event{Type: "pull.group.complete", Source: "checkins", Payload: events.CompletionPayload{Success: success, Error: err, Count: successTotal}})
+	a.Events.Dispatch(events.Event{Type: "pull.group.complete", Source: "checkins", Payload: events.CompletionPayload{Success: success, Error: err, Count: successTotal, JobID: jobID}})
 	if success {
 		a.Events.Dispatch(events.Infof("pull", "Finished pulling all checkins"))
 	} else {
@@ -282,17 +294,18 @@ func PullGroupCheckins(a *app.App, progressCallback func(current, total int)) (e
 }
 
 func PullRoute(a *app.App, routeID int) (route *models.Route, err error) {
-	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "route", Payload: events.PullStartPayload{ResourceID: routeID}})
+	jobID := metricJobID(a)
+	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "route", Payload: events.PullStartPayload{ResourceID: routeID, JobID: jobID}})
 	a.Events.Dispatch(events.Infof("pull", "Pulling route with ID: %d", routeID))
 
 	defer func() {
 		success := err == nil
-		payload := events.CompletionPayload{Success: success, ResourceID: routeID}
+		payload := events.CompletionPayload{Success: success, ResourceID: routeID, JobID: jobID}
 		if success {
 			payload.Count = 1
 		} else {
 			payload.Error = err
-			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "route", Payload: events.ErrorPayload{Error: err, ResourceID: routeID}})
+			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "route", Payload: events.ErrorPayload{Error: err, ResourceID: routeID, JobID: jobID}})
 		}
 		a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "route", Payload: payload})
 	}()
@@ -312,23 +325,24 @@ func PullRoute(a *app.App, routeID int) (route *models.Route, err error) {
 }
 
 func PullGroupRoutes(a *app.App, progressCallback func(current, total int)) (err error) {
-	a.Events.Dispatch(events.Event{Type: "pull.group.start", Source: "routes"})
+	jobID := metricJobID(a)
+	a.Events.Dispatch(events.Event{Type: "pull.group.start", Source: "routes", Payload: events.PullStartPayload{JobID: jobID}})
 
 	defer func() {
 		if err != nil {
-			a.Events.Dispatch(events.Event{Type: "pull.group.error", Source: "routes", Payload: events.ErrorPayload{Error: err}})
+			a.Events.Dispatch(events.Event{Type: "pull.group.error", Source: "routes", Payload: events.ErrorPayload{Error: err, JobID: jobID}})
 		}
 	}()
 
 	routesResp, err := a.API.GetRoutes()
 	if err != nil {
 		err = fmt.Errorf("error getting routes: %w", err)
-		a.Events.Dispatch(events.Event{Type: "pull.error", Source: "routes", Payload: events.ErrorPayload{Error: err}})
+		a.Events.Dispatch(events.Event{Type: "pull.error", Source: "routes", Payload: events.ErrorPayload{Error: err, JobID: jobID}})
 		return err
 	}
 	routes := routesResp.Data
 	total := len(routes)
-	a.Events.Dispatch(events.Event{Type: "pull.ids_fetched", Source: "routes", Payload: events.ResourceIDsFetchedPayload{Count: total}})
+	a.Events.Dispatch(events.Event{Type: "pull.ids_fetched", Source: "routes", Payload: events.ResourceIDsFetchedPayload{Count: total, JobID: jobID}})
 
 	successCount := 0
 	var routeErrors []string
@@ -343,7 +357,7 @@ func PullGroupRoutes(a *app.App, progressCallback func(current, total int)) (err
 		a.Events.Dispatch(events.Event{Type: "pull.fetch_detail.success", Source: "routes", Payload: events.FetchDetailSuccessPayload{Data: route}})
 		if storeErr := StoreRoute(a, route); storeErr != nil {
 			wrappedErr := fmt.Errorf("error storing route %d: %w", route.RouteId.Int64, storeErr)
-			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "routes", Payload: events.ErrorPayload{Error: wrappedErr, ResourceID: route.RouteId.Int64}})
+			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "routes", Payload: events.ErrorPayload{Error: wrappedErr, ResourceID: route.RouteId.Int64, JobID: jobID}})
 			routeErrors = append(routeErrors, wrappedErr.Error())
 		} else {
 			a.Events.Dispatch(events.Event{Type: "pull.store.success", Source: "routes", Payload: events.StoreSuccessPayload{Data: route}})
@@ -359,7 +373,7 @@ func PullGroupRoutes(a *app.App, progressCallback func(current, total int)) (err
 	}
 
 	success := len(routeErrors) == 0
-	a.Events.Dispatch(events.Event{Type: "pull.group.complete", Source: "routes", Payload: events.CompletionPayload{Success: success, Error: err, Count: successCount}})
+	a.Events.Dispatch(events.Event{Type: "pull.group.complete", Source: "routes", Payload: events.CompletionPayload{Success: success, Error: err, Count: successCount, JobID: jobID}})
 	if success {
 		a.Events.Dispatch(events.Infof("pull", "Successfully pulled all routes"))
 	} else {
@@ -369,7 +383,8 @@ func PullGroupRoutes(a *app.App, progressCallback func(current, total int)) (err
 }
 
 func PullProfile(a *app.App, progressCallback func(current, total int)) (profile *models.UserProfile, err error) {
-	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "user profile"})
+	jobID := metricJobID(a)
+	a.Events.Dispatch(events.Event{Type: "pull.start", Source: "user profile", Payload: events.PullStartPayload{JobID: jobID}})
 	a.Events.Dispatch(events.Infof("pull", "Pulling user profile..."))
 
 	defer func() {
@@ -378,12 +393,12 @@ func PullProfile(a *app.App, progressCallback func(current, total int)) (profile
 			profileID = profile.ProfileId.Int64
 		}
 		success := err == nil
-		payload := events.CompletionPayload{Success: success, ResourceID: profileID}
+		payload := events.CompletionPayload{Success: success, ResourceID: profileID, JobID: jobID}
 		if success {
 			payload.Count = 1
 		} else {
 			payload.Error = err
-			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "user profile", Payload: events.ErrorPayload{Error: err, ResourceID: profileID}})
+			a.Events.Dispatch(events.Event{Type: "pull.error", Source: "user profile", Payload: events.ErrorPayload{Error: err, ResourceID: profileID, JobID: jobID}})
 		}
 		a.Events.Dispatch(events.Event{Type: "pull.complete", Source: "user profile", Payload: payload})
 	}()

@@ -46,6 +46,7 @@ func TestSQLFiles(t *testing.T) {
 		"CreateRouteWaypointsTable.sql",
 		"CreateRoutesTable.sql",
 		"CreateSyncHistoryTable.sql",
+		"CreateJobLogTable.sql",
 		"CreateUserProfilesTable.sql",
 		"DeleteAccountLocations.sql",
 		"DeleteDataSetValues.sql",
@@ -82,12 +83,18 @@ func TestSQLFiles(t *testing.T) {
 		"InsertConfigurations.sql",
 		"UpdateConfiguration.sql",
 		"CreateCommandLogTable.sql",
+		"CreateJobLogIndexes.sql",
 		"CompleteSyncHistory.sql",
+		"CompleteJobLog.sql",
 		"GetRecentSyncHistory.sql",
+		"GetRecentJobLog.sql",
 		"InsertSyncHistory.sql",
+		"InsertJobLog.sql",
+		"BackfillJobLogFromSyncHistory.sql",
 		"CreateWebhookLogTable.sql",
 		"GetWebhookLog.sql",
 		"UpdateSyncHistoryMetrics.sql",
+		"UpdateJobLogMetrics.sql",
 	}
 
 	postgresMssqlExtraFiles := []string{

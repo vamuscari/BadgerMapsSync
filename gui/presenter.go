@@ -34,6 +34,22 @@ func NewGuiPresenter(a *app.App, v GuiView) *GuiPresenter {
 	return &GuiPresenter{app: a, view: v}
 }
 
+func (p *GuiPresenter) logOperationalCommand(command string, args []string, commandErr error) {
+	if p == nil || p.app == nil || p.app.DB == nil || !p.app.DB.IsConnected() {
+		return
+	}
+
+	success := commandErr == nil
+	errorMessage := ""
+	if commandErr != nil {
+		errorMessage = commandErr.Error()
+	}
+
+	if err := database.LogCommand(p.app.DB, command, args, success, errorMessage); err != nil {
+		p.app.Events.Dispatch(events.Warningf("presenter", "Failed to log command %q: %v", command, err))
+	}
+}
+
 func ratioProgress(current, total int) float64 {
 	if total <= 0 {
 		return 0
@@ -137,13 +153,18 @@ func (p *GuiPresenter) RunFullSyncBlocking() error {
 	defer p.view.HideProgressBar()
 
 	if err := p.runPullGroupSync(); err != nil {
-		return fmt.Errorf("full sync pull stage failed: %w", err)
+		runErr := fmt.Errorf("full sync pull stage failed: %w", err)
+		p.logOperationalCommand("gui.full_sync", nil, runErr)
+		return runErr
 	}
 
 	if err := p.runPushAllSync(); err != nil {
-		return fmt.Errorf("full sync push stage failed: %w", err)
+		runErr := fmt.Errorf("full sync push stage failed: %w", err)
+		p.logOperationalCommand("gui.full_sync", nil, runErr)
+		return runErr
 	}
 
+	p.logOperationalCommand("gui.full_sync", nil, nil)
 	return nil
 }
 
@@ -159,9 +180,11 @@ func (p *GuiPresenter) HandlePullGroup() {
 	go func() {
 		defer p.view.HideProgressBar()
 		if err := p.runPullGroupSync(); err != nil {
+			p.logOperationalCommand("gui.pull.all", nil, err)
 			p.view.ShowToast("Error: The data pull failed.")
 			return
 		}
+		p.logOperationalCommand("gui.pull.all", nil, nil)
 		p.view.ShowToast("Success: Full data pull complete.")
 	}()
 }
@@ -176,7 +199,7 @@ func (p *GuiPresenter) HandlePullAccount(idStr string) {
 	}
 	p.app.Events.Dispatch(events.Infof("presenter", "Starting pull for account ID: %d...", id))
 	go func() {
-		if err := syncproxy.RunWithServerRouting(
+		runErr := syncproxy.RunWithServerRouting(
 			p.app,
 			appserver.SyncModePullAccount,
 			"gui.pull.account",
@@ -185,11 +208,14 @@ func (p *GuiPresenter) HandlePullAccount(idStr string) {
 				_, err := pull.PullAccount(p.app, id)
 				return err
 			},
-		); err != nil {
-			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
+		)
+		if runErr != nil {
+			p.logOperationalCommand("gui.pull.account", []string{strconv.Itoa(id)}, runErr)
+			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", runErr))
 			p.view.ShowToast(fmt.Sprintf("Error: Failed to pull account %d.", id))
 			return
 		}
+		p.logOperationalCommand("gui.pull.account", []string{strconv.Itoa(id)}, nil)
 		p.view.ShowToast(fmt.Sprintf("Success: Pulled account %d.", id))
 	}()
 }
@@ -357,7 +383,7 @@ func (p *GuiPresenter) HandlePullAccounts() {
 		callback := func(current, total int) {
 			p.view.SetProgress(float64(current) / float64(total))
 		}
-		if err := syncproxy.RunWithServerRouting(
+		runErr := syncproxy.RunWithServerRouting(
 			p.app,
 			appserver.SyncModePullAccounts,
 			"gui.pull.accounts",
@@ -365,11 +391,14 @@ func (p *GuiPresenter) HandlePullAccounts() {
 			func() error {
 				return pull.PullGroupAccounts(p.app, 0, callback)
 			},
-		); err != nil {
-			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
+		)
+		if runErr != nil {
+			p.logOperationalCommand("gui.pull.accounts", nil, runErr)
+			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", runErr))
 			p.view.ShowToast("Error: Failed to pull all accounts.")
 			return
 		}
+		p.logOperationalCommand("gui.pull.accounts", nil, nil)
 		p.view.SetProgress(1)
 		p.view.ShowToast("Success: Pulled all accounts.")
 	}()
@@ -385,7 +414,7 @@ func (p *GuiPresenter) HandlePullCheckin(idStr string) {
 	}
 	p.app.Events.Dispatch(events.Infof("presenter", "Starting pull for check-in ID: %d...", id))
 	go func() {
-		if err := syncproxy.RunWithServerRouting(
+		runErr := syncproxy.RunWithServerRouting(
 			p.app,
 			appserver.SyncModePullCheckin,
 			"gui.pull.checkin",
@@ -394,11 +423,14 @@ func (p *GuiPresenter) HandlePullCheckin(idStr string) {
 				_, err := pull.PullCheckin(p.app, id)
 				return err
 			},
-		); err != nil {
-			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
+		)
+		if runErr != nil {
+			p.logOperationalCommand("gui.pull.checkin", []string{strconv.Itoa(id)}, runErr)
+			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", runErr))
 			p.view.ShowToast(fmt.Sprintf("Error: Failed to pull check-in %d.", id))
 			return
 		}
+		p.logOperationalCommand("gui.pull.checkin", []string{strconv.Itoa(id)}, nil)
 		p.view.ShowToast(fmt.Sprintf("Success: Pulled check-in %d.", id))
 	}()
 }
@@ -414,7 +446,7 @@ func (p *GuiPresenter) HandlePullCheckins() {
 		callback := func(current, total int) {
 			p.view.SetProgress(float64(current) / float64(total))
 		}
-		if err := syncproxy.RunWithServerRouting(
+		runErr := syncproxy.RunWithServerRouting(
 			p.app,
 			appserver.SyncModePullCheckins,
 			"gui.pull.checkins",
@@ -422,11 +454,14 @@ func (p *GuiPresenter) HandlePullCheckins() {
 			func() error {
 				return pull.PullGroupCheckins(p.app, callback)
 			},
-		); err != nil {
-			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
+		)
+		if runErr != nil {
+			p.logOperationalCommand("gui.pull.checkins", nil, runErr)
+			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", runErr))
 			p.view.ShowToast("Error: Failed to pull all check-ins.")
 			return
 		}
+		p.logOperationalCommand("gui.pull.checkins", nil, nil)
 		p.view.SetProgress(1)
 		p.view.ShowToast("Success: Pulled all check-ins.")
 	}()
@@ -438,11 +473,14 @@ func (p *GuiPresenter) HandlePullCheckinsForAccount(accountID int) {
 	p.app.Events.Dispatch(events.Infof("presenter", "Pulling check-ins for account %d...", accountID))
 
 	go func() {
-		if err := pull.PullCheckinsForAccount(p.app, accountID); err != nil {
-			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
+		runErr := pull.PullCheckinsForAccount(p.app, accountID)
+		if runErr != nil {
+			p.logOperationalCommand("gui.pull.checkins_for_account", []string{strconv.Itoa(accountID)}, runErr)
+			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", runErr))
 			p.view.ShowToast(fmt.Sprintf("Error: Failed to pull check-ins for account %d.", accountID))
 			return
 		}
+		p.logOperationalCommand("gui.pull.checkins_for_account", []string{strconv.Itoa(accountID)}, nil)
 		p.view.ShowToast(fmt.Sprintf("Success: Pulled check-ins for account %d.", accountID))
 	}()
 }
@@ -457,7 +495,7 @@ func (p *GuiPresenter) HandlePullRoute(idStr string) {
 	}
 	p.app.Events.Dispatch(events.Infof("presenter", "Starting pull for route ID: %d...", id))
 	go func() {
-		if err := syncproxy.RunWithServerRouting(
+		runErr := syncproxy.RunWithServerRouting(
 			p.app,
 			appserver.SyncModePullRoute,
 			"gui.pull.route",
@@ -466,11 +504,14 @@ func (p *GuiPresenter) HandlePullRoute(idStr string) {
 				_, err := pull.PullRoute(p.app, id)
 				return err
 			},
-		); err != nil {
-			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
+		)
+		if runErr != nil {
+			p.logOperationalCommand("gui.pull.route", []string{strconv.Itoa(id)}, runErr)
+			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", runErr))
 			p.view.ShowToast(fmt.Sprintf("Error: Failed to pull route %d.", id))
 			return
 		}
+		p.logOperationalCommand("gui.pull.route", []string{strconv.Itoa(id)}, nil)
 		p.view.ShowToast(fmt.Sprintf("Success: Pulled route %d.", id))
 	}()
 }
@@ -486,7 +527,7 @@ func (p *GuiPresenter) HandlePullRoutes() {
 		callback := func(current, total int) {
 			p.view.SetProgress(float64(current) / float64(total))
 		}
-		if err := syncproxy.RunWithServerRouting(
+		runErr := syncproxy.RunWithServerRouting(
 			p.app,
 			appserver.SyncModePullRoutes,
 			"gui.pull.routes",
@@ -494,11 +535,14 @@ func (p *GuiPresenter) HandlePullRoutes() {
 			func() error {
 				return pull.PullGroupRoutes(p.app, callback)
 			},
-		); err != nil {
-			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
+		)
+		if runErr != nil {
+			p.logOperationalCommand("gui.pull.routes", nil, runErr)
+			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", runErr))
 			p.view.ShowToast("Error: Failed to pull all routes.")
 			return
 		}
+		p.logOperationalCommand("gui.pull.routes", nil, nil)
 		p.view.SetProgress(1)
 		p.view.ShowToast("Success: Pulled all routes.")
 	}()
@@ -515,7 +559,7 @@ func (p *GuiPresenter) HandlePullProfile() {
 		callback := func(current, total int) {
 			p.view.SetProgress(float64(current) / float64(total))
 		}
-		if err := syncproxy.RunWithServerRouting(
+		runErr := syncproxy.RunWithServerRouting(
 			p.app,
 			appserver.SyncModePullProfile,
 			"gui.pull.profile",
@@ -529,11 +573,14 @@ func (p *GuiPresenter) HandlePullProfile() {
 				_, err := pull.PullProfile(p.app, callback)
 				return err
 			},
-		); err != nil {
-			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
+		)
+		if runErr != nil {
+			p.logOperationalCommand("gui.pull.profile", nil, runErr)
+			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", runErr))
 			p.view.ShowToast("Error: Failed to pull user profile.")
 			return
 		}
+		p.logOperationalCommand("gui.pull.profile", nil, nil)
 		p.view.SetProgress(1)
 		p.view.ShowToast("Success: Pulled user profile.")
 	}()
@@ -546,7 +593,7 @@ func (p *GuiPresenter) HandlePushAccounts() {
 	p.app.Events.Dispatch(events.Debugf("presenter", "HandlePushAccounts called"))
 	p.app.Events.Dispatch(events.Infof("presenter", "Starting push for account changes..."))
 	go func() {
-		if err := syncproxy.RunWithServerRouting(
+		runErr := syncproxy.RunWithServerRouting(
 			p.app,
 			appserver.SyncModePushAccounts,
 			"gui.push.accounts",
@@ -554,13 +601,16 @@ func (p *GuiPresenter) HandlePushAccounts() {
 			func() error {
 				return push.RunPushAccounts(p.app)
 			},
-		); err != nil {
-			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
+		)
+		if runErr != nil {
+			p.logOperationalCommand("gui.push.accounts", nil, runErr)
+			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", runErr))
 			fyne.Do(func() {
 				p.view.ShowToast("Error: Failed to push account changes.")
 			})
 			return
 		}
+		p.logOperationalCommand("gui.push.accounts", nil, nil)
 		fyne.Do(func() {
 			p.view.ShowToast("Success: Account changes pushed.")
 			p.view.RefreshPushTab()
@@ -573,7 +623,7 @@ func (p *GuiPresenter) HandlePushCheckins() {
 	p.app.Events.Dispatch(events.Debugf("presenter", "HandlePushCheckins called"))
 	p.app.Events.Dispatch(events.Infof("presenter", "Starting push for check-in changes..."))
 	go func() {
-		if err := syncproxy.RunWithServerRouting(
+		runErr := syncproxy.RunWithServerRouting(
 			p.app,
 			appserver.SyncModePushCheckins,
 			"gui.push.checkins",
@@ -581,13 +631,16 @@ func (p *GuiPresenter) HandlePushCheckins() {
 			func() error {
 				return push.RunPushCheckins(p.app)
 			},
-		); err != nil {
-			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
+		)
+		if runErr != nil {
+			p.logOperationalCommand("gui.push.checkins", nil, runErr)
+			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", runErr))
 			fyne.Do(func() {
 				p.view.ShowToast("Error: Failed to push check-in changes.")
 			})
 			return
 		}
+		p.logOperationalCommand("gui.push.checkins", nil, nil)
 		fyne.Do(func() {
 			p.view.ShowToast("Success: Check-in changes pushed.")
 			p.view.RefreshPushTab()
@@ -601,6 +654,7 @@ func (p *GuiPresenter) HandlePushAll() {
 	p.app.Events.Dispatch(events.Infof("presenter", "Starting push for all changes..."))
 	go func() {
 		err := p.runPushAllSync()
+		p.logOperationalCommand("gui.push.all", nil, err)
 		fyne.Do(func() {
 			if err != nil {
 				p.view.ShowToast("Error: Failed to push one or more pending changes.")
@@ -802,19 +856,23 @@ func (p *GuiPresenter) HandleTestDBConnection(dbType, dbPath, dbHost, dbPortStr,
 // HandleSchemaEnforcement initializes or re-initializes the database schema.
 func (p *GuiPresenter) HandleSchemaEnforcement() {
 	p.app.Events.Dispatch(events.Debugf("presenter", "HandleSchemaEnforcement called"))
+	logCommand := "gui.schema.init_or_reset"
 	if p.app.DB == nil {
 		p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: Database is not configured."))
+		p.logOperationalCommand(logCommand, nil, fmt.Errorf("database is not configured"))
 		p.view.ShowToast("Error: Database is not configured.")
 		return
 	}
 	if p.app.DB.GetDB() == nil {
 		if err := p.app.DB.Connect(); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: Failed to connect database before schema action: %v", err))
+			p.logOperationalCommand(logCommand, nil, err)
 			p.view.ShowToast("Error: Failed to connect to database.")
 			return
 		}
 		if err := p.app.DB.TestConnection(); err != nil {
 			p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: Database connection test failed before schema action: %v", err))
+			p.logOperationalCommand(logCommand, nil, err)
 			p.view.ShowToast("Error: Failed to verify database connection.")
 			return
 		}
@@ -827,8 +885,10 @@ func (p *GuiPresenter) HandleSchemaEnforcement() {
 			}
 			p.app.Events.Dispatch(events.Warningf("presenter", "Re-initializing database schema and deleting all existing data..."))
 			go func() {
-				if err := p.app.DB.ResetSchema(p.app.State); err != nil {
-					p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
+				runErr := p.app.DB.ResetSchema(p.app.State)
+				p.logOperationalCommand("gui.schema.reset", nil, runErr)
+				if runErr != nil {
+					p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", runErr))
 					p.view.ShowToast("Error: Failed to re-initialize schema.")
 					return
 				}
@@ -842,8 +902,10 @@ func (p *GuiPresenter) HandleSchemaEnforcement() {
 		// Schema doesn't exist, just initialize it
 		p.app.Events.Dispatch(events.Infof("presenter", "Initializing database schema..."))
 		go func() {
-			if err := p.app.DB.EnforceSchema(p.app.State); err != nil {
-				p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", err))
+			runErr := p.app.DB.EnforceSchema(p.app.State)
+			p.logOperationalCommand("gui.schema.init", nil, runErr)
+			if runErr != nil {
+				p.app.Events.Dispatch(events.Errorf("presenter", "ERROR: %v", runErr))
 				p.view.ShowToast("Error: Failed to initialize schema.")
 				return
 			}
@@ -887,8 +949,14 @@ func (p *GuiPresenter) HandleSaveServerConfig(host, portStr, timezone string, tl
 	trimmedCert := strings.TrimSpace(tlsCert)
 	trimmedKey := strings.TrimSpace(tlsKey)
 	trimmedTimezone := appserver.NormalizeTimezone(timezone)
+	logArgs := []string{
+		fmt.Sprintf("host=%s", trimmedHost),
+		fmt.Sprintf("port=%d", serverPort),
+		fmt.Sprintf("timezone=%s", trimmedTimezone),
+	}
 	if err := appserver.ValidateTimezone(trimmedTimezone); err != nil {
 		p.app.Events.Dispatch(events.Warningf("presenter", "Invalid timezone '%s': %v", trimmedTimezone, err))
+		p.logOperationalCommand("gui.server.save_config", logArgs, err)
 		p.view.ShowToast("Error: Invalid timezone. Use an IANA value like America/New_York.")
 		return
 	}
@@ -912,9 +980,11 @@ func (p *GuiPresenter) HandleSaveServerConfig(host, portStr, timezone string, tl
 	if err := p.app.SaveConfig(); err != nil {
 		errWrapped := fmt.Errorf("failed to save server configuration: %w", err)
 		p.app.Events.Dispatch(events.Errorf("presenter", errWrapped.Error()))
+		p.logOperationalCommand("gui.server.save_config", logArgs, errWrapped)
 		p.view.ShowToast("Error: Failed to save server settings.")
 		return
 	}
+	p.logOperationalCommand("gui.server.save_config", logArgs, nil)
 
 	if _, running := p.app.Server.GetServerStatus(); running {
 		p.view.ShowToast("Success: Server settings saved. Restart server to apply timezone changes.")
@@ -928,9 +998,11 @@ func (p *GuiPresenter) HandleSaveServerConfig(host, portStr, timezone string, tl
 func (p *GuiPresenter) HandleStartServer() {
 	if err := p.app.Server.StartServer(); err != nil {
 		p.app.Events.Dispatch(events.Errorf("presenter", "Error starting server: %v", err))
+		p.logOperationalCommand("gui.server.start", nil, err)
 		p.view.ShowErrorDialog(err)
 		return
 	}
+	p.logOperationalCommand("gui.server.start", nil, nil)
 	p.app.Events.Dispatch(events.Event{Type: "server.status.changed", Source: "presenter"})
 }
 
@@ -938,9 +1010,11 @@ func (p *GuiPresenter) HandleStartServer() {
 func (p *GuiPresenter) HandleStopServer() {
 	if err := p.app.Server.StopServer(); err != nil {
 		p.app.Events.Dispatch(events.Errorf("presenter", "Error stopping server: %v", err))
+		p.logOperationalCommand("gui.server.stop", nil, err)
 		p.view.ShowErrorDialog(err)
 		return
 	}
+	p.logOperationalCommand("gui.server.stop", nil, nil)
 	p.app.Events.Dispatch(events.Event{Type: "server.status.changed", Source: "presenter"})
 }
 
@@ -972,6 +1046,7 @@ func (p *GuiPresenter) FetchServerJobsSnapshot() (*appserver.SyncJobListResponse
 func (p *GuiPresenter) HandleRunScheduledJob(jobID string, jobName string) {
 	trimmedID := strings.TrimSpace(jobID)
 	if trimmedID == "" {
+		p.logOperationalCommand("gui.scheduled.run", nil, fmt.Errorf("scheduled job ID is required"))
 		p.view.ShowToast("Error: Scheduled job ID is required.")
 		return
 	}
@@ -985,11 +1060,14 @@ func (p *GuiPresenter) HandleRunScheduledJob(jobID string, jobName string) {
 	p.view.ShowToast(fmt.Sprintf("Queueing job '%s'...", displayName))
 
 	go func() {
-		if err := syncproxy.RunScheduledJobNow(p.app, trimmedID); err != nil {
-			p.app.Events.Dispatch(events.Errorf("presenter", "Failed to queue scheduled job '%s': %v", displayName, err))
+		runErr := syncproxy.RunScheduledJobNow(p.app, trimmedID)
+		if runErr != nil {
+			p.logOperationalCommand("gui.scheduled.run", []string{trimmedID}, runErr)
+			p.app.Events.Dispatch(events.Errorf("presenter", "Failed to queue scheduled job '%s': %v", displayName, runErr))
 			p.view.ShowToast(fmt.Sprintf("Error: Failed to queue job '%s'.", displayName))
 			return
 		}
+		p.logOperationalCommand("gui.scheduled.run", []string{trimmedID}, nil)
 		p.app.Events.Dispatch(events.Infof("presenter", "Queued scheduled job '%s'.", displayName))
 		p.view.ShowToast(fmt.Sprintf("Queued job '%s'.", displayName))
 	}()

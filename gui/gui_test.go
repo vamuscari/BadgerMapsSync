@@ -390,8 +390,8 @@ func TestSyncCenterContainsScheduledJobsToolsAndHeaderServerControl(t *testing.T
 	if !hasButton(syncTab.Content, "Add Job") {
 		t.Fatal("expected Add Job button in Sync Center")
 	}
-	if !hasButton(syncTab.Content, "Sync History") {
-		t.Fatal("expected Sync History shortcut in Sync Center tools")
+	if !hasButton(syncTab.Content, "Job Log") {
+		t.Fatal("expected Job Log shortcut in Sync Center tools")
 	}
 	if !hasButton(syncTab.Content, "Pending Changes") {
 		t.Fatal("expected Pending Changes shortcut in Sync Center tools")
