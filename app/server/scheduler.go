@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -77,35 +78,57 @@ type Scheduler struct {
 	syncQueue    *SyncJobCoordinator
 	actionExec   *action.Executor
 	legacyCron   []CronJob
+	globalTZ     string
 	running      bool
 	stopChan     chan struct{}
+}
+
+var schedulerCronParser = cron.NewParser(
+	cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
+)
+
+func parseSchedulerSpec(spec string) (cron.Schedule, error) {
+	return schedulerCronParser.Parse(spec)
 }
 
 func NewScheduler(
 	state *state.State,
 	db database.DB,
 	api *api.APIClient,
-	events *events.EventDispatcher,
+	eventBus *events.EventDispatcher,
 	auditLogger *audit.AuditLogger,
 	syncExecutor SyncExecutor,
 	syncQueue *SyncJobCoordinator,
 	legacyCronJobs []CronJob,
+	globalTimezone string,
 ) *Scheduler {
-	// Create cron with seconds field support
-	parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+	resolvedGlobalTZ := NormalizeTimezone(globalTimezone)
+	resolvedGlobalLoc := time.Local
+	if resolvedGlobalTZ != "" {
+		loc, err := time.LoadLocation(resolvedGlobalTZ)
+		if err != nil {
+			resolvedGlobalTZ = ""
+			if eventBus != nil {
+				eventBus.Dispatch(events.Warningf("scheduler", "Invalid global timezone '%s'; falling back to local time", globalTimezone))
+			}
+		} else {
+			resolvedGlobalLoc = loc
+		}
+	}
 
 	return &Scheduler{
-		cron:         cron.New(cron.WithParser(parser), cron.WithLocation(time.Local)),
+		cron:         cron.New(cron.WithParser(schedulerCronParser), cron.WithLocation(resolvedGlobalLoc)),
 		jobs:         make(map[string]*ScheduledJob),
 		state:        state,
 		db:           db,
 		api:          api,
-		events:       events,
+		events:       eventBus,
 		auditLogger:  auditLogger,
 		syncExecutor: syncExecutor,
 		syncQueue:    syncQueue,
 		actionExec:   action.NewExecutor(db, api),
 		legacyCron:   append([]CronJob(nil), legacyCronJobs...),
+		globalTZ:     resolvedGlobalTZ,
 		stopChan:     make(chan struct{}),
 	}
 }
@@ -187,35 +210,26 @@ func (s *Scheduler) AddJob(job *ScheduledJob) error {
 		job.ID = fmt.Sprintf("job_%d", time.Now().UnixNano())
 	}
 
-	// Validate cron expression
-	schedule, err := cron.ParseStandard(job.Schedule)
-	if err != nil {
-		return fmt.Errorf("invalid cron expression: %w", err)
-	}
-
-	// Calculate next run time with timezone support
-	var nextRun time.Time
-	if job.Timezone != "" {
-		loc, err := time.LoadLocation(job.Timezone)
-		if err != nil {
-			return fmt.Errorf("invalid timezone: %w", err)
-		}
-		// Calculate next run in the job's timezone
-		nextRun = schedule.Next(time.Now().In(loc))
-	} else {
-		nextRun = schedule.Next(time.Now())
-	}
-	job.NextRun = &nextRun
-
 	// Add to cron if enabled
 	if job.Enabled {
-		entryID, err := s.cron.AddFunc(job.Schedule, func() {
+		spec, nextRun, err := s.scheduleSpecAndNextRun(job)
+		if err != nil {
+			return err
+		}
+		entryID, err := s.cron.AddFunc(spec, func() {
 			s.executeJob(job.ID)
 		})
 		if err != nil {
 			return fmt.Errorf("failed to add job to cron: %w", err)
 		}
 		job.cronID = entryID
+		job.NextRun = nextRun
+	} else {
+		nextRun, err := s.estimateNextRun(job)
+		if err != nil {
+			return err
+		}
+		job.NextRun = nextRun
 	}
 
 	s.jobs[job.ID] = job
@@ -275,6 +289,9 @@ func (s *Scheduler) UpdateJob(jobID string, updates *ScheduledJob) error {
 	if updates.SyncType != "" {
 		job.SyncType = updates.SyncType
 	}
+	if normalizedTimezone := NormalizeTimezone(updates.Timezone); normalizedTimezone != "" {
+		job.Timezone = normalizedTimezone
+	}
 	job.Enabled = updates.Enabled
 	job.RetryOnError = updates.RetryOnError
 	job.MaxRetries = updates.MaxRetries
@@ -285,31 +302,25 @@ func (s *Scheduler) UpdateJob(jobID string, updates *ScheduledJob) error {
 
 	// Re-add to cron if enabled
 	if job.Enabled {
-		schedule, err := cron.ParseStandard(job.Schedule)
+		spec, nextRun, err := s.scheduleSpecAndNextRun(job)
 		if err != nil {
-			return fmt.Errorf("invalid cron expression: %w", err)
+			return err
 		}
 
-		// Calculate next run time with timezone support
-		var nextRun time.Time
-		if job.Timezone != "" {
-			loc, err := time.LoadLocation(job.Timezone)
-			if err != nil {
-				return fmt.Errorf("invalid timezone: %w", err)
-			}
-			nextRun = schedule.Next(time.Now().In(loc))
-		} else {
-			nextRun = schedule.Next(time.Now())
-		}
-		job.NextRun = &nextRun
-
-		entryID, err := s.cron.AddFunc(job.Schedule, func() {
+		entryID, err := s.cron.AddFunc(spec, func() {
 			s.executeJob(jobID)
 		})
 		if err != nil {
 			return fmt.Errorf("failed to update job in cron: %w", err)
 		}
 		job.cronID = entryID
+		job.NextRun = nextRun
+	} else {
+		nextRun, err := s.estimateNextRun(job)
+		if err != nil {
+			return err
+		}
+		job.NextRun = nextRun
 	}
 
 	s.saveJobs()
@@ -491,6 +502,9 @@ func (s *Scheduler) runScheduledJob(jobID string) error {
 
 	if len(job.Actions) > 0 {
 		for _, actionConfig := range job.Actions {
+			if !actionConfig.IsEnabled() {
+				continue
+			}
 			action, err := action.NewActionFromConfig(actionConfig)
 			if err != nil {
 				s.events.Dispatch(events.Errorf("scheduler", "Failed to create action: %v", err))
@@ -623,6 +637,62 @@ func (s *Scheduler) updateNextRunTimes() {
 	}
 }
 
+func (s *Scheduler) scheduleSpecAndNextRun(job *ScheduledJob) (string, *time.Time, error) {
+	spec, location, _, err := s.effectiveScheduleSpec(job)
+	if err != nil {
+		return "", nil, err
+	}
+
+	nextRun, err := nextRunForSpec(spec, location)
+	if err != nil {
+		return "", nil, err
+	}
+	return spec, &nextRun, nil
+}
+
+func (s *Scheduler) estimateNextRun(job *ScheduledJob) (*time.Time, error) {
+	_, nextRun, err := s.scheduleSpecAndNextRun(job)
+	if err != nil {
+		return nil, err
+	}
+	return nextRun, nil
+}
+
+func (s *Scheduler) effectiveScheduleSpec(job *ScheduledJob) (string, *time.Location, string, error) {
+	if job == nil {
+		return "", nil, "", fmt.Errorf("job is required")
+	}
+
+	schedule := strings.TrimSpace(job.Schedule)
+	if schedule == "" {
+		return "", nil, "", fmt.Errorf("job schedule is required")
+	}
+
+	timezone, source, location, err := ResolveEffectiveTimezone(job.Timezone, s.globalTZ)
+	if err != nil {
+		return "", nil, "", err
+	}
+
+	spec := schedule
+	if source == TimezoneSourceOverride {
+		spec = fmt.Sprintf("CRON_TZ=%s %s", timezone, schedule)
+	}
+
+	return spec, location, source, nil
+}
+
+func nextRunForSpec(spec string, location *time.Location) (time.Time, error) {
+	schedule, err := parseSchedulerSpec(spec)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid cron expression: %w", err)
+	}
+
+	if location == nil {
+		location = time.Local
+	}
+	return schedule.Next(time.Now().In(location)), nil
+}
+
 func (s *Scheduler) syncModeForJob(syncType SyncType) SyncMode {
 	switch syncType {
 	case SyncTypePull, SyncTypeFull:
@@ -693,31 +763,38 @@ func (s *Scheduler) addLoadedJob(job *ScheduledJob) error {
 	if job.ID == "" {
 		job.ID = fmt.Sprintf("job_%d", time.Now().UnixNano())
 	}
+	job.Timezone = NormalizeTimezone(job.Timezone)
 	job.cronID = 0
 	s.jobs[job.ID] = job
+
+	spec, nextRun, err := s.scheduleSpecAndNextRun(job)
+	if err != nil {
+		if job.Timezone != "" {
+			invalidTimezone := job.Timezone
+			job.Timezone = ""
+			spec, nextRun, err = s.scheduleSpecAndNextRun(job)
+			if err == nil {
+				if s.events != nil {
+					s.events.Dispatch(events.Warningf(
+						"scheduler",
+						"Invalid timezone '%s' for job '%s'; falling back to global/local timezone",
+						invalidTimezone,
+						job.Name,
+					))
+				}
+			}
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("invalid schedule for job %s: %w", job.Name, err)
+	}
+	job.NextRun = nextRun
 
 	if !job.Enabled {
 		return nil
 	}
 
-	schedule, err := cron.ParseStandard(job.Schedule)
-	if err != nil {
-		return fmt.Errorf("invalid schedule for job %s: %w", job.Name, err)
-	}
-
-	var nextRun time.Time
-	if job.Timezone != "" {
-		if loc, tzErr := time.LoadLocation(job.Timezone); tzErr == nil {
-			nextRun = schedule.Next(time.Now().In(loc))
-		} else {
-			nextRun = schedule.Next(time.Now())
-		}
-	} else {
-		nextRun = schedule.Next(time.Now())
-	}
-	job.NextRun = &nextRun
-
-	entryID, err := s.cron.AddFunc(job.Schedule, func(jobID string) func() {
+	entryID, err := s.cron.AddFunc(spec, func(jobID string) func() {
 		return func() {
 			s.executeJob(jobID)
 		}
@@ -798,13 +875,13 @@ func (s *Scheduler) saveJobs() error {
 
 // TestCronExpression tests if a cron expression is valid
 func TestCronExpression(expression string) error {
-	_, err := cron.ParseStandard(expression)
+	_, err := parseSchedulerSpec(expression)
 	return err
 }
 
 // GetNextRunTime calculates the next run time for a cron expression
 func GetNextRunTime(expression string) (*time.Time, error) {
-	schedule, err := cron.ParseStandard(expression)
+	schedule, err := parseSchedulerSpec(expression)
 	if err != nil {
 		return nil, err
 	}

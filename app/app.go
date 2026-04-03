@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,6 +33,7 @@ const (
 type ServerConfig struct {
 	Host        string          `yaml:"host"`
 	Port        int             `yaml:"port"`
+	Timezone    string          `yaml:"timezone,omitempty"`
 	TLSEnabled  bool            `yaml:"tls_enabled"`
 	TLSCert     string          `yaml:"tls_cert"`
 	TLSKey      string          `yaml:"tls_key"`
@@ -126,6 +128,7 @@ func NewApp() *App {
 			Server: ServerConfig{
 				Host:        "localhost",
 				Port:        8080,
+				Timezone:    "",
 				LogRequests: true,
 				Webhooks:    defaultWebhookConfig(),
 			},
@@ -221,10 +224,15 @@ func (a *App) LoadConfig() error {
 	}
 	a.ensureServerWebhookDefaults()
 	a.ensureThemePreference()
+	a.Config.Server.Timezone = server.NormalizeTimezone(a.Config.Server.Timezone)
+	if err := server.ValidateTimezone(a.Config.Server.Timezone); err != nil {
+		return err
+	}
 
 	// Transfer server config to state
 	a.State.ServerHost = a.Config.Server.Host
 	a.State.ServerPort = a.Config.Server.Port
+	a.State.ServerTimezone = a.Config.Server.Timezone
 	a.State.TLSEnabled = a.Config.Server.TLSEnabled
 	a.State.TLSCert = a.Config.Server.TLSCert
 	a.State.TLSKey = a.Config.Server.TLSKey
@@ -257,6 +265,9 @@ func (a *App) LoadConfig() error {
 		for _, eventAction := range a.Config.EventActions {
 			if eventAction.Event == string(event.Type) && (eventAction.Source == "" || eventAction.Source == event.Source) {
 				for _, actionConfig := range eventAction.Run {
+					if !actionConfig.IsEnabled() {
+						continue
+					}
 					ac := actionConfig
 					execCopy := execCtx
 					go func(cfg action.ActionConfig, ctx *action.ExecutionContext) {
@@ -548,6 +559,218 @@ func (a *App) RemoveEventAction(eventName string, actionIndex int) error {
 		}
 	}
 	return fmt.Errorf("event action not found: %s", eventName)
+}
+
+func (a *App) SetEventActionEnabled(eventName string, actionIndex int, enabled bool) error {
+	for i := range a.Config.EventActions {
+		if a.Config.EventActions[i].Name != eventName {
+			continue
+		}
+		if actionIndex < 0 || actionIndex >= len(a.Config.EventActions[i].Run) {
+			return fmt.Errorf("invalid action index")
+		}
+		a.Config.EventActions[i].Run[actionIndex].SetEnabled(enabled)
+		err := a.SaveConfig()
+		if err == nil {
+			a.Events.Dispatch(events.Event{Type: "action.config.updated", Source: "events", Payload: events.ActionConfigUpdatedPayload{}})
+		}
+		return err
+	}
+	return fmt.Errorf("event action not found: %s", eventName)
+}
+
+func (a *App) ListScheduledJobs() ([]*server.ScheduledJob, error) {
+	jobsMap, err := server.LoadScheduledJobs(a.State)
+	if err != nil {
+		return nil, err
+	}
+
+	jobs := make([]*server.ScheduledJob, 0, len(jobsMap))
+	for id, job := range jobsMap {
+		if job == nil {
+			continue
+		}
+		jobCopy := *job
+		jobCopy.ID = id
+		jobs = append(jobs, &jobCopy)
+	}
+
+	sort.SliceStable(jobs, func(i, j int) bool {
+		leftName := strings.TrimSpace(jobs[i].Name)
+		rightName := strings.TrimSpace(jobs[j].Name)
+		if leftName == rightName {
+			return jobs[i].ID < jobs[j].ID
+		}
+		return strings.ToLower(leftName) < strings.ToLower(rightName)
+	})
+
+	return jobs, nil
+}
+
+func (a *App) ServerTimezoneLocation() *time.Location {
+	loc, err := server.ResolveTimezoneLocation(a.Config.Server.Timezone)
+	if err != nil || loc == nil {
+		return time.Local
+	}
+	return loc
+}
+
+func (a *App) DisplayTimezoneName() string {
+	loc := a.ServerTimezoneLocation()
+	if loc == nil {
+		return time.Local.String()
+	}
+	return loc.String()
+}
+
+func (a *App) FormatTimestampInDisplayTimezone(ts time.Time, layout string) string {
+	loc := a.ServerTimezoneLocation()
+	if loc == nil {
+		loc = time.Local
+	}
+
+	trimmedLayout := strings.TrimSpace(layout)
+	if trimmedLayout == "" {
+		trimmedLayout = time.RFC3339
+	}
+
+	formatted := ts.In(loc).Format(trimmedLayout)
+	return fmt.Sprintf("%s [%s]", formatted, loc.String())
+}
+
+func (a *App) DateInDisplayTimezone(ts time.Time) string {
+	loc := a.ServerTimezoneLocation()
+	if loc == nil {
+		loc = time.Local
+	}
+	return ts.In(loc).Format("2006-01-02")
+}
+
+func (a *App) EffectiveScheduledJobTimezone(job *server.ScheduledJob) (string, string) {
+	if job == nil {
+		return time.Local.String(), server.TimezoneSourceLocal
+	}
+	name, source, _, err := server.ResolveEffectiveTimezone(job.Timezone, a.Config.Server.Timezone)
+	if err != nil {
+		return time.Local.String(), server.TimezoneSourceLocal
+	}
+	return name, source
+}
+
+func (a *App) ensureScheduledJobEditsAllowed() error {
+	if a == nil || a.Server == nil {
+		return nil
+	}
+	if _, running := a.Server.GetServerStatus(); running {
+		return fmt.Errorf("cannot modify scheduled jobs while server is running; stop the server first")
+	}
+	return nil
+}
+
+func (a *App) UpsertScheduledJob(job *server.ScheduledJob) error {
+	if job == nil {
+		return fmt.Errorf("job is required")
+	}
+	if err := a.ensureScheduledJobEditsAllowed(); err != nil {
+		return err
+	}
+
+	trimmedSchedule := strings.TrimSpace(job.Schedule)
+	if trimmedSchedule == "" {
+		return fmt.Errorf("job schedule is required")
+	}
+	if err := server.TestCronExpression(trimmedSchedule); err != nil {
+		return fmt.Errorf("invalid cron expression: %w", err)
+	}
+
+	jobsMap, err := server.LoadScheduledJobs(a.State)
+	if err != nil {
+		return err
+	}
+
+	jobID := strings.TrimSpace(job.ID)
+	if jobID == "" {
+		jobID = server.GenerateScheduledJobID()
+	}
+
+	jobCopy := *job
+	jobCopy.ID = jobID
+	jobCopy.Schedule = trimmedSchedule
+	jobCopy.Timezone = server.NormalizeTimezone(jobCopy.Timezone)
+	if err := server.ValidateTimezone(jobCopy.Timezone); err != nil {
+		return err
+	}
+	if strings.TrimSpace(jobCopy.Name) == "" {
+		jobCopy.Name = jobID
+	}
+	if jobCopy.SyncType == "" {
+		jobCopy.SyncType = server.SyncTypePull
+	}
+
+	jobsMap[jobID] = &jobCopy
+	if err := server.SaveScheduledJobs(a.State, jobsMap); err != nil {
+		return err
+	}
+
+	a.Events.Dispatch(events.Infof("jobs", "Saved scheduled job '%s'", jobCopy.Name))
+	return nil
+}
+
+func (a *App) DeleteScheduledJob(jobID string) error {
+	trimmedID := strings.TrimSpace(jobID)
+	if trimmedID == "" {
+		return fmt.Errorf("job id is required")
+	}
+	if err := a.ensureScheduledJobEditsAllowed(); err != nil {
+		return err
+	}
+
+	jobsMap, err := server.LoadScheduledJobs(a.State)
+	if err != nil {
+		return err
+	}
+	if _, exists := jobsMap[trimmedID]; !exists {
+		return fmt.Errorf("job not found: %s", trimmedID)
+	}
+
+	delete(jobsMap, trimmedID)
+	if err := server.SaveScheduledJobs(a.State, jobsMap); err != nil {
+		return err
+	}
+	a.Events.Dispatch(events.Infof("jobs", "Deleted scheduled job '%s'", trimmedID))
+	return nil
+}
+
+func (a *App) SetScheduledJobEnabled(jobID string, enabled bool) error {
+	trimmedID := strings.TrimSpace(jobID)
+	if trimmedID == "" {
+		return fmt.Errorf("job id is required")
+	}
+	if err := a.ensureScheduledJobEditsAllowed(); err != nil {
+		return err
+	}
+
+	jobsMap, err := server.LoadScheduledJobs(a.State)
+	if err != nil {
+		return err
+	}
+	job, exists := jobsMap[trimmedID]
+	if !exists || job == nil {
+		return fmt.Errorf("job not found: %s", trimmedID)
+	}
+
+	job.Enabled = enabled
+	jobsMap[trimmedID] = job
+	if err := server.SaveScheduledJobs(a.State, jobsMap); err != nil {
+		return err
+	}
+
+	stateLabel := "resumed"
+	if !enabled {
+		stateLabel = "paused"
+	}
+	a.Events.Dispatch(events.Infof("jobs", "Job '%s' %s", trimmedID, stateLabel))
+	return nil
 }
 
 func (a *App) ExecuteAction(actionConfig action.ActionConfig) error {

@@ -23,6 +23,7 @@ import (
 	"badgermaps/app"
 	"badgermaps/app/action"
 	"badgermaps/app/push"
+	appserver "badgermaps/app/server"
 	"badgermaps/database"
 	"badgermaps/events"
 )
@@ -599,6 +600,7 @@ func (ui *Gui) createMainContent() fyne.CanvasObject {
 	syncTab := container.NewTabItemWithIcon("Sync Center", theme.DownloadIcon(), syncContent)
 	explorerTab := container.NewTabItemWithIcon("Explorer", theme.FolderIcon(), explorerContent)
 	actionsTab := container.NewTabItemWithIcon("Actions", theme.ViewRefreshIcon(), ui.createActionsTab())
+	jobsTab := container.NewTabItemWithIcon("Jobs", theme.HistoryIcon(), ui.createJobsTab())
 	serverTab := container.NewTabItemWithIcon("Server", theme.ComputerIcon(), ui.createServerTab())
 
 	tabs := []*container.TabItem{
@@ -606,6 +608,7 @@ func (ui *Gui) createMainContent() fyne.CanvasObject {
 		syncTab,
 		explorerTab,
 		actionsTab,
+		jobsTab,
 		serverTab,
 		configTab,
 	}
@@ -925,6 +928,44 @@ func (ui *Gui) RefreshHomeTab() {
 	})
 }
 
+func (ui *Gui) refreshActionsTab() {
+	if ui.tabs == nil {
+		return
+	}
+	for _, tab := range ui.tabs.Items {
+		if tab.Text == "Actions" {
+			tab.Content = ui.createActionsTab()
+			ui.tabs.Refresh()
+			return
+		}
+	}
+}
+
+func (ui *Gui) RefreshActionsTab() {
+	fyne.Do(func() {
+		ui.refreshActionsTab()
+	})
+}
+
+func (ui *Gui) refreshJobsTab() {
+	if ui.tabs == nil {
+		return
+	}
+	for _, tab := range ui.tabs.Items {
+		if tab.Text == "Jobs" {
+			tab.Content = ui.createJobsTab()
+			ui.tabs.Refresh()
+			return
+		}
+	}
+}
+
+func (ui *Gui) RefreshJobsTab() {
+	fyne.Do(func() {
+		ui.refreshJobsTab()
+	})
+}
+
 func (ui *Gui) createRightPaneHeader() fyne.CanvasObject {
 	detailsButton := widget.NewButtonWithIcon("Details", theme.ListIcon(), func() {
 		ui.terminalVisible = false
@@ -1166,6 +1207,18 @@ func (ui *Gui) RefreshPushTab() {
 	})
 }
 
+func (ui *Gui) formatTimestampInDisplayTimezone(ts time.Time, layout string) string {
+	if ui != nil && ui.app != nil {
+		return ui.app.FormatTimestampInDisplayTimezone(ts, layout)
+	}
+
+	trimmedLayout := strings.TrimSpace(layout)
+	if trimmedLayout == "" {
+		trimmedLayout = time.RFC3339
+	}
+	return fmt.Sprintf("%s [%s]", ts.In(time.Local).Format(trimmedLayout), time.Local.String())
+}
+
 func (ui *Gui) createPendingChangesTable(entityType string) fyne.CanvasObject {
 	options := push.PushFilterOptions{
 		Status:  "pending",
@@ -1193,7 +1246,7 @@ func (ui *Gui) createPendingChangesTable(entityType string) fyne.CanvasObject {
 				fmt.Sprintf("%d", c.AccountId),
 				c.ChangeType,
 				c.Status,
-				c.CreatedAt.Format(time.RFC3339),
+				ui.formatTimestampInDisplayTimezone(c.CreatedAt, time.RFC3339),
 				c.Changes,
 			})
 		}
@@ -1212,7 +1265,7 @@ func (ui *Gui) createPendingChangesTable(entityType string) fyne.CanvasObject {
 				c.EndpointType.String,
 				c.Type.String,
 				c.Status,
-				c.CreatedAt.Format(time.RFC3339),
+				ui.formatTimestampInDisplayTimezone(c.CreatedAt, time.RFC3339),
 				c.Comments.String,
 			})
 		}
@@ -1288,6 +1341,7 @@ func (ui *Gui) createActionsTab() fyne.CanvasObject {
 			idx := i
 			var iconResource fyne.Resource
 			var labelText string
+			enabled := ac.IsEnabled()
 
 			switch ac.Type {
 			case "exec":
@@ -1325,13 +1379,34 @@ func (ui *Gui) createActionsTab() fyne.CanvasObject {
 				iconResource = theme.HelpIcon()
 				labelText = "Unknown action"
 			}
+			if !enabled {
+				labelText = fmt.Sprintf("[Paused] %s", labelText)
+			}
 
 			label := widget.NewLabel(labelText)
 			icon := widget.NewIcon(iconResource)
 
+			pauseIcon := theme.MediaPauseIcon()
+			pauseLabel := "Pause"
+			nextEnabled := false
+			if !enabled {
+				pauseIcon = theme.MediaPlayIcon()
+				pauseLabel = "Resume"
+				nextEnabled = true
+			}
+
 			toolbar := widget.NewToolbar(
-				widget.NewToolbarAction(theme.MediaPlayIcon(), func() {
+				widget.NewToolbarAction(theme.MediaSkipNextIcon(), func() {
 					ui.app.ExecuteAction(ac)
+				}),
+				widget.NewToolbarSeparator(),
+				widget.NewToolbarAction(pauseIcon, func() {
+					if err := ui.app.SetEventActionEnabled(ea.Name, idx, nextEnabled); err != nil {
+						ui.app.Events.Dispatch(events.Errorf("gui", "Error updating action state: %v", err))
+						return
+					}
+					ui.ShowToast(fmt.Sprintf("%s action", pauseLabel))
+					ui.refreshActionsTab()
 				}),
 				widget.NewToolbarSeparator(),
 				widget.NewToolbarAction(theme.DocumentCreateIcon(), func() {
@@ -1344,7 +1419,9 @@ func (ui *Gui) createActionsTab() fyne.CanvasObject {
 							err := ui.app.RemoveEventAction(ea.Name, idx)
 							if err != nil {
 								ui.app.Events.Dispatch(events.Errorf("gui", "Error removing action: %v", err))
+								return
 							}
+							ui.refreshActionsTab()
 						}
 					}, ui.window)
 				}),
@@ -1380,15 +1457,246 @@ func (ui *Gui) createActionsTab() fyne.CanvasObject {
 	return container.NewBorder(nil, addButton, nil, nil, container.NewVScroll(actionsContent))
 }
 
+func (ui *Gui) createJobsTab() fyne.CanvasObject {
+	jobsContent := container.NewVBox()
+
+	jobs, err := ui.app.ListScheduledJobs()
+	if err != nil {
+		errorLabel := widget.NewLabel(fmt.Sprintf("Unable to load scheduled jobs: %v", err))
+		errorLabel.Wrapping = fyne.TextWrapWord
+		jobsContent.Add(ui.newSectionCard("Jobs", "Failed to load jobs", errorLabel))
+	} else {
+		if len(jobs) == 0 {
+			jobsContent.Add(ui.newSectionCard(
+				"Jobs",
+				"No scheduled jobs configured yet.",
+				widget.NewLabel("Use the button below to add scheduled pull/push automation."),
+			))
+		}
+
+		for _, job := range jobs {
+			jb := job
+			stateLabel := "Active"
+			if !jb.Enabled {
+				stateLabel = "Paused"
+			}
+			effectiveTimezone, timezoneSource := ui.app.EffectiveScheduledJobTimezone(jb)
+			timezoneSummary := fmt.Sprintf("%s (%s)", effectiveTimezone, timezoneSource)
+
+			summary := widget.NewLabel(fmt.Sprintf(
+				"Schedule: %s\nSync: %s\nRetries: %d (retry_on_error=%t)\nTimezone: %s\nState: %s",
+				jb.Schedule,
+				jb.SyncType,
+				jb.MaxRetries,
+				jb.RetryOnError,
+				timezoneSummary,
+				stateLabel,
+			))
+			summary.Wrapping = fyne.TextWrapWord
+
+			pauseIcon := theme.MediaPauseIcon()
+			pauseVerb := "Paused"
+			nextEnabled := false
+			if !jb.Enabled {
+				pauseIcon = theme.MediaPlayIcon()
+				pauseVerb = "Resumed"
+				nextEnabled = true
+			}
+
+			toolbar := widget.NewToolbar(
+				widget.NewToolbarAction(pauseIcon, func() {
+					if err := ui.app.SetScheduledJobEnabled(jb.ID, nextEnabled); err != nil {
+						ui.app.Events.Dispatch(events.Errorf("gui", "Error updating job state: %v", err))
+						ui.ShowToast(fmt.Sprintf("Error: %v", err))
+						return
+					}
+					ui.ShowToast(fmt.Sprintf("%s job '%s'. Restart server if already running.", pauseVerb, jb.Name))
+					ui.refreshJobsTab()
+				}),
+				widget.NewToolbarSeparator(),
+				widget.NewToolbarAction(theme.DocumentCreateIcon(), func() {
+					ui.createJobPopup(jb)
+				}),
+				widget.NewToolbarSeparator(),
+				widget.NewToolbarAction(theme.DeleteIcon(), func() {
+					dialog.ShowConfirm("Delete Job", "Delete this scheduled job?", func(confirm bool) {
+						if !confirm {
+							return
+						}
+						if err := ui.app.DeleteScheduledJob(jb.ID); err != nil {
+							ui.app.Events.Dispatch(events.Errorf("gui", "Error deleting job: %v", err))
+							ui.ShowToast(fmt.Sprintf("Error: %v", err))
+							return
+						}
+						ui.ShowToast(fmt.Sprintf("Deleted job '%s'.", jb.Name))
+						ui.refreshJobsTab()
+					}, ui.window)
+				}),
+			)
+
+			title := jb.Name
+			if strings.TrimSpace(title) == "" {
+				title = jb.ID
+			}
+			if !jb.Enabled {
+				title = fmt.Sprintf("[Paused] %s", title)
+			}
+
+			jobsContent.Add(ui.newSectionCard(
+				title,
+				fmt.Sprintf("ID: %s", jb.ID),
+				container.NewBorder(nil, nil, nil, toolbar, summary),
+			))
+		}
+	}
+
+	addButton := widget.NewButtonWithIcon("Add Job", theme.ContentAddIcon(), func() {
+		ui.createJobPopup(nil)
+	})
+
+	notice := widget.NewLabel("Stop the server before editing jobs. Changes are written immediately and loaded on next start.")
+	notice.Wrapping = fyne.TextWrapWord
+
+	footer := container.NewVBox(widget.NewSeparator(), notice, addButton)
+	return container.NewBorder(nil, footer, nil, nil, container.NewVScroll(jobsContent))
+}
+
+func (ui *Gui) createJobPopup(existing *appserver.ScheduledJob) {
+	job := appserver.ScheduledJob{
+		Enabled:      true,
+		SyncType:     appserver.SyncTypePull,
+		MaxRetries:   1,
+		RetryOnError: false,
+	}
+	if existing != nil {
+		job = *existing
+	}
+
+	nameEntry := widget.NewEntry()
+	nameEntry.SetPlaceHolder("Nightly pull")
+	nameEntry.SetText(job.Name)
+
+	scheduleEntry := widget.NewEntry()
+	scheduleEntry.SetPlaceHolder("0 0 0 * * *")
+	scheduleEntry.SetText(job.Schedule)
+
+	syncTypeOptions := []string{
+		string(appserver.SyncTypePull),
+		string(appserver.SyncTypePush),
+		string(appserver.SyncTypePullPush),
+		string(appserver.SyncTypeAccounts),
+		string(appserver.SyncTypeCheckins),
+		string(appserver.SyncTypeRoutes),
+		string(appserver.SyncTypeFull),
+		string(appserver.SyncTypeNone),
+	}
+	syncTypeSelect := widget.NewSelect(syncTypeOptions, nil)
+	selectedSyncType := string(job.SyncType)
+	if strings.TrimSpace(selectedSyncType) == "" {
+		selectedSyncType = string(appserver.SyncTypePull)
+	}
+	syncTypeSelect.SetSelected(selectedSyncType)
+
+	enabledCheck := widget.NewCheck("Enabled", nil)
+	enabledCheck.SetChecked(job.Enabled)
+
+	retryCheck := widget.NewCheck("Retry on error", nil)
+	retryCheck.SetChecked(job.RetryOnError)
+
+	maxRetriesEntry := widget.NewEntry()
+	if job.MaxRetries <= 0 {
+		maxRetriesEntry.SetText("1")
+	} else {
+		maxRetriesEntry.SetText(strconv.Itoa(job.MaxRetries))
+	}
+
+	timezoneEntry := widget.NewEntry()
+	timezoneEntry.SetPlaceHolder("Optional override, e.g. America/New_York")
+	timezoneEntry.SetText(job.Timezone)
+
+	form := widget.NewForm(
+		widget.NewFormItem("Name", nameEntry),
+		widget.NewFormItem("Schedule (cron, includes seconds)", scheduleEntry),
+		widget.NewFormItem("Sync Type", syncTypeSelect),
+		widget.NewFormItem("Timezone Override (optional)", timezoneEntry),
+		widget.NewFormItem("", widget.NewLabel("Leave blank to inherit the global server timezone (or OS local if unset).")),
+		widget.NewFormItem("Max Retries", maxRetriesEntry),
+		widget.NewFormItem("", enabledCheck),
+		widget.NewFormItem("", retryCheck),
+	)
+
+	title := "Add Job"
+	if existing != nil {
+		title = "Edit Job"
+	}
+
+	d := dialog.NewCustomConfirm(title, "Save", "Cancel", form, func(confirm bool) {
+		if !confirm {
+			return
+		}
+
+		name := strings.TrimSpace(nameEntry.Text)
+		schedule := strings.TrimSpace(scheduleEntry.Text)
+		if name == "" {
+			ui.ShowToast("Job name is required.")
+			return
+		}
+		if schedule == "" {
+			ui.ShowToast("Cron schedule is required.")
+			return
+		}
+		if err := appserver.TestCronExpression(schedule); err != nil {
+			ui.ShowToast(fmt.Sprintf("Invalid cron expression: %v", err))
+			return
+		}
+		if strings.TrimSpace(syncTypeSelect.Selected) == "" {
+			ui.ShowToast("Sync type is required.")
+			return
+		}
+
+		maxRetries := 1
+		if strings.TrimSpace(maxRetriesEntry.Text) != "" {
+			value, err := strconv.Atoi(strings.TrimSpace(maxRetriesEntry.Text))
+			if err != nil || value <= 0 {
+				ui.ShowToast("Max retries must be a positive number.")
+				return
+			}
+			maxRetries = value
+		}
+
+		updated := job
+		updated.Name = name
+		updated.Schedule = schedule
+		updated.SyncType = appserver.SyncType(syncTypeSelect.Selected)
+		updated.Timezone = strings.TrimSpace(timezoneEntry.Text)
+		updated.Enabled = enabledCheck.Checked
+		updated.RetryOnError = retryCheck.Checked
+		updated.MaxRetries = maxRetries
+
+		if err := ui.app.UpsertScheduledJob(&updated); err != nil {
+			ui.app.Events.Dispatch(events.Errorf("gui", "Error saving job: %v", err))
+			ui.ShowToast(fmt.Sprintf("Error: %v", err))
+			return
+		}
+		ui.ShowToast("Job saved. Restart server if already running.")
+		ui.refreshJobsTab()
+	}, ui.window)
+
+	d.Resize(fyne.NewSize(520, 0))
+	d.Show()
+}
+
 func (ui *Gui) createActionPopup(eventAction *action.EventAction, actionIndex int) {
 	var event, source string
 	var actionConfig action.ActionConfig
+	actionEnabled := true
 
 	if eventAction != nil {
 		event = eventAction.Event
 		source = eventAction.Source
 		if actionIndex != -1 {
 			actionConfig = eventAction.Run[actionIndex]
+			actionEnabled = actionConfig.IsEnabled()
 		}
 	}
 
@@ -1672,6 +1980,10 @@ func (ui *Gui) createActionPopup(eventAction *action.EventAction, actionIndex in
 		actionTabs,
 	)
 
+	enabledCheck := widget.NewCheck("Enabled", nil)
+	enabledCheck.SetChecked(actionEnabled)
+	dialogBody.Add(enabledCheck)
+
 	dialogContent := container.NewBorder(nil, tokenControls, nil, nil, dialogBody)
 
 	d := dialog.NewCustomConfirm("Save Action", "Save", "Cancel", dialogContent, func(confirm bool) {
@@ -1735,6 +2047,7 @@ func (ui *Gui) createActionPopup(eventAction *action.EventAction, actionIndex in
 				newAction.Args["data"] = data
 			}
 		}
+		newAction.SetEnabled(enabledCheck.Checked)
 
 		eventValue := strings.TrimSpace(eventEntry.Text)
 		if eventValue == "" {
@@ -1761,13 +2074,17 @@ func (ui *Gui) createActionPopup(eventAction *action.EventAction, actionIndex in
 			err := ui.app.AddEventAction(eventValue, sourceValue, newAction)
 			if err != nil {
 				ui.app.Events.Dispatch(events.Errorf("gui", "Error adding action: %v", err))
+				return
 			}
 		} else {
 			err := ui.app.UpdateEventAction(eventAction.Name, actionIndex, newAction)
 			if err != nil {
 				ui.app.Events.Dispatch(events.Errorf("gui", "Error updating action: %v", err))
+				return
 			}
 		}
+
+		ui.refreshActionsTab()
 	}, ui.window)
 
 	d.Resize(fyne.NewSize(500, 400))
@@ -2912,6 +3229,7 @@ func (ui *Gui) createServerTab() fyne.CanvasObject {
 	}
 
 	var refreshServerStatus func()
+	var refreshJobs func()
 	setToggleButton := func(running bool) {
 		if running {
 			toggleServerButton.SetText("Stop Server")
@@ -2941,12 +3259,71 @@ func (ui *Gui) createServerTab() fyne.CanvasObject {
 			setToggleButton(false)
 		}
 		canvas.Refresh(statusValue)
+		if refreshJobs != nil {
+			refreshJobs()
+		}
 	}
 
 	refreshServerStatus()
 
 	statusLabel := widget.NewLabelWithStyle("Server Status:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	serverHeader := container.NewHBox(statusLabel, statusValue)
+
+	jobLines := []string{"No server jobs available."}
+	serverJobsList := widget.NewList(
+		func() int {
+			return len(jobLines)
+		},
+		func() fyne.CanvasObject {
+			label := widget.NewLabel("template")
+			label.Wrapping = fyne.TextWrapWord
+			return label
+		},
+		func(id widget.ListItemID, object fyne.CanvasObject) {
+			object.(*widget.Label).SetText(jobLines[id])
+		},
+	)
+	serverJobsListContainer := container.NewVScroll(serverJobsList)
+	serverJobsListContainer.SetMinSize(fyne.NewSize(0, 220))
+
+	serverJobsActivityLabel := widget.NewLabel("Server jobs will appear here once the server is active.")
+	serverJobsActivityLabel.Wrapping = fyne.TextWrapWord
+
+	refreshJobs = func() {
+		displayLoc := ui.app.ServerTimezoneLocation()
+		timezoneLabel := displayLoc.String()
+		snapshot, err := ui.presenter.FetchServerJobsSnapshot()
+		if err != nil {
+			serverJobsActivityLabel.SetText(fmt.Sprintf("Unable to load server jobs: %v (display TZ: %s)", err, timezoneLabel))
+			jobLines = []string{"Start the server to view active and queued jobs."}
+			serverJobsList.Refresh()
+			return
+		}
+
+		serverJobsActivityLabel.SetText(formatServerActivityLine(snapshot.Activity, displayLoc))
+		if len(snapshot.Jobs) == 0 {
+			jobLines = []string{"No jobs in queue or recent history."}
+			serverJobsList.Refresh()
+			return
+		}
+
+		lines := make([]string, 0, len(snapshot.Jobs))
+		for _, job := range snapshot.Jobs {
+			lines = append(lines, formatServerJobLine(job, displayLoc))
+		}
+		jobLines = lines
+		serverJobsList.Refresh()
+	}
+
+	refreshJobsButton := widget.NewButtonWithIcon("Refresh Job List", theme.ViewRefreshIcon(), refreshJobs)
+	serverJobsCard := ui.newSectionCard(
+		"Server Jobs",
+		"View active, queued, and recent server sync jobs.",
+		serverJobsActivityLabel,
+		serverJobsListContainer,
+		container.NewCenter(refreshJobsButton),
+	)
+	refreshJobs()
 
 	webhookCard := ui.newSectionCard(
 		"Webhook Routing",
@@ -2961,6 +3338,9 @@ func (ui *Gui) createServerTab() fyne.CanvasObject {
 	serverHostEntry.SetText(ui.app.Config.Server.Host)
 	serverPortEntry := widget.NewEntry()
 	serverPortEntry.SetText(fmt.Sprintf("%d", ui.app.Config.Server.Port))
+	serverTimezoneEntry := widget.NewEntry()
+	serverTimezoneEntry.SetPlaceHolder("Optional, e.g. America/New_York")
+	serverTimezoneEntry.SetText(ui.app.Config.Server.Timezone)
 	tlsCertEntry := widget.NewEntry()
 	tlsCertEntry.SetText(ui.app.Config.Server.TLSCert)
 	tlsKeyEntry := widget.NewEntry()
@@ -2990,6 +3370,7 @@ func (ui *Gui) createServerTab() fyne.CanvasObject {
 	serverForm = widget.NewForm(
 		widget.NewFormItem("Host", serverHostEntry),
 		widget.NewFormItem("Port", serverPortEntry),
+		widget.NewFormItem("Global Timezone (IANA)", serverTimezoneEntry),
 	)
 
 	tlsEnabledCheck.SetChecked(ui.app.Config.Server.TLSEnabled)
@@ -2998,6 +3379,7 @@ func (ui *Gui) createServerTab() fyne.CanvasObject {
 		ui.presenter.HandleSaveServerConfig(
 			serverHostEntry.Text,
 			serverPortEntry.Text,
+			serverTimezoneEntry.Text,
 			tlsEnabledCheck.Checked,
 			tlsCertEntry.Text,
 			tlsKeyEntry.Text,
@@ -3007,7 +3389,7 @@ func (ui *Gui) createServerTab() fyne.CanvasObject {
 
 	serverSettingsCard := ui.newSectionCard(
 		"Server Configuration",
-		"Configure host, TLS, and request logging for the embedded server.",
+		"Configure host, global timezone, TLS, and request logging for the embedded server.",
 		tlsEnabledCheck,
 		serverForm,
 		logRequestsCheck,
@@ -3017,6 +3399,7 @@ func (ui *Gui) createServerTab() fyne.CanvasObject {
 
 	scrollContent := container.NewVScroll(container.NewVBox(
 		serverHeader,
+		serverJobsCard,
 		webhookCard,
 		autoSyncCard,
 		serverSettingsCard,
@@ -3026,6 +3409,89 @@ func (ui *Gui) createServerTab() fyne.CanvasObject {
 	footer := container.NewVBox(widget.NewSeparator(), buttonGrid)
 
 	return container.NewBorder(nil, footer, nil, nil, scrollContent)
+}
+
+func formatServerActivityLine(activity appserver.RuntimeActivity, location *time.Location) string {
+	if location == nil {
+		location = time.Local
+	}
+	timezoneLabel := time.Local.String()
+	if location != nil {
+		timezoneLabel = location.String()
+	}
+
+	heartbeat := activity.LastHeartbeat
+	if heartbeat.IsZero() {
+		return "Activity unavailable."
+	}
+	heartbeatText := formatTimestampInLocation(heartbeat, location, "2006-01-02 15:04:05")
+
+	if activity.ActiveJobID != "" {
+		return fmt.Sprintf(
+			"Active: %s (%s, %s) | Queue depth: %d | Heartbeat: %s | TZ: %s",
+			activity.ActiveJobName,
+			activity.ActiveJobMode,
+			activity.ActiveJobID,
+			activity.QueueDepth,
+			heartbeatText,
+			timezoneLabel,
+		)
+	}
+
+	return fmt.Sprintf(
+		"No active job | Queue depth: %d | Heartbeat: %s | TZ: %s",
+		activity.QueueDepth,
+		heartbeatText,
+		timezoneLabel,
+	)
+}
+
+func formatServerJobLine(job *appserver.SyncJob, location *time.Location) string {
+	if location == nil {
+		location = time.Local
+	}
+	if job == nil {
+		return "Unknown job"
+	}
+
+	start := formatSyncTimestamp(job.StartedAt, location)
+	end := formatSyncTimestamp(job.CompletedAt, location)
+	line := fmt.Sprintf(
+		"[%s] %s | mode=%s | source=%s | queued=%s | started=%s | completed=%s",
+		strings.ToUpper(string(job.Status)),
+		job.ID,
+		job.Mode,
+		job.Source,
+		formatTimestampInLocation(job.QueuedAt, location, "2006-01-02 15:04:05"),
+		start,
+		end,
+	)
+	if strings.TrimSpace(job.Error) != "" {
+		line = fmt.Sprintf("%s | error=%s", line, job.Error)
+	}
+	return line
+}
+
+func formatSyncTimestamp(value *time.Time, location *time.Location) string {
+	if location == nil {
+		location = time.Local
+	}
+	if value == nil || value.IsZero() {
+		return "-"
+	}
+	return formatTimestampInLocation(*value, location, "2006-01-02 15:04:05")
+}
+
+func formatTimestampInLocation(value time.Time, location *time.Location, layout string) string {
+	if location == nil {
+		location = time.Local
+	}
+
+	trimmedLayout := strings.TrimSpace(layout)
+	if trimmedLayout == "" {
+		trimmedLayout = time.RFC3339
+	}
+	return fmt.Sprintf("%s [%s]", value.In(location).Format(trimmedLayout), location.String())
 }
 
 // createDebugTab creates the content for the "Debug" tab
@@ -3644,11 +4110,7 @@ func (ui *Gui) loadPaginatedTableData(tableName string, page, pageSize int, opts
 				rowData[i] = ""
 				continue
 			}
-			if b, ok := (*v).([]byte); ok {
-				rowData[i] = string(b)
-			} else {
-				rowData[i] = fmt.Sprintf("%v", *v)
-			}
+			rowData[i] = ui.formatExplorerCellValue(tableName, resultColumns[i], *v)
 		}
 		data = append(data, rowData)
 	}
@@ -3662,6 +4124,72 @@ func (ui *Gui) loadPaginatedTableData(tableName string, page, pageSize int, opts
 		PageSize:    pageSize,
 		TotalPages:  totalPages,
 	}
+}
+
+func (ui *Gui) formatExplorerCellValue(tableName, columnName string, value interface{}) string {
+	if value == nil {
+		return ""
+	}
+
+	// Render SyncHistory absolute timestamps in the configured server timezone.
+	if strings.EqualFold(tableName, "SyncHistory") &&
+		(strings.EqualFold(columnName, "StartedAt") || strings.EqualFold(columnName, "CompletedAt")) {
+		if parsed, ok := parseExplorerTimestamp(value); ok {
+			return ui.formatTimestampInDisplayTimezone(parsed, "2006-01-02 15:04:05")
+		}
+	}
+
+	if b, ok := value.([]byte); ok {
+		return string(b)
+	}
+	return fmt.Sprintf("%v", value)
+}
+
+func parseExplorerTimestamp(value interface{}) (time.Time, bool) {
+	switch typed := value.(type) {
+	case time.Time:
+		return typed, true
+	case *time.Time:
+		if typed != nil {
+			return *typed, true
+		}
+	case string:
+		return parseExplorerTimestampString(typed)
+	case []byte:
+		return parseExplorerTimestampString(string(typed))
+	}
+	return time.Time{}, false
+}
+
+func parseExplorerTimestampString(raw string) (time.Time, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return time.Time{}, false
+	}
+
+	layoutsWithZone := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05Z07:00",
+	}
+	for _, layout := range layoutsWithZone {
+		if parsed, err := time.Parse(layout, trimmed); err == nil {
+			return parsed, true
+		}
+	}
+
+	layoutsWithoutZone := []string{
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+	}
+	for _, layout := range layoutsWithoutZone {
+		if parsed, err := time.ParseInLocation(layout, trimmed, time.UTC); err == nil {
+			return parsed, true
+		}
+	}
+
+	return time.Time{}, false
 }
 
 func normalizeExplorerOptions(opts ExplorerQueryOptions) ExplorerQueryOptions {
