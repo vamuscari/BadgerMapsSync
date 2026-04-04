@@ -26,9 +26,11 @@ INSERT INTO AccountsPendingChanges (ChangeId, AccountId, ChangeType, Changes, St
 VALUES
   (2001, 1, 'UPDATE', '{"Notes":"Upsell interest"}', 'pending');
 
-INSERT INTO AccountCheckinsPendingChanges (ChangeId, CheckinId, ChangeType, Changes, Status)
+INSERT INTO AccountCheckinsPendingChanges (
+  ChangeId, CheckinId, AccountId, CrmId, LogDatetime, Type, Comments, EndpointType, CreatedBy, ChangeType, Status
+)
 VALUES
-  (3001, 1001, 'CREATE', '{"Comments":"Added post-visit summary"}', 'pending');
+  (3001, 1001, 1, 'CHK-001', '2025-01-05T09:45:00Z', 'Visit', 'Added post-visit summary', 'standard', 'alice@company.com', 'CREATE', 'pending');
 
 -- User Profile (owner) so DataSets can reference a ProfileId
 INSERT INTO UserProfiles (ProfileId, Email, FirstName, LastName, IsManager, HasData, CompanyId, CompanyName, CompanyShortName)
@@ -48,11 +50,14 @@ VALUES
   ('AccountOwner', 42, 'bob@company.com',   'bob@company.com',   2),
   ('AccountOwner', 42, 'carol@company.com', 'carol@company.com', 3);
 
--- Sync History (sample runs)
-INSERT INTO SyncHistory (CorrelationId, RunType, Direction, Source, Initiator, Status, ItemsProcessed, ErrorCount, StartedAt, CompletedAt, DurationSeconds, Summary, Details)
+-- Job Log (sample runs)
+INSERT INTO JobLog (
+  CorrelationId, RunType, Direction, Source, Initiator, JobKind, Mode, Status,
+  ItemsProcessed, ErrorCount, StartedAt, StartedAtTimezone, CompletedAt, CompletedAtTimezone, DurationSeconds, Summary, Details
+)
 VALUES
-  ('corr-0001', 'manual', 'pull', 'accounts', 'user', 'completed', 3, 0, '2025-01-05T08:00:00Z', '2025-01-05T08:00:12Z', 12, 'Pulled accounts', '3 accounts pulled successfully'),
-  ('corr-0002', 'manual', 'push', 'changes',  'user', 'completed', 2, 0, '2025-01-05T08:30:00Z', '2025-01-05T08:30:08Z', 8,  'Pushed pending changes', '2 changes pushed successfully');
+  ('corr-0001', 'manual', 'pull', 'accounts', 'user', 'workflow', 'pull_accounts', 'completed', 3, 0, '2025-01-05T08:00:00Z', 'UTC', '2025-01-05T08:00:12Z', 'UTC', 12, 'Pulled accounts', '3 accounts pulled successfully'),
+  ('corr-0002', 'manual', 'push', 'changes',  'user', 'workflow', 'push',          'completed', 2, 0, '2025-01-05T08:30:00Z', 'UTC', '2025-01-05T08:30:08Z', 'UTC', 8,  'Pushed pending changes', '2 changes pushed successfully');
 
 -- Command Log (example CLI invocations)
 INSERT INTO CommandLog (Command, Args, Success, ErrorMessage)
