@@ -26,6 +26,9 @@ func TestBackfillJobLogFromSyncHistoryIsIdempotent(t *testing.T) {
 	if err := db.EnforceSchema(&state.State{}); err != nil {
 		t.Fatalf("failed to enforce schema: %v", err)
 	}
+	if err := RunCommand(db, "CreateSyncHistoryTable"); err != nil {
+		t.Fatalf("failed to create legacy sync history table: %v", err)
+	}
 
 	correlationID := "sync_backfill_1"
 	if _, err := InsertSyncHistory(db, &SyncHistoryEntry{

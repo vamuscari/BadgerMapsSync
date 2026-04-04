@@ -31,14 +31,16 @@ const (
 )
 
 type ServerConfig struct {
-	Host        string          `yaml:"host"`
-	Port        int             `yaml:"port"`
-	Timezone    string          `yaml:"timezone,omitempty"`
-	TLSEnabled  bool            `yaml:"tls_enabled"`
-	TLSCert     string          `yaml:"tls_cert"`
-	TLSKey      string          `yaml:"tls_key"`
-	LogRequests bool            `yaml:"log_requests"`
-	Webhooks    map[string]bool `yaml:"webhooks"`
+	Host             string          `yaml:"host"`
+	Port             int             `yaml:"port"`
+	Timezone         string          `yaml:"timezone,omitempty"`
+	TLSEnabled       bool            `yaml:"tls_enabled"`
+	TLSCert          string          `yaml:"tls_cert"`
+	TLSKey           string          `yaml:"tls_key"`
+	WebhookSecret    string          `yaml:"webhook_secret,omitempty"`
+	InternalAPIToken string          `yaml:"internal_api_token,omitempty"`
+	LogRequests      bool            `yaml:"log_requests"`
+	Webhooks         map[string]bool `yaml:"webhooks"`
 }
 
 func defaultWebhookConfig() map[string]bool {
@@ -87,6 +89,8 @@ type App struct {
 	shuttingDown  atomic.Bool
 	coordMu       sync.Mutex
 }
+
+var resolveExecutablePath = os.Executable
 
 func (a *App) Close() {
 	a.closeOnce.Do(func() {
@@ -276,10 +280,23 @@ func (a *App) LoadConfig() error {
 		return err
 	}
 	a.ensureServerWebhookDefaults()
+	tokenGenerated, err := a.ensureServerSecurityDefaults()
+	if err != nil {
+		return err
+	}
 	a.ensureThemePreference()
 	a.Config.Server.Timezone = server.NormalizeTimezone(a.Config.Server.Timezone)
 	if err := server.ValidateTimezone(a.Config.Server.Timezone); err != nil {
 		return err
+	}
+
+	if tokenGenerated {
+		if a.ConfigFile == "" {
+			a.SetConfigFilePath(utils.GetConfigDirFile("config.yaml"))
+		}
+		if err := a.SaveConfig(); err != nil {
+			return fmt.Errorf("failed to persist generated server.internal_api_token: %w", err)
+		}
 	}
 
 	// Transfer server config to state
@@ -289,6 +306,8 @@ func (a *App) LoadConfig() error {
 	a.State.TLSEnabled = a.Config.Server.TLSEnabled
 	a.State.TLSCert = a.Config.Server.TLSCert
 	a.State.TLSKey = a.Config.Server.TLSKey
+	a.State.ServerWebhookSecret = a.Config.Server.WebhookSecret
+	a.State.ServerInternalAPIToken = a.Config.Server.InternalAPIToken
 	a.State.ServerLogRequests = a.Config.Server.LogRequests
 
 	a.API = api.NewAPIClient(&a.Config.API)
@@ -306,10 +325,7 @@ func (a *App) LoadConfig() error {
 		} else {
 			a.DB.TestConnection()
 			if err := database.EnsureJobLogSetup(a.DB); err != nil {
-				a.Events.Dispatch(events.Errorf("db", "Failed to ensure JobLog schema: %v", err))
-				a.DB.Close()
-				a.DB = nil
-				return err
+				a.Events.Dispatch(events.Warningf("db", "JobLog setup skipped: %v", err))
 			}
 		}
 	}
@@ -339,6 +355,9 @@ func (a *App) writeYamlFile(path string) error {
 	data, err := yaml.Marshal(a.Config)
 	if err != nil {
 		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 	return os.WriteFile(path, data, 0644)
 }
@@ -409,6 +428,23 @@ func (a *App) ensureServerWebhookDefaults() {
 	}
 }
 
+func (a *App) ensureServerSecurityDefaults() (bool, error) {
+	a.Config.Server.WebhookSecret = strings.TrimSpace(a.Config.Server.WebhookSecret)
+
+	currentToken := strings.TrimSpace(a.Config.Server.InternalAPIToken)
+	if currentToken != "" {
+		a.Config.Server.InternalAPIToken = currentToken
+		return false, nil
+	}
+
+	generatedToken, err := server.GenerateInternalAPIToken()
+	if err != nil {
+		return false, fmt.Errorf("failed to generate internal API token: %w", err)
+	}
+	a.Config.Server.InternalAPIToken = generatedToken
+	return true, nil
+}
+
 func (a *App) ensureThemePreference() {
 	a.Config.ThemePreference = NormalizeThemePreference(a.Config.ThemePreference)
 }
@@ -468,7 +504,19 @@ func (a *App) GetConfigFilePath() (string, bool, error) {
 	}
 
 	// Auto-detection logic
-	// 1. Check local config.yaml
+	// 1. Check executable directory config.yaml
+	if executablePath, err := resolveExecutablePath(); err == nil {
+		executableConfigPath := filepath.Join(filepath.Dir(executablePath), "config.yaml")
+		if utils.CheckIfFileExists(executableConfigPath) {
+			absPath, err := filepath.Abs(executableConfigPath)
+			if err != nil {
+				return "", false, fmt.Errorf("error getting absolute path for %s: %w", executableConfigPath, err)
+			}
+			return absPath, true, nil
+		}
+	}
+
+	// 2. Check local config.yaml
 	localConfigPath := filepath.Join(".", "config.yaml")
 	if utils.CheckIfFileExists(localConfigPath) {
 		absPath, err := filepath.Abs(localConfigPath)
@@ -477,7 +525,7 @@ func (a *App) GetConfigFilePath() (string, bool, error) {
 		}
 		return absPath, true, nil
 	}
-	// 2. Check user config directory
+	// 3. Check user config directory
 	userConfigPath := utils.GetConfigDirFile("config.yaml")
 	if utils.CheckIfFileExists(userConfigPath) {
 		absPath, err := filepath.Abs(userConfigPath)

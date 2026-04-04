@@ -51,14 +51,20 @@ The database schema is managed through the `EnforceSchema`, `ValidateSchema`, an
 - **`ValidateSchema`**: This method checks if the existing database schema matches the expected schema. It is used to ensure that the database is in a consistent state before the application starts.
 - **`ResetSchema`**: This method drops all schema objects in a safe order and then recreates them, effectively reinitializing the database.
 
-## SyncHistory Timezone Columns
+## Job History Storage
 
-`SyncHistory` includes timezone context fields to preserve the configured execution timezone alongside UTC timestamps:
+`JobLog` is the primary job/runtime history table and is always ensured during startup (`EnsureJobLogSetup`).
+
+`SyncHistory` is treated as a legacy table:
+
+- Schema enforcement no longer requires creating `SyncHistory`.
+- If `SyncHistory` already exists, startup backfills missing `JobLog` rows from legacy entries.
+- If `SyncHistory` does not exist, startup continues normally.
+
+For legacy databases that still use `SyncHistory`, timezone context columns remain supported:
 
 - `StartedAtTimezone`
 - `CompletedAtTimezone`
-
-These columns are included for SQLite, PostgreSQL, and MSSQL and are added for existing databases through schema column migrations during `EnforceSchema`.
 
 ## Adding a New Database Backend
 

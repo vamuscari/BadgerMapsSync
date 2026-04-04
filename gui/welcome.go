@@ -5,7 +5,6 @@ import (
 	"badgermaps/app/action"
 	"badgermaps/database"
 	"badgermaps/events"
-	"badgermaps/utils"
 	"fmt"
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -38,9 +37,10 @@ type WelcomeScreen struct {
 	dbPass string
 	dbName string
 
-	serverHost       string
-	serverPort       string
-	serverTLSEnabled bool
+	serverHost         string
+	serverPort         string
+	serverTLSEnabled   bool
+	configSaveLocation string
 }
 
 // NewWelcomeScreen creates a new welcome screen
@@ -114,6 +114,7 @@ func (w *WelcomeScreen) initializeWizardState() {
 		w.serverPort = "8080"
 	}
 	w.serverTLSEnabled = serverConfig.TLSEnabled
+	w.configSaveLocation = detectConfigSaveLocation(w.app)
 }
 
 func (w *WelcomeScreen) applyWizardConfiguration() error {
@@ -184,12 +185,8 @@ func (w *WelcomeScreen) applyWizardConfiguration() error {
 	w.app.State.ServerPort = serverPort
 	w.app.State.TLSEnabled = w.serverTLSEnabled
 
-	if strings.TrimSpace(w.app.ConfigFile) == "" {
-		if path, ok, err := w.app.GetConfigFilePath(); err == nil && ok && strings.TrimSpace(path) != "" {
-			w.app.SetConfigFilePath(path)
-		} else {
-			w.app.SetConfigFilePath(utils.GetConfigDirFile("config.yaml"))
-		}
+	if err := ensureConfigSavePath(w.app, w.configSaveLocation); err != nil {
+		return fmt.Errorf("failed to choose config save path: %w", err)
 	}
 
 	if err := w.app.SaveConfig(); err != nil {
@@ -918,10 +915,54 @@ func (w *WelcomeScreen) createCompleteStep() fyne.CanvasObject {
 	// Summary of configuration
 	summary := w.createConfigSummary()
 
+	var updateSavePathLabel func()
+	saveLocationSelect := widget.NewSelect(configSaveLocationOptions(), func(selected string) {
+		w.configSaveLocation = strings.TrimSpace(selected)
+		updateSavePathLabel()
+	})
+	saveLocationSelect.PlaceHolder = "Keep current config path"
+	if strings.TrimSpace(w.configSaveLocation) != "" {
+		saveLocationSelect.SetSelected(w.configSaveLocation)
+	}
+
+	savePathLabel := widget.NewLabel("")
+	savePathLabel.Wrapping = fyne.TextWrapWord
+
+	updateSavePathLabel = func() {
+		selected := strings.TrimSpace(w.configSaveLocation)
+		if selected != "" {
+			if path, err := configSaveLocationPath(selected); err == nil {
+				savePathLabel.SetText(fmt.Sprintf("Will save to: %s", path))
+				return
+			}
+		}
+		if current := currentConfigPath(w.app); current != "" {
+			savePathLabel.SetText(fmt.Sprintf("Current: %s", current))
+			return
+		}
+		globalPath, err := configSaveLocationPath(configSaveLocationUserID)
+		if err != nil {
+			savePathLabel.SetText("Current: none")
+			return
+		}
+		savePathLabel.SetText(fmt.Sprintf("Will save to default: %s", globalPath))
+	}
+	updateSavePathLabel()
+
+	saveLocationCard := widget.NewCard(
+		"Configuration File Location",
+		"Choose where this setup writes config.yaml.",
+		container.NewVBox(
+			widget.NewForm(widget.NewFormItem("Save Location", saveLocationSelect)),
+			savePathLabel,
+		),
+	)
+
 	return container.NewVBox(
 		container.NewPadded(container.NewCenter(icon)),
 		container.NewPadded(title),
 		container.NewPadded(message),
+		container.NewPadded(saveLocationCard),
 		container.NewPadded(summary),
 	)
 }

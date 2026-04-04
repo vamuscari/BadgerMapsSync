@@ -10,8 +10,10 @@ The server and scheduler now support explicit timezone handling end-to-end:
 
 - A global server timezone can be configured with `server.timezone` (IANA format, for example `America/New_York`).
 - Each scheduled job can optionally define its own timezone override.
-- Sync history now stores timezone context for start and completion timestamps.
-- Server runtime now exposes a jobs snapshot endpoint used by the GUI Sync Center and the right-pane `Jobs` monitor.
+- Incoming webhook routes are protected by HMAC signature validation when webhooks are enabled.
+- Internal runtime endpoints require bearer authentication and local-source address checks.
+- Legacy `SyncHistory` rows (when that table exists) can store timezone context for start and completion timestamps.
+- Server runtime exposes queue/activity endpoints used by the GUI Sync Center and the right-pane `Jobs` monitor.
 
 ## Server Timezone Configuration
 
@@ -25,6 +27,8 @@ server:
   port: 8080
   timezone: America/New_York
   tls_enabled: false
+  webhook_secret: "<set-a-shared-secret>"
+  internal_api_token: "<generated-or-set-token>"
   log_requests: true
 ```
 
@@ -35,6 +39,20 @@ Ways to configure:
 - Direct YAML edit: set `server.timezone` in `config.yaml`.
 
 If you change timezone while the server is already running, restart the server to apply scheduler timezone changes.
+
+## Server Security Configuration
+
+`server.webhook_secret` and `server.internal_api_token` secure server endpoints:
+
+- `server.webhook_secret` is required when webhook routes are enabled (`account_create` and/or `checkin`).
+- `server.internal_api_token` protects `/internal/*` endpoints.
+- If `server.internal_api_token` is missing, the app generates one and persists it to config on load.
+
+Ways to configure:
+
+- GUI: Configuration tab, Server section (`Webhook Secret`, `Internal API Token`, token `Regenerate` action).
+- CLI: `./badgermaps server setup` prompts for both values.
+- Direct YAML edit: set `server.webhook_secret` and `server.internal_api_token`.
 
 ## Scheduled Jobs Timezone Resolution
 
@@ -66,10 +84,12 @@ Another valid legacy expression:
 
 ## Runtime Jobs Visibility
 
-The server exposes internal local-only endpoints for queue/activity visibility:
+The server exposes internal endpoints for queue/activity visibility and command submission:
 
+- `POST /internal/jobs/sync`
 - `GET /internal/jobs`
 - `GET /internal/jobs/{id}`
+- `POST /internal/scheduled-jobs/run`
 - `GET /internal/activity`
 
 The runtime payload includes:
@@ -77,18 +97,21 @@ The runtime payload includes:
 - Per-job `current_action` when a sync job is actively executing a stage.
 - Activity-level `active_job_action` for quick status display.
 
-The GUI Sync Center uses these endpoints to show active, queued, and recent jobs. The right-pane slide-out `Jobs` section uses the same endpoint and focuses on active and queued jobs with live action updates while running. Access is restricted to local requests.
+The GUI Sync Center uses these endpoints to show active, queued, and recent jobs. The right-pane slide-out `Jobs` section uses the same endpoint and focuses on active and queued jobs with live action updates while running. Access requires both:
+
+- `Authorization: Bearer <server.internal_api_token>`
+- A local source address (loopback or a local interface address).
 
 ## Sync History Timezone Fields
 
-`SyncHistory` now stores timezone context alongside UTC timestamps:
+`SyncHistory` is a legacy table. When present, it stores timezone context alongside UTC timestamps:
 
 - `StartedAt` (UTC timestamp)
 - `StartedAtTimezone` (IANA timezone string)
 - `CompletedAt` (UTC timestamp)
 - `CompletedAtTimezone` (IANA timezone string)
 
-This schema is supported across SQLite, PostgreSQL, and MSSQL, including column migrations for existing databases.
+`JobLog` is the primary runtime/job history table. `SyncHistory` may still exist in older databases and is used for optional backfill into `JobLog`.
 
 ## Notes for Operators
 

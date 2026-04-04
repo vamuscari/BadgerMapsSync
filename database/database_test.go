@@ -265,6 +265,61 @@ func TestEnforceSchema(t *testing.T) {
 	if count < 5 {
 		t.Errorf("FieldMaps table has %d rows, expected at least 5", count)
 	}
+
+	jobLogExists, err := db.TableExists("JobLog")
+	if err != nil {
+		t.Fatalf("failed to check JobLog existence: %v", err)
+	}
+	if !jobLogExists {
+		t.Fatalf("expected JobLog table to exist")
+	}
+
+	syncHistoryExists, err := db.TableExists("SyncHistory")
+	if err != nil {
+		t.Fatalf("failed to check SyncHistory existence: %v", err)
+	}
+	if syncHistoryExists {
+		t.Fatalf("expected SyncHistory table to be omitted from enforced schema")
+	}
+}
+
+func TestEnsureJobLogSetupWithoutSyncHistoryTable(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "joblog_only.db")
+
+	config := &DBConfig{
+		Type: "sqlite3",
+		Path: dbPath,
+	}
+
+	db, err := NewDB(config)
+	if err != nil {
+		t.Fatalf("Failed to load database settings: %v", err)
+	}
+	if err := db.Connect(); err != nil {
+		t.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close()
+
+	if err := EnsureJobLogSetup(db); err != nil {
+		t.Fatalf("EnsureJobLogSetup failed without SyncHistory table: %v", err)
+	}
+
+	jobLogExists, err := db.TableExists("JobLog")
+	if err != nil {
+		t.Fatalf("failed to check JobLog existence: %v", err)
+	}
+	if !jobLogExists {
+		t.Fatalf("expected JobLog table to exist after setup")
+	}
+
+	syncHistoryExists, err := db.TableExists("SyncHistory")
+	if err != nil {
+		t.Fatalf("failed to check SyncHistory existence: %v", err)
+	}
+	if syncHistoryExists {
+		t.Fatalf("expected SyncHistory table to remain absent")
+	}
 }
 
 func TestIsConnected(t *testing.T) {

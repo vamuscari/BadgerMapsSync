@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -78,6 +79,164 @@ func TestHandleHealthCheck(t *testing.T) {
 	presenter.HandleHealthCheck(rr, req)
 	if status := rr.Code; status != http.StatusServiceUnavailable {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusServiceUnavailable)
+	}
+}
+
+func TestWithInternalAuthRejectsMissingToken(t *testing.T) {
+	a := app.NewApp()
+	a.Config.Server.InternalAPIToken = "test-token"
+	a.State.ServerInternalAPIToken = "test-token"
+	presenter := NewCliPresenter(a)
+
+	handler := presenter.withInternalAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/internal/jobs", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, rr.Code)
+	}
+}
+
+func TestWithInternalAuthRejectsInvalidToken(t *testing.T) {
+	a := app.NewApp()
+	a.Config.Server.InternalAPIToken = "test-token"
+	a.State.ServerInternalAPIToken = "test-token"
+	presenter := NewCliPresenter(a)
+
+	handler := presenter.withInternalAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/internal/jobs", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Authorization", "Bearer wrong-token")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, rr.Code)
+	}
+}
+
+func TestWithInternalAuthRejectsNonLocalRequestWithValidToken(t *testing.T) {
+	a := app.NewApp()
+	a.Config.Server.InternalAPIToken = "test-token"
+	a.State.ServerInternalAPIToken = "test-token"
+	presenter := NewCliPresenter(a)
+
+	handler := presenter.withInternalAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/internal/jobs", nil)
+	req.RemoteAddr = "203.0.113.10:12345"
+	req.Header.Set("Authorization", "Bearer test-token")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d", http.StatusForbidden, rr.Code)
+	}
+}
+
+func TestWithInternalAuthAllowsLocalRequestWithValidToken(t *testing.T) {
+	a := app.NewApp()
+	a.Config.Server.InternalAPIToken = "test-token"
+	a.State.ServerInternalAPIToken = "test-token"
+	presenter := NewCliPresenter(a)
+
+	handler := presenter.withInternalAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/internal/jobs", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Authorization", "Bearer test-token")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected status %d, got %d", http.StatusNoContent, rr.Code)
+	}
+}
+
+func TestRunServerWithContextRequiresWebhookSecretWhenWebhookEnabled(t *testing.T) {
+	a := app.NewApp()
+	a.SetConfigFilePath(filepath.Join(t.TempDir(), "config.yaml"))
+	a.Config.Server.Webhooks = map[string]bool{
+		app.WebhookAccountCreate: true,
+		app.WebhookCheckin:       false,
+	}
+	a.Config.Server.InternalAPIToken = "test-token"
+	a.State.ServerInternalAPIToken = "test-token"
+	presenter := NewCliPresenter(a)
+
+	err := presenter.RunServerWithContext(context.Background(), &ServerConfig{
+		Host:             "localhost",
+		Port:             0,
+		WebhookSecret:    "",
+		InternalAPIToken: "test-token",
+	})
+	if err == nil {
+		t.Fatal("expected error when webhook secret is missing")
+	}
+	if !strings.Contains(err.Error(), "webhook_secret") {
+		t.Fatalf("expected webhook secret validation error, got %v", err)
+	}
+}
+
+func TestValidateWebhookSecurityConfigRequiresSecretWhenWebhooksEnabled(t *testing.T) {
+	err := validateWebhookSecurityConfig(true, "")
+	if err == nil {
+		t.Fatal("expected webhook secret validation error")
+	}
+	if !strings.Contains(err.Error(), "webhook_secret") {
+		t.Fatalf("expected webhook secret validation error, got %v", err)
+	}
+}
+
+func TestValidateWebhookSecurityConfigAllowsDisabledWebhooksWithoutSecret(t *testing.T) {
+	if err := validateWebhookSecurityConfig(false, ""); err != nil {
+		t.Fatalf("expected disabled webhooks to allow empty secret, got %v", err)
+	}
+}
+
+func TestValidateServerSetupSecurityRequiresSecretWhenWebhooksEnabled(t *testing.T) {
+	a := app.NewApp()
+	a.Config.Server.Webhooks = map[string]bool{
+		app.WebhookAccountCreate: true,
+		app.WebhookCheckin:       false,
+	}
+	a.State.ServerWebhookSecret = ""
+
+	err := validateServerSetupSecurity(a)
+	if err == nil {
+		t.Fatal("expected webhook secret validation error")
+	}
+	if !strings.Contains(err.Error(), "webhook_secret") {
+		t.Fatalf("expected webhook secret validation error, got %v", err)
+	}
+}
+
+func TestValidateServerSetupSecurityAllowsEmptySecretWhenWebhooksDisabled(t *testing.T) {
+	a := app.NewApp()
+	a.Config.Server.Webhooks = map[string]bool{
+		app.WebhookAccountCreate: false,
+		app.WebhookCheckin:       false,
+	}
+	a.State.ServerWebhookSecret = ""
+
+	if err := validateServerSetupSecurity(a); err != nil {
+		t.Fatalf("expected disabled webhooks to allow empty secret, got %v", err)
 	}
 }
 

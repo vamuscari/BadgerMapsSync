@@ -9,7 +9,6 @@ import (
 	"badgermaps/app/syncproxy"
 	"badgermaps/database"
 	"badgermaps/events"
-	"badgermaps/utils"
 	"errors"
 	"fmt"
 	"fyne.io/fyne/v2"
@@ -671,6 +670,7 @@ func (p *GuiPresenter) HandlePushAll() {
 // HandleSaveConfig saves the application configuration.
 func (p *GuiPresenter) HandleSaveConfig(
 	apiKey, baseURL, dbType, dbPath, dbHost, dbPortStr, dbUser, dbPass, dbName string,
+	configSaveLocation string,
 	themePreference string,
 	maxConcurrentStr string,
 	parallelProcessing bool,
@@ -728,13 +728,10 @@ func (p *GuiPresenter) HandleSaveConfig(
 		p.app.Config.DB.Database = dbName
 	}
 
-	// Write the accumulated viper config to file
-	if strings.TrimSpace(p.app.ConfigFile) == "" {
-		if path, ok, err := p.app.GetConfigFilePath(); err == nil && ok && strings.TrimSpace(path) != "" {
-			p.app.SetConfigFilePath(path)
-		} else {
-			p.app.SetConfigFilePath(utils.GetConfigDirFile("config.yaml"))
-		}
+	if err := ensureConfigSavePath(p.app, configSaveLocation); err != nil {
+		p.app.Events.Dispatch(events.Errorf("presenter", "ERROR choosing config save path: %v", err))
+		p.view.ShowToast("Error: Invalid config save location.")
+		return
 	}
 	if err := p.app.SaveConfig(); err != nil {
 		p.app.Events.Dispatch(events.Errorf("presenter", "ERROR saving config file: %v", err))
@@ -933,8 +930,8 @@ func (p *GuiPresenter) HandleViewConfig() {
 
 // --- Server Handlers ---
 
-// HandleSaveServerConfig persists server host, timezone, TLS, and logging settings.
-func (p *GuiPresenter) HandleSaveServerConfig(host, portStr, timezone string, tlsEnabled bool, tlsCert, tlsKey string, logRequests bool) {
+// HandleSaveServerConfig persists server host, timezone, TLS, and server security settings.
+func (p *GuiPresenter) HandleSaveServerConfig(host, portStr, timezone string, tlsEnabled bool, tlsCert, tlsKey, webhookSecret, internalAPIToken string, logRequests bool) {
 	p.app.Events.Dispatch(events.Debugf("presenter", "HandleSaveServerConfig called"))
 	p.app.Events.Dispatch(events.Infof("presenter", "Saving server configuration..."))
 
@@ -948,11 +945,30 @@ func (p *GuiPresenter) HandleSaveServerConfig(host, portStr, timezone string, tl
 
 	trimmedCert := strings.TrimSpace(tlsCert)
 	trimmedKey := strings.TrimSpace(tlsKey)
+	trimmedWebhookSecret := strings.TrimSpace(webhookSecret)
+	trimmedInternalAPIToken := strings.TrimSpace(internalAPIToken)
+	if trimmedInternalAPIToken == "" {
+		generatedToken, err := appserver.GenerateInternalAPIToken()
+		if err != nil {
+			errWrapped := fmt.Errorf("failed to generate internal API token: %w", err)
+			p.app.Events.Dispatch(events.Errorf("presenter", errWrapped.Error()))
+			p.logOperationalCommand("gui.server.save_config", []string{
+				fmt.Sprintf("host=%s", trimmedHost),
+				fmt.Sprintf("port=%d", serverPort),
+			}, errWrapped)
+			p.view.ShowToast("Error: Failed to generate internal API token.")
+			return
+		}
+		trimmedInternalAPIToken = generatedToken
+	}
+
 	trimmedTimezone := appserver.NormalizeTimezone(timezone)
 	logArgs := []string{
 		fmt.Sprintf("host=%s", trimmedHost),
 		fmt.Sprintf("port=%d", serverPort),
 		fmt.Sprintf("timezone=%s", trimmedTimezone),
+		fmt.Sprintf("webhook_secret_set=%t", trimmedWebhookSecret != ""),
+		fmt.Sprintf("internal_api_token_set=%t", trimmedInternalAPIToken != ""),
 	}
 	if err := appserver.ValidateTimezone(trimmedTimezone); err != nil {
 		p.app.Events.Dispatch(events.Warningf("presenter", "Invalid timezone '%s': %v", trimmedTimezone, err))
@@ -967,6 +983,8 @@ func (p *GuiPresenter) HandleSaveServerConfig(host, portStr, timezone string, tl
 	p.app.Config.Server.TLSEnabled = tlsEnabled
 	p.app.Config.Server.TLSCert = trimmedCert
 	p.app.Config.Server.TLSKey = trimmedKey
+	p.app.Config.Server.WebhookSecret = trimmedWebhookSecret
+	p.app.Config.Server.InternalAPIToken = trimmedInternalAPIToken
 	p.app.Config.Server.LogRequests = logRequests
 
 	p.app.State.ServerHost = trimmedHost
@@ -975,6 +993,8 @@ func (p *GuiPresenter) HandleSaveServerConfig(host, portStr, timezone string, tl
 	p.app.State.TLSEnabled = tlsEnabled
 	p.app.State.TLSCert = trimmedCert
 	p.app.State.TLSKey = trimmedKey
+	p.app.State.ServerWebhookSecret = trimmedWebhookSecret
+	p.app.State.ServerInternalAPIToken = trimmedInternalAPIToken
 	p.app.State.ServerLogRequests = logRequests
 
 	if err := p.app.SaveConfig(); err != nil {

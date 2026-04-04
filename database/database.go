@@ -94,6 +94,14 @@ func applyColumnMigrations(db DB, migrations []columnMigration, s *state.State) 
 	}
 
 	for _, migration := range migrations {
+		tableExists, err := db.TableExists(migration.Table)
+		if err != nil {
+			return fmt.Errorf("failed to inspect table '%s' for migration '%s': %w", migration.Table, migration.Command, err)
+		}
+		if !tableExists {
+			continue
+		}
+
 		var count int
 		if err := sqlDB.QueryRow(checkSQL, migration.Table, migration.Column).Scan(&count); err != nil {
 			return fmt.Errorf("failed to inspect column '%s' on table '%s': %w", migration.Column, migration.Table, err)
@@ -1976,7 +1984,6 @@ func RequiredTables() []string {
 		"DataSetValues",
 		"FieldMaps",
 		"Configurations",
-		"SyncHistory",
 		"JobLog",
 		"CommandLog",
 		"WebhookLog",
@@ -2102,10 +2109,6 @@ func GetExpectedSchema() map[string][]string {
 			"WaypointId", "RouteId", "Name", "Address", "Suite", "City", "State", "Zipcode", "Location",
 			"Latitude", "Longitude", "LayoverMinutes", "Position", "CompleteAddress", "LocationId",
 			"CustomerId", "ApptTime", "Type", "PlaceId", "CreatedAt", "UpdatedAt",
-		},
-		"SyncHistory": {
-			"HistoryId", "CorrelationId", "RunType", "Direction", "Source", "Initiator", "Status", "ItemsProcessed", "ErrorCount",
-			"StartedAt", "StartedAtTimezone", "CompletedAt", "CompletedAtTimezone", "DurationSeconds", "Summary", "Details",
 		},
 		"JobLog": {
 			"HistoryId", "CorrelationId", "ParentCorrelationId", "RootCorrelationId", "RunType", "Direction", "Source", "Initiator",

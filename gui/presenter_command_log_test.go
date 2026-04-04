@@ -41,7 +41,7 @@ func newPresenterWithCommandLogDB(t *testing.T) (*GuiPresenter, *app.App, *testG
 func TestHandleSaveServerConfigWritesOperationalCommandLog(t *testing.T) {
 	presenter, a, _ := newPresenterWithCommandLogDB(t)
 
-	presenter.HandleSaveServerConfig("localhost", "8080", "UTC", false, "", "", true)
+	presenter.HandleSaveServerConfig("localhost", "8080", "UTC", false, "", "", "webhook-secret", "internal-token", true)
 
 	var (
 		command string

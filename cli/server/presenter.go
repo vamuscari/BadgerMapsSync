@@ -11,6 +11,7 @@ import (
 	"badgermaps/events"
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -79,6 +80,21 @@ func (p *CliPresenter) RunServer(config *ServerConfig) {
 
 // RunServerWithContext runs the server until context cancellation or a fatal server error.
 func (p *CliPresenter) RunServerWithContext(ctx context.Context, config *ServerConfig) error {
+	if config != nil {
+		if token := strings.TrimSpace(config.InternalAPIToken); token != "" {
+			p.App.State.ServerInternalAPIToken = token
+			if p.App.Config != nil {
+				p.App.Config.Server.InternalAPIToken = token
+			}
+		}
+		if secret := strings.TrimSpace(config.WebhookSecret); secret != "" {
+			p.App.State.ServerWebhookSecret = secret
+			if p.App.Config != nil {
+				p.App.Config.Server.WebhookSecret = secret
+			}
+		}
+	}
+
 	syncQueue := p.App.EnsureSyncCoordinator()
 	p.syncQueue = syncQueue
 	defer func() {
@@ -116,9 +132,6 @@ func (p *CliPresenter) RunServerWithContext(ctx context.Context, config *ServerC
 		return handler
 	}
 
-	accountCreateHandler := wrapWithLogging(http.HandlerFunc(p.HandleAccountCreateWebhook))
-	checkinHandler := wrapWithLogging(http.HandlerFunc(p.HandleCheckinWebhook))
-
 	enabledWebhooks := p.App.Config.Server.Webhooks
 	if len(enabledWebhooks) == 0 {
 		enabledWebhooks = map[string]bool{
@@ -126,6 +139,24 @@ func (p *CliPresenter) RunServerWithContext(ctx context.Context, config *ServerC
 			app.WebhookCheckin:       true,
 		}
 	}
+	webhooksEnabled := enabledWebhooks[app.WebhookAccountCreate] || enabledWebhooks[app.WebhookCheckin]
+	webhookSecret := strings.TrimSpace(config.WebhookSecret)
+	if webhookSecret == "" && p.App.Config != nil {
+		webhookSecret = strings.TrimSpace(p.App.Config.Server.WebhookSecret)
+	}
+	if err := validateWebhookSecurityConfig(webhooksEnabled, webhookSecret); err != nil {
+		return err
+	}
+	webhookSecurity := appserver.NewWebhookSecurity(webhookSecret, webhooksEnabled)
+	wrapWebhookHandler := func(handler http.Handler) http.Handler {
+		if logRequests {
+			handler = WebhookLoggingMiddleware(handler, p.App)
+		}
+		return appserver.WebhookSecurityMiddleware(webhookSecurity)(handler)
+	}
+
+	accountCreateHandler := wrapWebhookHandler(http.HandlerFunc(p.HandleAccountCreateWebhook))
+	checkinHandler := wrapWebhookHandler(http.HandlerFunc(p.HandleCheckinWebhook))
 
 	if enabledWebhooks[app.WebhookAccountCreate] {
 		mux.Handle("/webhook/account/create", accountCreateHandler)
@@ -143,11 +174,11 @@ func (p *CliPresenter) RunServerWithContext(ctx context.Context, config *ServerC
 		p.App.Events.Dispatch(events.Warningf("server", "All webhooks are disabled; server will only serve /health"))
 	}
 
-	mux.Handle("/internal/jobs/sync", p.withLocalOnly(http.HandlerFunc(p.HandleInternalSyncJob)))
-	mux.Handle("/internal/jobs", p.withLocalOnly(http.HandlerFunc(p.HandleInternalSyncJobs)))
-	mux.Handle("/internal/jobs/", p.withLocalOnly(http.HandlerFunc(p.HandleInternalSyncJobStatus)))
-	mux.Handle("/internal/scheduled-jobs/run", p.withLocalOnly(http.HandlerFunc(p.HandleInternalScheduledJobRun)))
-	mux.Handle("/internal/activity", p.withLocalOnly(http.HandlerFunc(p.HandleInternalActivity)))
+	mux.Handle("/internal/jobs/sync", p.withInternalAuth(http.HandlerFunc(p.HandleInternalSyncJob)))
+	mux.Handle("/internal/jobs", p.withInternalAuth(http.HandlerFunc(p.HandleInternalSyncJobs)))
+	mux.Handle("/internal/jobs/", p.withInternalAuth(http.HandlerFunc(p.HandleInternalSyncJobStatus)))
+	mux.Handle("/internal/scheduled-jobs/run", p.withInternalAuth(http.HandlerFunc(p.HandleInternalScheduledJobRun)))
+	mux.Handle("/internal/activity", p.withInternalAuth(http.HandlerFunc(p.HandleInternalActivity)))
 
 	if p.App.Config.WebhookCatchAll {
 		catchAllHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -570,14 +601,72 @@ func (p *CliPresenter) HandleInternalActivity(w http.ResponseWriter, r *http.Req
 	_ = json.NewEncoder(w).Encode(activity)
 }
 
-func (p *CliPresenter) withLocalOnly(next http.Handler) http.Handler {
+func (p *CliPresenter) withInternalAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !hasValidInternalAuthHeader(r, p.configuredInternalAPIToken()) {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 		if !isLocalRequest(r) {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (p *CliPresenter) configuredInternalAPIToken() string {
+	if p == nil || p.App == nil {
+		return ""
+	}
+	if p.App.Config != nil {
+		if token := strings.TrimSpace(p.App.Config.Server.InternalAPIToken); token != "" {
+			return token
+		}
+	}
+	if p.App.State != nil {
+		return strings.TrimSpace(p.App.State.ServerInternalAPIToken)
+	}
+	return ""
+}
+
+func hasValidInternalAuthHeader(r *http.Request, expectedToken string) bool {
+	if r == nil {
+		return false
+	}
+	expectedToken = strings.TrimSpace(expectedToken)
+	if expectedToken == "" {
+		return false
+	}
+
+	token, ok := extractBearerToken(r.Header.Get("Authorization"))
+	if !ok {
+		return false
+	}
+	if len(token) != len(expectedToken) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(token), []byte(expectedToken)) == 1
+}
+
+func extractBearerToken(authorizationHeader string) (string, bool) {
+	authorizationHeader = strings.TrimSpace(authorizationHeader)
+	if !strings.HasPrefix(authorizationHeader, "Bearer ") {
+		return "", false
+	}
+	token := strings.TrimSpace(strings.TrimPrefix(authorizationHeader, "Bearer "))
+	if token == "" {
+		return "", false
+	}
+	return token, true
+}
+
+func validateWebhookSecurityConfig(webhooksEnabled bool, webhookSecret string) error {
+	if webhooksEnabled && strings.TrimSpace(webhookSecret) == "" {
+		return fmt.Errorf("server.webhook_secret is required when webhooks are enabled")
+	}
+	return nil
 }
 
 func isLocalRequest(r *http.Request) bool {

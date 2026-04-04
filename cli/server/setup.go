@@ -36,6 +36,18 @@ func interactiveServerSetup(a *app.App) error {
 	a.State.ServerHost = utils.PromptString(reader, "Server Host", a.State.ServerHost)
 	a.State.ServerPort = utils.PromptInt(reader, "Server Port", a.State.ServerPort)
 	a.State.ServerTimezone = utils.PromptString(reader, "Global Timezone (IANA, optional)", a.State.ServerTimezone)
+	a.State.ServerWebhookSecret = utils.PromptPassword(reader, "Webhook Secret (required when webhooks are enabled)", a.State.ServerWebhookSecret)
+	if err := validateServerSetupSecurity(a); err != nil {
+		return err
+	}
+	if a.State.ServerInternalAPIToken == "" {
+		generatedToken, err := appserver.GenerateInternalAPIToken()
+		if err != nil {
+			return fmt.Errorf("failed to generate internal API token: %w", err)
+		}
+		a.State.ServerInternalAPIToken = generatedToken
+	}
+	a.State.ServerInternalAPIToken = utils.PromptString(reader, "Internal API Token", a.State.ServerInternalAPIToken)
 	a.State.TLSEnabled = utils.PromptBool(reader, "Enable TLS/HTTPS", a.State.TLSEnabled)
 	a.State.ServerLogRequests = utils.PromptBool(reader, "Log all incoming requests", a.State.ServerLogRequests)
 
@@ -55,7 +67,23 @@ func interactiveServerSetup(a *app.App) error {
 	a.Config.Server.TLSEnabled = a.State.TLSEnabled
 	a.Config.Server.TLSCert = a.State.TLSCert
 	a.Config.Server.TLSKey = a.State.TLSKey
+	a.Config.Server.WebhookSecret = a.State.ServerWebhookSecret
+	a.Config.Server.InternalAPIToken = a.State.ServerInternalAPIToken
 	a.Config.Server.LogRequests = a.State.ServerLogRequests
 
 	return a.SaveConfig()
+}
+
+func validateServerSetupSecurity(a *app.App) error {
+	if a == nil || a.Config == nil || a.State == nil {
+		return nil
+	}
+
+	enabledWebhooks := a.Config.Server.Webhooks
+	webhooksEnabled := enabledWebhooks[app.WebhookAccountCreate] || enabledWebhooks[app.WebhookCheckin]
+	if len(enabledWebhooks) == 0 {
+		webhooksEnabled = true
+	}
+
+	return validateWebhookSecurityConfig(webhooksEnabled, a.State.ServerWebhookSecret)
 }

@@ -28,6 +28,8 @@ const (
 	defaultActivityStaleWindow = 20 * time.Second
 	defaultInternalRequestPath = "/internal/jobs/sync"
 	defaultScheduledJobRunPath = "/internal/scheduled-jobs/run"
+	authorizationHeaderName    = "Authorization"
+	bearerAuthPrefix           = "Bearer "
 )
 
 type healthStatusError struct {
@@ -119,7 +121,7 @@ func newInternalHTTPClient(baseURL string) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(baseURL)), "https://") {
 		transport.TLSClientConfig = &tls.Config{
-			// These calls target only local internal endpoints that are already guarded by local-only checks.
+			// These calls target local internal endpoints that require both bearer auth and local-origin checks.
 			InsecureSkipVerify: true,
 		}
 	}
@@ -128,6 +130,33 @@ func newInternalHTTPClient(baseURL string) *http.Client {
 		Timeout:   defaultClientTimeout,
 		Transport: transport,
 	}
+}
+
+func resolveInternalAPIToken(a *app.App) string {
+	if a == nil {
+		return ""
+	}
+	if a.Config != nil {
+		if token := strings.TrimSpace(a.Config.Server.InternalAPIToken); token != "" {
+			return token
+		}
+	}
+	if a.State != nil {
+		return strings.TrimSpace(a.State.ServerInternalAPIToken)
+	}
+	return ""
+}
+
+func applyInternalAuthHeader(req *http.Request, a *app.App) error {
+	if req == nil {
+		return fmt.Errorf("internal request is required")
+	}
+	token := resolveInternalAPIToken(a)
+	if token == "" {
+		return fmt.Errorf("internal API token is not configured; set server.internal_api_token in config")
+	}
+	req.Header.Set(authorizationHeaderName, bearerAuthPrefix+token)
+	return nil
 }
 
 func FetchServerJobsSnapshot(a *app.App) (*appserver.SyncJobListResponse, error) {
@@ -154,6 +183,9 @@ func FetchServerJobsSnapshot(a *app.App) (*appserver.SyncJobListResponse, error)
 	req, err := http.NewRequest(http.MethodGet, baseURL+"/internal/jobs", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create jobs request: %w", err)
+	}
+	if err := applyInternalAuthHeader(req, a); err != nil {
+		return nil, fmt.Errorf("failed to authorize jobs request: %w", err)
 	}
 
 	resp, err := client.Do(req)
@@ -219,6 +251,9 @@ func runScheduledJobNowRemote(a *app.App, jobID string) error {
 		return fmt.Errorf("failed to create scheduled job request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if err := applyInternalAuthHeader(req, a); err != nil {
+		return fmt.Errorf("failed to authorize scheduled job request: %w", err)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -287,6 +322,9 @@ func runAsRemoteJob(
 		return fmt.Errorf("failed to create sync request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if err := applyInternalAuthHeader(req, a); err != nil {
+		return fmt.Errorf("failed to authorize sync request: %w", err)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -310,7 +348,7 @@ func runAsRemoteJob(
 	a.Events.Dispatch(events.Infof("server.proxy", "Sync job %s submitted to active server", job.ID))
 
 	for {
-		current, err := fetchJobStatus(client, baseURL, job.ID)
+		current, err := fetchJobStatus(client, baseURL, job.ID, a)
 		if err != nil {
 			return err
 		}
@@ -549,10 +587,13 @@ func runLocalSyncMode(a *app.App, mode appserver.SyncMode, resourceID int) error
 	}
 }
 
-func fetchJobStatus(client *http.Client, baseURL string, jobID string) (*appserver.SyncJob, error) {
+func fetchJobStatus(client *http.Client, baseURL string, jobID string, a *app.App) (*appserver.SyncJob, error) {
 	req, err := http.NewRequest(http.MethodGet, baseURL+"/internal/jobs/"+jobID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create status request: %w", err)
+	}
+	if err := applyInternalAuthHeader(req, a); err != nil {
+		return nil, fmt.Errorf("failed to authorize status request: %w", err)
 	}
 
 	resp, err := client.Do(req)
@@ -574,7 +615,7 @@ func fetchJobStatus(client *http.Client, baseURL string, jobID string) (*appserv
 }
 
 func resolveActivity(client *http.Client, baseURL string, a *app.App) (appserver.RuntimeActivity, error) {
-	activity, err := fetchActivity(client, baseURL)
+	activity, err := fetchActivity(client, baseURL, a)
 	if err == nil {
 		return activity, nil
 	}
@@ -589,10 +630,13 @@ func resolveActivity(client *http.Client, baseURL string, a *app.App) (appserver
 	return fileActivity, nil
 }
 
-func fetchActivity(client *http.Client, baseURL string) (appserver.RuntimeActivity, error) {
+func fetchActivity(client *http.Client, baseURL string, a *app.App) (appserver.RuntimeActivity, error) {
 	req, err := http.NewRequest(http.MethodGet, baseURL+"/internal/activity", nil)
 	if err != nil {
 		return appserver.RuntimeActivity{}, fmt.Errorf("failed to create activity request: %w", err)
+	}
+	if err := applyInternalAuthHeader(req, a); err != nil {
+		return appserver.RuntimeActivity{}, fmt.Errorf("failed to authorize activity request: %w", err)
 	}
 
 	resp, err := client.Do(req)

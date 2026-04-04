@@ -4360,12 +4360,29 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 	tlsCertEntry.SetText(ui.app.Config.Server.TLSCert)
 	tlsKeyEntry := widget.NewEntry()
 	tlsKeyEntry.SetText(ui.app.Config.Server.TLSKey)
+	webhookSecretEntry := widget.NewPasswordEntry()
+	webhookSecretEntry.SetText(ui.app.Config.Server.WebhookSecret)
+	internalTokenEntry := widget.NewEntry()
+	internalTokenEntry.SetText(ui.app.Config.Server.InternalAPIToken)
 	logRequestsCheck := widget.NewCheck("Log incoming requests", nil)
 	logRequestsCheck.SetChecked(ui.app.Config.Server.LogRequests)
+
+	regenerateTokenButton := widget.NewButtonWithIcon("Regenerate", theme.ViewRefreshIcon(), func() {
+		generatedToken, err := appserver.GenerateInternalAPIToken()
+		if err != nil {
+			ui.app.Events.Dispatch(events.Errorf("gui", "Failed to regenerate internal API token: %v", err))
+			ui.ShowToast("Error: Failed to regenerate internal API token.")
+			return
+		}
+		internalTokenEntry.SetText(generatedToken)
+		ui.ShowToast("Generated a new internal API token. Save server settings to apply it.")
+	})
 
 	var serverForm *widget.Form
 	tlsCertFormItem := widget.NewFormItem("TLS Cert Path", tlsCertEntry)
 	tlsKeyFormItem := widget.NewFormItem("TLS Key Path", tlsKeyEntry)
+	webhookSecretFormItem := widget.NewFormItem("Webhook Secret", webhookSecretEntry)
+	internalTokenFormItem := widget.NewFormItem("Internal API Token", container.NewBorder(nil, nil, nil, regenerateTokenButton, internalTokenEntry))
 	tlsEnabledCheck := widget.NewCheck("Enable TLS", func(enabled bool) {
 		if enabled {
 			serverForm.AppendItem(tlsCertFormItem)
@@ -4386,6 +4403,8 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 		widget.NewFormItem("Host", serverHostEntry),
 		widget.NewFormItem("Port", serverPortEntry),
 		widget.NewFormItem("Global Timezone (IANA)", serverTimezoneEntry),
+		webhookSecretFormItem,
+		internalTokenFormItem,
 	)
 
 	tlsEnabledCheck.SetChecked(ui.app.Config.Server.TLSEnabled)
@@ -4398,6 +4417,8 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 			tlsEnabledCheck.Checked,
 			tlsCertEntry.Text,
 			tlsKeyEntry.Text,
+			webhookSecretEntry.Text,
+			internalTokenEntry.Text,
 			logRequestsCheck.Checked,
 		)
 	})
@@ -4411,6 +4432,38 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 		container.NewCenter(saveServerButton),
 	)
 
+	configSaveLocationSelect := widget.NewSelect(configSaveLocationOptions(), nil)
+	configSaveLocationSelect.PlaceHolder = "Keep current config path"
+	if selected := detectConfigSaveLocation(ui.app); selected != "" {
+		configSaveLocationSelect.SetSelected(selected)
+	}
+
+	configSavePathLabel := widget.NewLabel("")
+	configSavePathLabel.Wrapping = fyne.TextWrapWord
+	updateConfigSavePathLabel := func(selected string) {
+		selected = strings.TrimSpace(selected)
+		if selected != "" {
+			if path, err := configSaveLocationPath(selected); err == nil {
+				configSavePathLabel.SetText(fmt.Sprintf("Will save to: %s", path))
+				return
+			}
+		}
+		if current := currentConfigPath(ui.app); current != "" {
+			configSavePathLabel.SetText(fmt.Sprintf("Current: %s", current))
+			return
+		}
+		globalPath, err := configSaveLocationPath(configSaveLocationUserID)
+		if err != nil {
+			configSavePathLabel.SetText("Current: none")
+			return
+		}
+		configSavePathLabel.SetText(fmt.Sprintf("Will save to default: %s", globalPath))
+	}
+	configSaveLocationSelect.OnChanged = func(selected string) {
+		updateConfigSavePathLabel(selected)
+	}
+	updateConfigSavePathLabel(configSaveLocationSelect.Selected)
+
 	// Buttons
 	saveButton := NewSecondaryButton("Save Configuration", theme.ConfirmIcon(), func() {
 		selectedThemePreference := app.ThemePreferenceAuto
@@ -4422,6 +4475,7 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 		ui.presenter.HandleSaveConfig(
 			apiKeyEntry.Text, baseURLEntry.Text, dbTypeSelect.Selected, dbPathEntry.Text,
 			dbHostEntry.Text, dbPortEntry.Text, dbUserEntry.Text, dbPassEntry.Text, dbNameEntry.Text,
+			configSaveLocationSelect.Selected,
 			selectedThemePreference,
 			maxConcurrentEntry.Text,
 			parallelProcessingCheck.Checked,
@@ -4434,6 +4488,10 @@ func (ui *Gui) buildConfigTab() fyne.CanvasObject {
 	actionsCard := ui.newSectionCard(
 		"Configuration Actions",
 		"Review or persist the current configuration.",
+		widget.NewForm(
+			widget.NewFormItem("Save Location", configSaveLocationSelect),
+		),
+		configSavePathLabel,
 		container.NewGridWithColumns(2, viewButton, saveButton),
 	)
 

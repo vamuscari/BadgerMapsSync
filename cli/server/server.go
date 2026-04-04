@@ -31,12 +31,14 @@ func ServerCmd(a *app.App) *cobra.Command {
 			}
 
 			serverConfig := ServerConfig{
-				Host:        App.State.ServerHost,
-				Port:        App.State.ServerPort,
-				TLSEnabled:  App.State.TLSEnabled,
-				TLSCert:     App.State.TLSCert,
-				TLSKey:      App.State.TLSKey,
-				LogRequests: App.State.ServerLogRequests,
+				Host:             App.State.ServerHost,
+				Port:             App.State.ServerPort,
+				TLSEnabled:       App.State.TLSEnabled,
+				TLSCert:          App.State.TLSCert,
+				TLSKey:           App.State.TLSKey,
+				WebhookSecret:    App.State.ServerWebhookSecret,
+				InternalAPIToken: App.State.ServerInternalAPIToken,
+				LogRequests:      App.State.ServerLogRequests,
 			}
 			presenter.RunServer(&serverConfig)
 		},

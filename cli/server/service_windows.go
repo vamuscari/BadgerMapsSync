@@ -44,12 +44,14 @@ func (s *badgerMapsService) Execute(args []string, r <-chan svc.ChangeRequest, c
 	}
 
 	config := &ServerConfig{
-		Host:        s.app.State.ServerHost,
-		Port:        s.app.State.ServerPort,
-		TLSEnabled:  s.app.State.TLSEnabled,
-		TLSCert:     s.app.State.TLSCert,
-		TLSKey:      s.app.State.TLSKey,
-		LogRequests: s.app.State.ServerLogRequests,
+		Host:             s.app.State.ServerHost,
+		Port:             s.app.State.ServerPort,
+		TLSEnabled:       s.app.State.TLSEnabled,
+		TLSCert:          s.app.State.TLSCert,
+		TLSKey:           s.app.State.TLSKey,
+		WebhookSecret:    s.app.State.ServerWebhookSecret,
+		InternalAPIToken: s.app.State.ServerInternalAPIToken,
+		LogRequests:      s.app.State.ServerLogRequests,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

@@ -5,6 +5,7 @@ import (
 	"badgermaps/app/action"
 	appserver "badgermaps/app/server"
 	"badgermaps/app/state"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -118,5 +119,43 @@ func TestRunScheduledJobNowReturnsErrorForUnknownLocalJob(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(err.Error()), "job not found") {
 		t.Fatalf("expected job not found error, got %v", err)
+	}
+}
+
+func TestApplyInternalAuthHeaderRejectsMissingToken(t *testing.T) {
+	a := app.NewApp()
+	a.Config.Server.InternalAPIToken = ""
+	a.State.ServerInternalAPIToken = ""
+
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1/internal/jobs", nil)
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
+
+	err = applyInternalAuthHeader(req, a)
+	if err == nil {
+		t.Fatal("expected missing token error")
+	}
+	if !strings.Contains(err.Error(), "internal_api_token") {
+		t.Fatalf("expected internal_api_token guidance, got %v", err)
+	}
+}
+
+func TestApplyInternalAuthHeaderSetsBearerToken(t *testing.T) {
+	a := app.NewApp()
+	a.Config.Server.InternalAPIToken = "abc123"
+	a.State.ServerInternalAPIToken = "abc123"
+
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1/internal/jobs", nil)
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
+
+	if err := applyInternalAuthHeader(req, a); err != nil {
+		t.Fatalf("expected token header to be set, got %v", err)
+	}
+
+	if got := req.Header.Get("Authorization"); got != "Bearer abc123" {
+		t.Fatalf("expected Authorization header %q, got %q", "Bearer abc123", got)
 	}
 }

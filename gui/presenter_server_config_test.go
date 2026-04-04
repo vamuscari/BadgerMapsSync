@@ -41,6 +41,8 @@ func TestHandleSaveServerConfigSavesValidTimezone(t *testing.T) {
 		false,
 		"",
 		"",
+		"webhook-secret",
+		"internal-token",
 		true,
 	)
 
@@ -74,6 +76,8 @@ func TestHandleSaveServerConfigRejectsInvalidTimezone(t *testing.T) {
 		false,
 		"",
 		"",
+		"webhook-secret",
+		"internal-token",
 		true,
 	)
 
