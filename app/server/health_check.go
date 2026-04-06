@@ -3,12 +3,17 @@ package server
 import (
 	"badgermaps/api"
 	"badgermaps/app/audit"
+	"badgermaps/app/state"
 	"badgermaps/database"
 	"badgermaps/events"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"runtime"
+	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 )
@@ -44,6 +49,7 @@ type HealthChecker struct {
 	api           *api.APIClient
 	events        *events.EventDispatcher
 	auditLogger   *audit.AuditLogger
+	version       string
 	startTime     time.Time
 	mu            sync.RWMutex
 	lastCheck     *HealthCheck
@@ -63,6 +69,7 @@ func NewHealthChecker(
 		api:           api,
 		events:        events,
 		auditLogger:   auditLogger,
+		version:       buildVersionFromBuildInfo(debug.ReadBuildInfo()),
 		startTime:     time.Now(),
 		checkInterval: 30 * time.Second,
 		stopChan:      make(chan struct{}),
@@ -118,7 +125,7 @@ func (hc *HealthChecker) performHealthCheck() {
 	check := &HealthCheck{
 		Timestamp:  time.Now(),
 		Components: make(map[string]*ComponentHealth),
-		Version:    "1.0.0", // TODO: Get from build info
+		Version:    hc.version,
 		Uptime:     time.Since(hc.startTime),
 	}
 
@@ -410,6 +417,41 @@ type DataValidator struct {
 	events *events.EventDispatcher
 }
 
+func buildVersionFromBuildInfo(info *debug.BuildInfo, ok bool) string {
+	const defaultVersion = "development"
+
+	if !ok || info == nil {
+		return defaultVersion
+	}
+
+	if version := strings.TrimSpace(info.Main.Version); version != "" && version != "(devel)" {
+		return version
+	}
+
+	revision := ""
+	modified := false
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			revision = strings.TrimSpace(setting.Value)
+		case "vcs.modified":
+			modified = strings.EqualFold(strings.TrimSpace(setting.Value), "true")
+		}
+	}
+
+	if revision == "" {
+		return defaultVersion
+	}
+
+	if len(revision) > 12 {
+		revision = revision[:12]
+	}
+	if modified {
+		return revision + "-dirty"
+	}
+	return revision
+}
+
 func NewDataValidator(db database.DB, api *api.APIClient, events *events.EventDispatcher) *DataValidator {
 	return &DataValidator{
 		db:     db,
@@ -452,43 +494,138 @@ func (dv *DataValidator) ValidateBeforeSync(syncType SyncType) error {
 
 // ValidateAccountData validates account data integrity
 func (dv *DataValidator) ValidateAccountData(accountID int) error {
-	// TODO: Implement account validation when database methods are available
-	// This will require adding GetAccount method to database.DB interface
-	// or using ExecuteQuery to fetch account data
+	if accountID <= 0 {
+		return fmt.Errorf("account id must be greater than 0")
+	}
+
+	account, err := database.GetAccountByID(dv.db, accountID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("account %d does not exist", accountID)
+		}
+		return fmt.Errorf("failed to validate account %d: %w", accountID, err)
+	}
+	if account == nil {
+		return fmt.Errorf("account %d does not exist", accountID)
+	}
+	if !account.AccountId.Valid {
+		return fmt.Errorf("account %d has invalid account id value", accountID)
+	}
+	if int(account.AccountId.Int64) != accountID {
+		return fmt.Errorf("account id mismatch: expected %d, got %d", accountID, account.AccountId.Int64)
+	}
 
 	return nil
 }
 
 // ValidateDataConsistency checks for data consistency issues
 func (dv *DataValidator) ValidateDataConsistency() error {
-	// TODO: Implement data consistency checks
-	// This will require adding methods to database.DB interface or using ExecuteQuery
-	// to run custom queries for finding orphaned and duplicate records
+	checks := []struct {
+		command string
+		label   string
+	}{
+		{command: "CountOrphanedCheckins", label: "orphaned_checkins"},
+		{command: "CountOrphanedAccountLocations", label: "orphaned_account_locations"},
+		{command: "CountOrphanedRouteWaypoints", label: "orphaned_route_waypoints"},
+	}
 
-	// Example queries that could be implemented:
-	// - SELECT COUNT(*) FROM account_checkins WHERE account_id NOT IN (SELECT id FROM accounts)
-	// - SELECT customer_id, COUNT(*) FROM accounts GROUP BY customer_id HAVING COUNT(*) > 1
+	var violations []string
+	for _, check := range checks {
+		count, err := dv.queryCount(check.command)
+		if err != nil {
+			return fmt.Errorf("failed consistency check %s: %w", check.label, err)
+		}
+		if count > 0 {
+			violations = append(violations, fmt.Sprintf("%s=%d", check.label, count))
+		}
+	}
+
+	if len(violations) > 0 {
+		return fmt.Errorf("data consistency violations detected: %s", strings.Join(violations, ", "))
+	}
 
 	return nil
 }
 
 // Helper methods for schema validation
 func (hc *HealthChecker) validateDatabaseSchema() error {
-	// TODO: Implement schema validation
-	return nil
+	if hc.db == nil {
+		return fmt.Errorf("database is not configured")
+	}
+
+	s := state.NewState()
+	s.Quiet = true
+	return hc.db.ValidateSchema(s)
 }
 
 func (dv *DataValidator) validateAccountsSchema() error {
-	// TODO: Implement accounts schema validation
-	return nil
+	return dv.validateSchemaTables("Accounts", "AccountLocations", "AccountsPendingChanges")
 }
 
 func (dv *DataValidator) validateCheckinsSchema() error {
-	// TODO: Implement checkins schema validation
-	return nil
+	return dv.validateSchemaTables("AccountCheckins", "AccountCheckinsPendingChanges")
 }
 
 func (dv *DataValidator) validateRoutesSchema() error {
-	// TODO: Implement routes schema validation
+	return dv.validateSchemaTables("Routes", "RouteWaypoints")
+}
+
+func (dv *DataValidator) validateSchemaTables(tableNames ...string) error {
+	expectedSchema := database.GetExpectedSchema()
+	for _, tableName := range tableNames {
+		expectedColumns, ok := expectedSchema[tableName]
+		if !ok {
+			return fmt.Errorf("no expected schema registered for table %s", tableName)
+		}
+		if err := dv.validateTableSchema(tableName, expectedColumns); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func (dv *DataValidator) validateTableSchema(tableName string, expectedColumns []string) error {
+	exists, err := dv.db.TableExists(tableName)
+	if err != nil {
+		return fmt.Errorf("failed to inspect table %s: %w", tableName, err)
+	}
+	if !exists {
+		return fmt.Errorf("required table %s does not exist", tableName)
+	}
+
+	columns, err := dv.db.GetTableColumns(tableName)
+	if err != nil {
+		return fmt.Errorf("failed to get columns for table %s: %w", tableName, err)
+	}
+
+	columnSet := make(map[string]struct{}, len(columns))
+	for _, column := range columns {
+		columnSet[strings.ToLower(strings.TrimSpace(column))] = struct{}{}
+	}
+
+	for _, expected := range expectedColumns {
+		if _, ok := columnSet[strings.ToLower(strings.TrimSpace(expected))]; !ok {
+			return fmt.Errorf("missing column %s in table %s", expected, tableName)
+		}
+	}
+
+	return nil
+}
+
+func (dv *DataValidator) queryCount(command string) (int, error) {
+	sqlText := strings.TrimSpace(dv.db.GetSQL(command))
+	if sqlText == "" {
+		return 0, fmt.Errorf("SQL command %s is unavailable for database type %s", command, dv.db.GetType())
+	}
+
+	sqlDB := dv.db.GetDB()
+	if sqlDB == nil {
+		return 0, fmt.Errorf("database connection is not initialized")
+	}
+
+	var count int
+	if err := sqlDB.QueryRow(sqlText).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
