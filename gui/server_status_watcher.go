@@ -9,8 +9,11 @@ import (
 const serverStatusPollInterval = 2 * time.Second
 
 type serverStatusSnapshot struct {
-	PID     int
-	Running bool
+	PID         int
+	Running     bool
+	State       string
+	Installed   bool
+	RuntimeMode string
 }
 
 func readServerStatusSnapshot(a *app.App) serverStatusSnapshot {
@@ -18,15 +21,22 @@ func readServerStatusSnapshot(a *app.App) serverStatusSnapshot {
 		return serverStatusSnapshot{}
 	}
 
-	pid, running := a.Server.GetServerStatus()
+	status := a.Server.GetDetailedStatus()
 	return serverStatusSnapshot{
-		PID:     pid,
-		Running: running,
+		PID:         status.PID,
+		Running:     status.Running,
+		State:       status.State,
+		Installed:   status.Installed,
+		RuntimeMode: status.RuntimeMode,
 	}
 }
 
 func shouldDispatchServerStatusChanged(previous, current serverStatusSnapshot) bool {
-	return previous.PID != current.PID || previous.Running != current.Running
+	return previous.PID != current.PID ||
+		previous.Running != current.Running ||
+		previous.State != current.State ||
+		previous.Installed != current.Installed ||
+		previous.RuntimeMode != current.RuntimeMode
 }
 
 func dispatchServerStatusTransition(dispatcher *events.EventDispatcher, previous, current serverStatusSnapshot, source string) bool {

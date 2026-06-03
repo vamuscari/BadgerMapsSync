@@ -3,6 +3,7 @@ package gui
 import (
 	"badgermaps/app"
 	"badgermaps/app/action"
+	appserver "badgermaps/app/server"
 	"badgermaps/database"
 	"badgermaps/events"
 	"fmt"
@@ -1012,9 +1013,17 @@ func (w *WelcomeScreen) createConfigSummary() fyne.CanvasObject {
 	serverStatus := "Not running"
 	serverColor := color.NRGBA{R: 128, G: 128, B: 128, A: 255}
 	if w.app != nil && w.app.Server != nil {
-		if pid, running := w.app.Server.GetServerStatus(); running {
-			serverStatus = fmt.Sprintf("Running (PID: %d)", pid)
+		status := w.app.Server.GetDetailedStatus()
+		if status.Running && status.PID > 0 {
+			serverStatus = fmt.Sprintf("Running (PID: %d)", status.PID)
 			serverColor = color.NRGBA{R: 0, G: 255, B: 0, A: 255}
+		} else if status.Running {
+			serverStatus = "Running"
+			serverColor = color.NRGBA{R: 0, G: 255, B: 0, A: 255}
+		} else if status.State == appserver.ServerStatusUnknown {
+			serverStatus = "Unknown"
+		} else if status.RuntimeMode == appserver.ServerRuntimeModeService && !status.Installed {
+			serverStatus = "Service not installed"
 		}
 	}
 

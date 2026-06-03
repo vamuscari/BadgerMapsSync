@@ -43,7 +43,7 @@ func createRootCmd() *cobra.Command {
 		It allows you to push and pull data, run in server mode, and perform various utility operations.`,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			// Don't load config for version, help, or gui commands
-			if cmd.Name() == "version" || cmd.Name() == "help" || (cmd.Name() == "badgermaps" && guiFlag) {
+			if cmd.Name() == "version" || cmd.Name() == "help" || (cmd.Name() == "badgermaps" && guiFlag) || isServerServiceRegistrationCommand(cmd) {
 				return
 			}
 			App.EnsureConfig(false)
@@ -92,6 +92,17 @@ func createRootCmd() *cobra.Command {
 	rootCmd.Flags().BoolVar(&guiFlag, "gui", false, "Launch the graphical user interface")
 
 	return rootCmd
+}
+
+func isServerServiceRegistrationCommand(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+	if cmd.Name() != "install" && cmd.Name() != "uninstall" {
+		return false
+	}
+	parent := cmd.Parent()
+	return parent != nil && parent.Name() == "server"
 }
 
 func main() {

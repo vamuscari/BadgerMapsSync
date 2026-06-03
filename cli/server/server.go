@@ -50,6 +50,7 @@ func ServerCmd(a *app.App) *cobra.Command {
 	// Add platform-agnostic commands
 	serverCmd.AddCommand(newServerStartCmd(presenter))
 	serverCmd.AddCommand(newServerStopCmd(presenter))
+	serverCmd.AddCommand(newServerRestartCmd(presenter))
 	serverCmd.AddCommand(newServerStatusCmd(presenter))
 	serverCmd.AddCommand(newServerSetupCmd(a))
 	serverCmd.AddCommand(newServerReplayWebhookCmd(presenter))
@@ -89,6 +90,16 @@ func newServerStopCmd(presenter *CliPresenter) *cobra.Command {
 		Short: "Stop the webhook server",
 		Run: func(cmd *cobra.Command, args []string) {
 			presenter.HandleServerStop()
+		},
+	}
+}
+
+func newServerRestartCmd(presenter *CliPresenter) *cobra.Command {
+	return &cobra.Command{
+		Use:   "restart",
+		Short: "Restart the webhook server",
+		Run: func(cmd *cobra.Command, args []string) {
+			presenter.HandleServerRestart()
 		},
 	}
 }

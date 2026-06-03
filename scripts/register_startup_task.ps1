@@ -7,6 +7,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+Write-Warning "Startup scheduled tasks are deprecated for BadgerMapsSync server startup. Prefer: BadgerMapsSync.exe server install --config <global-config.yaml>; BadgerMapsSync.exe server start."
+
 if ([string]::IsNullOrWhiteSpace($ExecutablePath)) {
     $ExecutablePath = Join-Path (Split-Path -Parent $PSScriptRoot) "BadgerMapsSync.exe"
 }

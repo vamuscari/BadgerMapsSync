@@ -4,12 +4,28 @@ import (
 	"badgermaps/app/action"
 	"badgermaps/app/state"
 	"fmt"
-	"os"
-	"strconv"
-	"strings"
 
 	"github.com/robfig/cron/v3"
 )
+
+const (
+	ServerRuntimeModeProcess = "process"
+	ServerRuntimeModeService = "service"
+
+	ServerStatusUnknown = "unknown"
+	ServerStatusStopped = "stopped"
+	ServerStatusPending = "pending"
+	ServerStatusRunning = "running"
+)
+
+type ServerStatus struct {
+	RuntimeMode string
+	Installed   bool
+	Running     bool
+	PID         int
+	State       string
+	Message     string
+}
 
 type CronJob struct {
 	Name     string              `yaml:"name"`
@@ -54,47 +70,31 @@ func (sm *ServerManager) StopCronJobs() {
 	}
 }
 
+func (sm *ServerManager) GetDetailedStatus() ServerStatus {
+	if sm == nil {
+		return ServerStatus{State: ServerStatusUnknown}
+	}
+	return sm.platformStatus()
+}
+
 // GetServerStatus checks if the server process is running.
 // It returns the PID and a boolean indicating if it's running.
 func (sm *ServerManager) GetServerStatus() (int, bool) {
-	pidFile := pidFilePath(sm.state)
-	pidData, err := os.ReadFile(pidFile)
-	if err != nil {
-		return 0, false // PID file doesn't exist
-	}
-
-	pid, err := strconv.Atoi(strings.TrimSpace(string(pidData)))
-	if err != nil {
-		return 0, false // Invalid PID file content
-	}
-
-	return pid, processRunning(pid)
+	status := sm.GetDetailedStatus()
+	return status.PID, status.Running
 }
 
 // StopServer stops the running server process.
 func (sm *ServerManager) StopServer() error {
 	sm.StopCronJobs()
+	return sm.platformStopServer()
+}
 
-	pidFile := pidFilePath(sm.state)
-	pid, running := sm.GetServerStatus()
-	if !running {
-		// If we have a PID but the process isn't running, clean up the stale PID file.
-		if pid > 0 {
-			os.Remove(pidFile)
-		}
-		return fmt.Errorf("server is not running")
+// RestartServer restarts the server if it is running, or starts it when stopped.
+func (sm *ServerManager) RestartServer() error {
+	if sm == nil {
+		return fmt.Errorf("server manager is unavailable")
 	}
-
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return fmt.Errorf("could not find process: %w", err)
-	}
-
-	// Ask the process to terminate gracefully
-	if err := terminateProcess(process); err != nil {
-		return fmt.Errorf("failed to terminate process: %w", err)
-	}
-
-	// Clean up the PID file
-	return os.Remove(pidFile)
+	sm.StopCronJobs()
+	return sm.platformRestartServer()
 }

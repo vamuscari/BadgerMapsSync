@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 )
 
@@ -49,4 +50,68 @@ func (sm *ServerManager) StartServer() error {
 
 	// Disown the process
 	return cmd.Process.Release()
+}
+
+func (sm *ServerManager) platformStatus() ServerStatus {
+	pidFile := pidFilePath(sm.state)
+	pidData, err := os.ReadFile(pidFile)
+	if err != nil {
+		return ServerStatus{
+			RuntimeMode: ServerRuntimeModeProcess,
+			State:       ServerStatusStopped,
+		}
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidData)))
+	if err != nil {
+		return ServerStatus{
+			RuntimeMode: ServerRuntimeModeProcess,
+			State:       ServerStatusStopped,
+			Message:     "invalid PID file",
+		}
+	}
+
+	running := processRunning(pid)
+	state := ServerStatusStopped
+	if running {
+		state = ServerStatusRunning
+	}
+	return ServerStatus{
+		RuntimeMode: ServerRuntimeModeProcess,
+		Installed:   true,
+		Running:     running,
+		PID:         pid,
+		State:       state,
+	}
+}
+
+func (sm *ServerManager) platformStopServer() error {
+	pidFile := pidFilePath(sm.state)
+	pid, running := sm.GetServerStatus()
+	if !running {
+		if pid > 0 {
+			os.Remove(pidFile)
+		}
+		return fmt.Errorf("server is not running")
+	}
+
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return fmt.Errorf("could not find process: %w", err)
+	}
+
+	if err := terminateProcess(process); err != nil {
+		return fmt.Errorf("failed to terminate process: %w", err)
+	}
+
+	return os.Remove(pidFile)
+}
+
+func (sm *ServerManager) platformRestartServer() error {
+	if _, running := sm.GetServerStatus(); running {
+		if err := sm.platformStopServer(); err != nil {
+			return err
+		}
+	}
+	return sm.StartServer()
 }

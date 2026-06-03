@@ -40,11 +40,17 @@ func newServerInstallCmd(a *app.App) *cobra.Command {
 		Use:   "install",
 		Short: "Install the server as a Windows service",
 		Run: func(cmd *cobra.Command, args []string) {
-			if err := installService(); err != nil {
+			configPath := ""
+			if flag := cmd.Root().PersistentFlags().Lookup("config"); flag != nil && flag.Changed {
+				configPath = flag.Value.String()
+			}
+			if err := installService(a, configPath); err != nil {
 				a.Events.Dispatch(events.Errorf("server", "Failed to install service: %v", err))
+				fmt.Fprintf(os.Stderr, "Failed to install service: %v\n", err)
 				os.Exit(1)
 			}
 			a.Events.Dispatch(events.Infof("server", "Service '%s' installed successfully.", serviceName))
+			fmt.Fprintf(os.Stdout, "Service '%s' installed successfully.\n", serviceName)
 		},
 	}
 }
@@ -56,9 +62,11 @@ func newServerUninstallCmd(a *app.App) *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := uninstallService(); err != nil {
 				a.Events.Dispatch(events.Errorf("server", "Failed to uninstall service: %v", err))
+				fmt.Fprintf(os.Stderr, "Failed to uninstall service: %v\n", err)
 				os.Exit(1)
 			}
 			a.Events.Dispatch(events.Infof("server", "Service '%s' uninstalled successfully.", serviceName))
+			fmt.Fprintf(os.Stdout, "Service '%s' uninstalled successfully.\n", serviceName)
 		},
 	}
 }

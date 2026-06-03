@@ -240,6 +240,19 @@ func TestValidateServerSetupSecurityAllowsEmptySecretWhenWebhooksDisabled(t *tes
 	}
 }
 
+func TestServerCmdIncludesRestartCommand(t *testing.T) {
+	a := app.NewApp()
+	cmd := ServerCmd(a)
+
+	restart, _, err := cmd.Find([]string{"restart"})
+	if err != nil {
+		t.Fatalf("expected restart command to be registered: %v", err)
+	}
+	if restart == nil || restart.Name() != "restart" {
+		t.Fatalf("expected restart command, got %#v", restart)
+	}
+}
+
 func TestHandleReplayWebhook(t *testing.T) {
 	// Create a temporary directory for the test database
 	tempDir := t.TempDir()

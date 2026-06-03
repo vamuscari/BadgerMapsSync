@@ -1,6 +1,7 @@
 package gui
 
 import (
+	appserver "badgermaps/app/server"
 	"badgermaps/database"
 	"badgermaps/events"
 	"fmt"
@@ -152,8 +153,8 @@ func (d *SmartDashboard) createStatusCards() fyne.CanvasObject {
 	}
 
 	d.serverToggleButton = NewSecondaryButton("Start Server", theme.MediaPlayIcon(), func() {
-		_, running := d.ui.app.Server.GetServerStatus()
-		if running {
+		status := d.ui.app.Server.GetDetailedStatus()
+		if status.Running {
 			d.ui.ShowConfirmDialog(
 				"Stop Server",
 				"The server is active and serving health checks. Stop it now?",
@@ -245,14 +246,39 @@ func (d *SmartDashboard) refreshServerStatusCard() {
 		return
 	}
 
-	pid, serverRunning := d.ui.app.Server.GetServerStatus()
-	if serverRunning {
+	status := d.ui.app.Server.GetDetailedStatus()
+	if status.Running {
 		d.serverStatusLabel.Text = "Running"
 		d.serverStatusLabel.Color = d.themeColor(StatusPositiveColorName)
-		d.serverPIDLabel.SetText(fmt.Sprintf("PID: %d", pid))
+		if status.PID > 0 {
+			d.serverPIDLabel.SetText(fmt.Sprintf("PID: %d", status.PID))
+		} else {
+			d.serverPIDLabel.SetText("PID: -")
+		}
 		d.serverToggleButton.SetText("Stop Server")
 		d.serverToggleButton.SetIcon(theme.NewColoredResource(theme.MediaStopIcon(), ServerActionStopColorName))
 		d.serverToggleButton.TextColor = d.themeColor(ServerActionStopColorName)
+	} else if status.State == appserver.ServerStatusUnknown {
+		d.serverStatusLabel.Text = "Unknown"
+		d.serverStatusLabel.Color = theme.ForegroundColor()
+		d.serverPIDLabel.SetText("PID: -")
+		d.serverToggleButton.SetText("Start Server")
+		d.serverToggleButton.SetIcon(theme.NewColoredResource(theme.MediaPlayIcon(), ServerActionStartColorName))
+		d.serverToggleButton.TextColor = d.themeColor(ServerActionStartColorName)
+	} else if status.RuntimeMode == appserver.ServerRuntimeModeService && !status.Installed {
+		d.serverStatusLabel.Text = "Service Missing"
+		d.serverStatusLabel.Color = d.themeColor(StatusNegativeColorName)
+		d.serverPIDLabel.SetText("PID: -")
+		d.serverToggleButton.SetText("Start Server")
+		d.serverToggleButton.SetIcon(theme.NewColoredResource(theme.MediaPlayIcon(), ServerActionStartColorName))
+		d.serverToggleButton.TextColor = d.themeColor(ServerActionStartColorName)
+	} else if status.State == appserver.ServerStatusPending {
+		d.serverStatusLabel.Text = "Pending"
+		d.serverStatusLabel.Color = theme.ForegroundColor()
+		d.serverPIDLabel.SetText("PID: -")
+		d.serverToggleButton.SetText("Start Server")
+		d.serverToggleButton.SetIcon(theme.NewColoredResource(theme.MediaPlayIcon(), ServerActionStartColorName))
+		d.serverToggleButton.TextColor = d.themeColor(ServerActionStartColorName)
 	} else {
 		d.serverStatusLabel.Text = "Stopped"
 		d.serverStatusLabel.Color = d.themeColor(StatusNegativeColorName)

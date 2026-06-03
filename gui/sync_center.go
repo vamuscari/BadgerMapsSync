@@ -1,6 +1,7 @@
 package gui
 
 import (
+	appserver "badgermaps/app/server"
 	"badgermaps/database"
 	"badgermaps/events"
 	"fmt"
@@ -476,10 +477,22 @@ func (sc *SyncCenter) RefreshServerStatusLabel() {
 	statusText := "Server: Unknown"
 	statusColor := theme.ForegroundColor()
 	if sc.ui != nil && sc.ui.app != nil && sc.ui.app.Server != nil {
-		pid, running := sc.ui.app.Server.GetServerStatus()
-		if running {
-			statusText = fmt.Sprintf("Server: Running (PID %d)", pid)
+		status := sc.ui.app.Server.GetDetailedStatus()
+		if status.Running && status.PID > 0 {
+			statusText = fmt.Sprintf("Server: Running (PID %d)", status.PID)
 			statusColor = sc.ui.themeColor(StatusPositiveColorName)
+		} else if status.Running {
+			statusText = "Server: Running"
+			statusColor = sc.ui.themeColor(StatusPositiveColorName)
+		} else if status.State == appserver.ServerStatusUnknown {
+			statusText = "Server: Unknown"
+			statusColor = theme.ForegroundColor()
+		} else if status.RuntimeMode == appserver.ServerRuntimeModeService && !status.Installed {
+			statusText = "Server: Service not installed"
+			statusColor = sc.ui.themeColor(StatusNegativeColorName)
+		} else if status.State == appserver.ServerStatusPending {
+			statusText = "Server: Pending"
+			statusColor = theme.ForegroundColor()
 		} else {
 			statusText = "Server: Stopped"
 			statusColor = sc.ui.themeColor(StatusNegativeColorName)

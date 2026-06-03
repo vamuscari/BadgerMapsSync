@@ -58,12 +58,37 @@ func (p *CliPresenter) HandleServerStop() {
 	p.App.Events.Dispatch(events.Infof("server", "Server stopped successfully."))
 }
 
+// HandleServerRestart restarts the running server.
+func (p *CliPresenter) HandleServerRestart() {
+	if err := p.App.Server.RestartServer(); err != nil {
+		p.App.Events.Dispatch(events.Errorf("server", "Failed to restart server: %v", err))
+		os.Exit(1)
+	}
+	pid, _ := p.App.Server.GetServerStatus()
+	if pid > 0 {
+		p.App.Events.Dispatch(events.Infof("server", "Server restarted successfully with PID %d.", pid))
+		return
+	}
+	p.App.Events.Dispatch(events.Infof("server", "Server restarted successfully."))
+}
+
 // HandleServerStatus checks and prints the server's status.
 func (p *CliPresenter) HandleServerStatus() {
-	if pid, running := p.App.Server.GetServerStatus(); running {
-		p.App.Events.Dispatch(events.Infof("server", "Server is running with PID %d.", pid))
-	} else {
+	status := p.App.Server.GetDetailedStatus()
+	switch {
+	case status.Running && status.PID > 0:
+		p.App.Events.Dispatch(events.Infof("server", "Server is running with PID %d.", status.PID))
+	case status.Running:
+		p.App.Events.Dispatch(events.Infof("server", "Server is running."))
+	case status.State == appserver.ServerStatusPending:
+		p.App.Events.Dispatch(events.Infof("server", "Server service is pending."))
+	case status.RuntimeMode == appserver.ServerRuntimeModeService && !status.Installed:
+		p.App.Events.Dispatch(events.Warningf("server", "Windows service is not installed."))
+	default:
 		p.App.Events.Dispatch(events.Warningf("server", "Server is not running."))
+	}
+	if status.Message != "" && !status.Running {
+		p.App.Events.Dispatch(events.Debugf("server", "Server status detail: %s", status.Message))
 	}
 }
 

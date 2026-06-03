@@ -34,6 +34,8 @@ The application includes a graphical user interface (GUI) built with the Fyne to
 
 For detailed server scheduling and timezone behavior, including cron format, job timezone precedence, and sync history timezone fields, see [Server and Timezone Guide](docs/server-timezone.md).
 
+On Windows, use the machine-wide Windows service for shared or production hosts. See [Windows Service Guide](docs/windows-service.md).
+
 ### Screenshots
 
 Below are example views using dummy data. If the images don’t render in your environment yet, follow the steps in “Demo Data & Screenshots” to generate them.

@@ -67,6 +67,12 @@ func TestShouldDispatchServerStatusChanged(t *testing.T) {
 			current:  serverStatusSnapshot{PID: 12, Running: true},
 			want:     true,
 		},
+		{
+			name:     "service_state_changed",
+			previous: serverStatusSnapshot{RuntimeMode: "service", Installed: false, State: "stopped"},
+			current:  serverStatusSnapshot{RuntimeMode: "service", Installed: true, State: "stopped"},
+			want:     true,
+		},
 	}
 
 	for _, tc := range cases {
