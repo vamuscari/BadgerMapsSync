@@ -397,21 +397,22 @@ func replaceEventTokens(input string, ctx *ExecutionContext) string {
 	if ctx == nil {
 		return input
 	}
-	replacements := map[string]string{
-		"$EVENT_TYPE":   ctx.EventType,
-		"$EVENT_SOURCE": ctx.Source,
+	replacements := [][2]string{
+		{"$EVENT_TYPE", ctx.EventType},
+		{"$EVENT_SOURCE", ctx.Source},
 	}
 	if eventJSON, err := ctx.EventJSON(); err == nil {
-		replacements["$EVENT_JSON"] = eventJSON
+		replacements = append(replacements, [2]string{"$EVENT_JSON", eventJSON})
 	}
 	if payloadJSON, err := ctx.PayloadJSON(); err == nil {
-		replacements["$EVENT_PAYLOAD_JSON"] = payloadJSON
+		replacements = append(replacements, [2]string{"$EVENT_PAYLOAD_JSON", payloadJSON})
 	}
 	if payload := ctx.payloadText(); payload != "" {
-		replacements["$EVENT_PAYLOAD"] = payload
+		replacements = append(replacements, [2]string{"$EVENT_PAYLOAD", payload})
 	}
 	result := replacePayloadFieldTokens(input, ctx)
-	for token, value := range replacements {
+	for _, replacement := range replacements {
+		token, value := replacement[0], replacement[1]
 		if value == "" {
 			continue
 		}
