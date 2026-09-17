@@ -18,6 +18,20 @@ BEGIN
     WHERE SettingKey = ''ApiProfileId'';
     SET @profileId = TRY_CAST(@profileId_str AS INT);
 
+    IF EXISTS (
+        SELECT 1
+        FROM dbo.DataSets ds
+        JOIN INFORMATION_SCHEMA.COLUMNS mapped_column
+          ON mapped_column.TABLE_SCHEMA = ''dbo''
+          AND mapped_column.TABLE_NAME = ''Accounts''
+          AND LOWER(mapped_column.COLUMN_NAME) = LOWER(ds.AccountField)
+        WHERE ds.ProfileId = @profileId
+          AND ds.Label IS NOT NULL
+          AND ds.Label <> ''''
+          AND DATALENGTH(ds.Label) > 256
+    )
+        THROW 50001, ''A DataSets label exceeds SQL Server''''s 128-character identifier limit.'', 1;
+
     -- Build the SELECT list dynamically (compatible with pre-2017 SQL Server versions)
     SELECT @select_list = STUFF((
         SELECT '', '' +
@@ -41,10 +55,11 @@ BEGIN
         SET @select_list = ''a.*'';
     END;
 
-    IF OBJECT_ID(''dbo.AccountsWithLabels'', ''V'') IS NOT NULL
-        DROP VIEW dbo.AccountsWithLabels;
+    IF OBJECT_ID(''dbo.AccountsWithLabels'', ''V'') IS NULL
+        SET @view_sql = N''CREATE VIEW dbo.AccountsWithLabels AS SELECT '' + @select_list + N'' FROM dbo.Accounts a;'';
+    ELSE
+        SET @view_sql = N''ALTER VIEW dbo.AccountsWithLabels AS SELECT '' + @select_list + N'' FROM dbo.Accounts a;'';
 
-    SET @view_sql = N''CREATE VIEW dbo.AccountsWithLabels AS SELECT '' + @select_list + N'' FROM dbo.Accounts a;'';
     EXEC sp_executesql @view_sql;
 END;
 ');

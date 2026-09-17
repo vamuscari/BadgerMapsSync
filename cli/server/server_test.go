@@ -335,6 +335,25 @@ func TestNormalizeServerHostBuildsValidBracketedIPv6ListenAddress(t *testing.T) 
 	}
 }
 
+func TestNewHTTPServerConfiguresDefensiveTimeouts(t *testing.T) {
+	server := newHTTPServer("127.0.0.1:0", http.NewServeMux())
+	if server.ReadHeaderTimeout <= 0 {
+		t.Fatal("expected a read-header timeout")
+	}
+	if server.ReadTimeout <= 0 {
+		t.Fatal("expected a read timeout")
+	}
+	if server.WriteTimeout <= 0 {
+		t.Fatal("expected a write timeout")
+	}
+	if server.IdleTimeout <= 0 {
+		t.Fatal("expected an idle timeout")
+	}
+	if server.MaxHeaderBytes <= 0 {
+		t.Fatal("expected a maximum header size")
+	}
+}
+
 func TestWebhookLoggingMiddleware(t *testing.T) {
 	// Create a temporary directory for the test database
 	tempDir := t.TempDir()
@@ -388,6 +407,26 @@ func TestWebhookLoggingMiddleware(t *testing.T) {
 	}
 	if loggedBody != `{"key":"value"}` {
 		t.Errorf("Expected body to be '{\"key\":\"value\"}', got '%s'", loggedBody)
+	}
+
+	handlerCalled := false
+	limitedHandler := WebhookLoggingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusNoContent)
+	}), app)
+	oversizedReq := httptest.NewRequest(
+		http.MethodPost,
+		"/test/webhook",
+		bytes.NewReader(bytes.Repeat([]byte("a"), int(appserver.MaxWebhookBodyBytes)+1)),
+	)
+	oversizedReq.RequestURI = "/test/webhook"
+	oversizedResponse := httptest.NewRecorder()
+	limitedHandler.ServeHTTP(oversizedResponse, oversizedReq)
+	if oversizedResponse.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected oversized log request status %d, got %d", http.StatusRequestEntityTooLarge, oversizedResponse.Code)
+	}
+	if handlerCalled {
+		t.Fatal("expected oversized request to be rejected before reaching the handler")
 	}
 }
 

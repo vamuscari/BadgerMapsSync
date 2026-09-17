@@ -1,14 +1,13 @@
 CREATE OR REPLACE FUNCTION RefreshAccountsWithLabelsView()
-RETURNS TRIGGER AS $
+RETURNS TRIGGER AS $$
 BEGIN
-    PERFORM AccountsWithLabelsView();
     RETURN NULL;
 END;
-$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS DatasetsUpdateTrigger ON "DataSets";
+DROP TRIGGER IF EXISTS DatasetsUpdateTrigger ON DataSets;
 
 CREATE TRIGGER DatasetsUpdateTrigger
-AFTER INSERT OR UPDATE OR DELETE ON "DataSets"
+AFTER INSERT OR UPDATE OR DELETE ON DataSets
 FOR EACH STATEMENT
 EXECUTE FUNCTION RefreshAccountsWithLabelsView();

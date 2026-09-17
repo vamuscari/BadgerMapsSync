@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libgl1-mesa-dev libxkbcommon-dev sqlite3 xorg-dev
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.4
+          cache: true
+
+      - name: Test
+        run: go test -cover ./...
+
+      - name: Build
+        run: go build -o badgermaps .
+
+  server-databases:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: badgermaps
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d badgermaps"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: BadgerMaps!2026
+        ports:
+          - 1433:1433
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.4
+          cache: true
+
+      - name: Test PostgreSQL and SQL Server
+        env:
+          BADGERMAPS_TEST_POSTGRES_HOST: 127.0.0.1
+          BADGERMAPS_TEST_POSTGRES_PORT: 5432
+          BADGERMAPS_TEST_POSTGRES_DATABASE: badgermaps
+          BADGERMAPS_TEST_POSTGRES_USERNAME: postgres
+          BADGERMAPS_TEST_POSTGRES_PASSWORD: postgres
+          BADGERMAPS_TEST_POSTGRES_SSL_MODE: disable
+          BADGERMAPS_TEST_MSSQL_HOST: 127.0.0.1
+          BADGERMAPS_TEST_MSSQL_PORT: 1433
+          BADGERMAPS_TEST_MSSQL_DATABASE: master
+          BADGERMAPS_TEST_MSSQL_USERNAME: sa
+          BADGERMAPS_TEST_MSSQL_PASSWORD: BadgerMaps!2026
+        run: go test -tags=integration ./database -run '^TestServerDatabaseSchemaIntegration$' -v -count=1

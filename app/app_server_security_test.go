@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -55,6 +56,7 @@ func TestLoadConfigGeneratesAndPersistsInternalAPITokenWhenMissing(t *testing.T)
 	if strings.TrimSpace(persisted.Server.InternalAPIToken) == "" {
 		t.Fatalf("expected persisted internal_api_token to be non-empty")
 	}
+	assertPrivateConfigPermissions(t, configPath)
 }
 
 func TestLoadConfigPreservesConfiguredInternalAPIToken(t *testing.T) {
@@ -127,5 +129,20 @@ func TestLoadConfigPersistsGeneratedInternalAPITokenWithoutExistingConfig(t *tes
 	}
 	if strings.TrimSpace(persisted.Server.InternalAPIToken) == "" {
 		t.Fatal("expected generated config to persist internal_api_token")
+	}
+	assertPrivateConfigPermissions(t, expectedPath)
+}
+
+func assertPrivateConfigPermissions(t *testing.T, path string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("failed to stat config file: %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0600); got != want {
+		t.Fatalf("expected config permissions %04o, got %04o", want, got)
 	}
 }

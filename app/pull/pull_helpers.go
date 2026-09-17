@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unicode/utf16"
 
 	"github.com/guregu/null/v6"
 )
@@ -510,9 +511,24 @@ func StoreRoute(a *app.App, route models.Route) error {
 }
 
 func StoreProfile(a *app.App, profile *models.UserProfile) error {
+	if profile == nil {
+		return fmt.Errorf("profile is required")
+	}
+	if !profile.ProfileId.Valid {
+		return fmt.Errorf("profile id is required")
+	}
+	if err := validateAccountViewLabels(a.DB.GetType(), profile.Datafields); err != nil {
+		return err
+	}
+
 	if a.State.Verbose {
 		a.Events.Dispatch(events.Debugf("pull", "Storing profile for: %s", profile.Email.String))
 	}
+	tx, err := a.DB.GetDB().Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin profile transaction: %w", err)
+	}
+	defer tx.Rollback()
 
 	var crmFields []string
 	for _, field := range profile.CRMEditableFieldsList {
@@ -522,7 +538,7 @@ func StoreProfile(a *app.App, profile *models.UserProfile) error {
 	}
 	crmEditableFieldsListStr := strings.Join(crmFields, ",")
 
-	err := database.RunCommand(a.DB, "MergeUserProfiles",
+	err = database.RunCommandTx(a.DB, tx, "MergeUserProfiles",
 		profile.ProfileId, profile.Email, profile.FirstName, profile.LastName, profile.IsManager,
 		profile.IsHideReferralIOSBanner, profile.MarkerIcon, profile.Manager, crmEditableFieldsListStr,
 		profile.CRMBaseURL, profile.CRMType, profile.ReferralURL, profile.MapStartZoom, profile.MapStart,
@@ -535,31 +551,31 @@ func StoreProfile(a *app.App, profile *models.UserProfile) error {
 	}
 
 	// Update Configurations table
-	if err := database.UpdateConfiguration(a.DB, "ApiProfileId", fmt.Sprintf("%d", profile.ProfileId.Int64)); err != nil {
+	if err := database.UpdateConfigurationTx(a.DB, tx, "ApiProfileId", fmt.Sprintf("%d", profile.ProfileId.Int64)); err != nil {
 		return err
 	}
-	if err := database.UpdateConfiguration(a.DB, "ApiProfileName", fmt.Sprintf("%s %s", profile.FirstName.String, profile.LastName.String)); err != nil {
+	if err := database.UpdateConfigurationTx(a.DB, tx, "ApiProfileName", fmt.Sprintf("%s %s", profile.FirstName.String, profile.LastName.String)); err != nil {
 		return err
 	}
-	if err := database.UpdateConfiguration(a.DB, "CompanyId", fmt.Sprintf("%d", profile.Company.Id.Int64)); err != nil {
+	if err := database.UpdateConfigurationTx(a.DB, tx, "CompanyId", fmt.Sprintf("%d", profile.Company.Id.Int64)); err != nil {
 		return err
 	}
-	if err := database.UpdateConfiguration(a.DB, "CompanyName", profile.Company.Name.String); err != nil {
+	if err := database.UpdateConfigurationTx(a.DB, tx, "CompanyName", profile.Company.Name.String); err != nil {
 		return err
 	}
-	if err := database.UpdateConfiguration(a.DB, "SqlDbUserName", a.DB.GetUsername()); err != nil {
+	if err := database.UpdateConfigurationTx(a.DB, tx, "SqlDbUserName", a.DB.GetUsername()); err != nil {
 		return err
 	}
 
-	if err := database.RunCommand(a.DB, "DeleteDataSetValues", profile.ProfileId); err != nil {
+	if err := database.RunCommandTx(a.DB, tx, "DeleteDataSetValues", profile.ProfileId); err != nil {
 		return err
 	}
-	if err := database.RunCommand(a.DB, "DeleteDataSets", profile.ProfileId); err != nil {
+	if err := database.RunCommandTx(a.DB, tx, "DeleteDataSets", profile.ProfileId); err != nil {
 		return err
 	}
 
 	for _, datafield := range profile.Datafields {
-		err := database.RunCommand(a.DB, "InsertDataSets",
+		err := database.RunCommandTx(a.DB, tx, "InsertDataSets",
 			datafield.Name, profile.ProfileId, datafield.Filterable, datafield.Label, datafield.Position, datafield.Type,
 			datafield.HasData, datafield.IsUserCanAddNewTextValues, datafield.RawMin, datafield.Min, datafield.Max,
 			datafield.RawMax, datafield.AccountField,
@@ -568,7 +584,7 @@ func StoreProfile(a *app.App, profile *models.UserProfile) error {
 			return err
 		}
 		for _, value := range datafield.Values {
-			err := database.RunCommand(a.DB, "InsertDataSetValues",
+			err := database.RunCommandTx(a.DB, tx, "InsertDataSetValues",
 				datafield.Name, profile.ProfileId, value.Text, value.Value, datafield.Position,
 			)
 			if err != nil {
@@ -577,5 +593,67 @@ func StoreProfile(a *app.App, profile *models.UserProfile) error {
 		}
 	}
 
+	if err := database.RefreshGeneratedViews(a.DB, tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit profile transaction: %w", err)
+	}
+	return nil
+}
+
+func validateAccountViewLabels(dbType string, datafields []models.DataField) error {
+	accountColumns := database.GetExpectedSchema()["Accounts"]
+	physicalColumns := make(map[string]string, len(accountColumns))
+	for _, column := range accountColumns {
+		physicalColumns[strings.ToLower(column)] = column
+	}
+
+	labelsByColumn := make(map[string]string)
+	for _, datafield := range datafields {
+		if !datafield.AccountField.Valid || datafield.AccountField.String == "" {
+			continue
+		}
+		column, exists := physicalColumns[strings.ToLower(datafield.AccountField.String)]
+		if !exists {
+			continue
+		}
+		normalizedColumn := strings.ToLower(column)
+		if _, exists := labelsByColumn[normalizedColumn]; exists {
+			return fmt.Errorf("multiple data sets map to account field %q", column)
+		}
+
+		label := column
+		if datafield.Label.Valid && datafield.Label.String != "" {
+			label = datafield.Label.String
+		}
+		if strings.ContainsRune(label, '\x00') {
+			return fmt.Errorf("account view label for %q contains a null character", column)
+		}
+		switch dbType {
+		case "postgres":
+			if len([]byte(label)) > 63 {
+				return fmt.Errorf("account view label %q exceeds PostgreSQL's 63-byte identifier limit", label)
+			}
+		case "mssql":
+			if len(utf16.Encode([]rune(label))) > 128 {
+				return fmt.Errorf("account view label %q exceeds SQL Server's 128-character identifier limit", label)
+			}
+		}
+		labelsByColumn[normalizedColumn] = label
+	}
+
+	aliases := make(map[string]string, len(accountColumns))
+	for _, column := range accountColumns {
+		alias := column
+		if label, exists := labelsByColumn[strings.ToLower(column)]; exists {
+			alias = label
+		}
+		normalizedAlias := strings.ToLower(alias)
+		if existingColumn, exists := aliases[normalizedAlias]; exists {
+			return fmt.Errorf("duplicate account view label %q for fields %q and %q", alias, existingColumn, column)
+		}
+		aliases[normalizedAlias] = column
+	}
 	return nil
 }

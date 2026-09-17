@@ -1,5 +1,6 @@
--- SQLite does not support dynamic SQL in triggers or stored procedures to build views
--- based on table data. This view is created as a simple copy of the Accounts table.
--- For dynamic labeled data, application-level logic is required.
-CREATE VIEW IF NOT EXISTS AccountsWithLabels AS
-SELECT * FROM Accounts;
+-- Go replaces the marked projection when profile labels are available. Executing
+-- this file directly remains a valid unlabeled fallback for maintenance scripts.
+DROP VIEW IF EXISTS AccountsWithLabels;
+CREATE VIEW AccountsWithLabels AS
+SELECT /* ACCOUNTS_WITH_LABELS_COLUMNS */ *
+FROM Accounts AS a;

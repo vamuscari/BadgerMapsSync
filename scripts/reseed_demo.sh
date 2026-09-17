@@ -26,9 +26,11 @@ declare -a TABLES=(
   DataSetValues
   FieldMaps
   Configurations
+  JobLog
   SyncHistory
   CommandLog
   WebhookLog
+  SchemaMigrations
 )
 
 for t in "${TABLES[@]}"; do
@@ -41,11 +43,14 @@ for t in "${TABLES[@]}"; do
   fi
 done
 
-# Optional view
-if [[ -f database/sqlite3/CreateAccountsWithLabelsView.sql ]]; then
-  echo "[reseed] Creating view: AccountsWithLabels"
-  sqlite3 "$DB_PATH" < database/sqlite3/CreateAccountsWithLabelsView.sql
-fi
+# Optional views
+for view in AccountsWithLabels AccountsIndexed; do
+  sql="database/sqlite3/Create${view}View.sql"
+  if [[ -f "$sql" ]]; then
+    echo "[reseed] Creating view: ${view}"
+    sqlite3 "$DB_PATH" < "$sql"
+  fi
+done
 
 # Seed baseline config + field maps if present
 if [[ -f database/sqlite3/InsertConfigurations.sql ]]; then

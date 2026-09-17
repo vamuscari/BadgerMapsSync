@@ -51,6 +51,15 @@ The database schema is managed through the `EnforceSchema`, `ValidateSchema`, an
 - **`ValidateSchema`**: This method checks if the existing database schema matches the expected schema. It is used to ensure that the database is in a consistent state before the application starts.
 - **`ResetSchema`**: This method drops all schema objects in a safe order and then recreates them, effectively reinitializing the database.
 
+## Account Views
+
+The schema exposes two account views using the profile selected by the `ApiProfileId` configuration:
+
+- **`AccountsWithLabels`** includes every physical `Accounts` column and aliases mapped columns with `DataSets.Label`.
+- **`AccountsIndexed`** keeps fixed account columns in table order, includes only custom columns mapped by the active profile, and orders those custom columns by `DataSets.Position`. `CreatedAt` and `UpdatedAt` remain last.
+
+Both views are rebuilt when profile data is stored. PostgreSQL and SQL Server also refresh them through the `DataSets` update trigger.
+
 ## Job History Storage
 
 `JobLog` is the primary job/runtime history table and is always ensured during startup (`EnsureJobLogSetup`).

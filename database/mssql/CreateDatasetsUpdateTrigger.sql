@@ -8,6 +8,5 @@ AFTER INSERT, UPDATE, DELETE
 AS
 BEGIN
     SET NOCOUNT ON;
-    EXEC dbo.AccountsWithLabelsView;
 END;
 ');

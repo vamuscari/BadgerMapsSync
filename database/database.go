@@ -46,6 +46,12 @@ type columnMigration struct {
 	Command string
 }
 
+type schemaMigration struct {
+	Version int
+	Name    string
+	Apply   func(DB, *sql.Tx) error
+}
+
 type mssqlColumnDefinition struct {
 	Name       string
 	Definition string
@@ -83,10 +89,13 @@ var syncHistoryTimezoneColumnMigrations = []columnMigration{
 }
 
 func applyColumnMigrations(db DB, migrations []columnMigration, s *state.State) error {
-	sqlDB := db.GetDB()
-	if sqlDB == nil {
+	if db.GetDB() == nil {
 		return fmt.Errorf("database connection is not initialized")
 	}
+	return applyColumnMigrationsWithExecutor(db, db.GetDB(), migrations, s)
+}
+
+func applyColumnMigrationsWithExecutor(db DB, executor sqlSchemaExecutor, migrations []columnMigration, s *state.State) error {
 
 	checkSQL := db.GetSQL("CheckColumnExists")
 	if checkSQL == "" {
@@ -94,7 +103,7 @@ func applyColumnMigrations(db DB, migrations []columnMigration, s *state.State) 
 	}
 
 	for _, migration := range migrations {
-		tableExists, err := db.TableExists(migration.Table)
+		tableExists, err := tableExistsWithExecutor(db, executor, migration.Table)
 		if err != nil {
 			return fmt.Errorf("failed to inspect table '%s' for migration '%s': %w", migration.Table, migration.Command, err)
 		}
@@ -103,7 +112,7 @@ func applyColumnMigrations(db DB, migrations []columnMigration, s *state.State) 
 		}
 
 		var count int
-		if err := sqlDB.QueryRow(checkSQL, migration.Table, migration.Column).Scan(&count); err != nil {
+		if err := executor.QueryRow(checkSQL, migration.Table, migration.Column).Scan(&count); err != nil {
 			return fmt.Errorf("failed to inspect column '%s' on table '%s': %w", migration.Column, migration.Table, err)
 		}
 		if count > 0 {
@@ -118,7 +127,7 @@ func applyColumnMigrations(db DB, migrations []columnMigration, s *state.State) 
 		if (s.Verbose || s.Debug) && !s.Quiet {
 			fmt.Printf("Applying schema migration: %s.%s... ", migration.Table, migration.Column)
 		}
-		if _, err := sqlDB.Exec(alterSQL); err != nil {
+		if _, err := executor.Exec(alterSQL); err != nil {
 			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
@@ -133,10 +142,13 @@ func applyColumnMigrations(db DB, migrations []columnMigration, s *state.State) 
 }
 
 func addMSSQLMissingColumnsRecursively(db *MSSQLConfig, s *state.State) error {
-	sqlDB := db.GetDB()
-	if sqlDB == nil {
+	if db.GetDB() == nil {
 		return fmt.Errorf("database connection is not initialized")
 	}
+	return addMSSQLMissingColumnsRecursivelyWithExecutor(db, db.GetDB(), s)
+}
+
+func addMSSQLMissingColumnsRecursivelyWithExecutor(db *MSSQLConfig, executor sqlSchemaExecutor, s *state.State) error {
 
 	definitionsByTable := make(map[string][]mssqlColumnDefinition, len(RequiredTables()))
 	for _, tableName := range RequiredTables() {
@@ -163,7 +175,7 @@ func addMSSQLMissingColumnsRecursively(db *MSSQLConfig, s *state.State) error {
 				continue
 			}
 
-			columns, err := db.GetTableColumns(tableName)
+			columns, err := getTableColumnsWithExecutor(db, executor, tableName)
 			if err != nil {
 				return fmt.Errorf("failed to get columns for table '%s': %w", tableName, err)
 			}
@@ -182,7 +194,7 @@ func addMSSQLMissingColumnsRecursively(db *MSSQLConfig, s *state.State) error {
 				if (s.Verbose || s.Debug) && !s.Quiet {
 					fmt.Printf("Adding missing column: %s.%s... ", tableName, definition.Name)
 				}
-				if err := addMSSQLColumnFromDefinition(sqlDB, tableName, definition); err != nil {
+				if err := addMSSQLColumnFromDefinition(executor, tableName, definition); err != nil {
 					if (s.Verbose || s.Debug) && !s.Quiet {
 						fmt.Println(color.RedString("ERROR"))
 					}
@@ -205,13 +217,13 @@ func addMSSQLMissingColumnsRecursively(db *MSSQLConfig, s *state.State) error {
 	return fmt.Errorf("schema migration exceeded maximum number of passes while adding missing columns")
 }
 
-func addMSSQLColumnFromDefinition(sqlDB *sql.DB, tableName string, definition mssqlColumnDefinition) error {
+func addMSSQLColumnFromDefinition(executor sqlSchemaExecutor, tableName string, definition mssqlColumnDefinition) error {
 	quotedTable := fmt.Sprintf("[%s]", escapeMSSQLIdentifier(tableName))
 	quotedColumn := fmt.Sprintf("[%s]", escapeMSSQLIdentifier(definition.Name))
 	fullDefinition := strings.TrimSpace(definition.Definition)
 	primarySQL := fmt.Sprintf("ALTER TABLE %s ADD %s %s;", quotedTable, quotedColumn, fullDefinition)
 
-	if _, err := sqlDB.Exec(primarySQL); err == nil {
+	if _, err := executor.Exec(primarySQL); err == nil {
 		return nil
 	} else {
 		fallbackDefinition := buildMSSQLFallbackColumnDefinition(fullDefinition)
@@ -220,7 +232,7 @@ func addMSSQLColumnFromDefinition(sqlDB *sql.DB, tableName string, definition ms
 		}
 
 		fallbackSQL := fmt.Sprintf("ALTER TABLE %s ADD %s %s;", quotedTable, quotedColumn, fallbackDefinition)
-		if _, fallbackErr := sqlDB.Exec(fallbackSQL); fallbackErr != nil {
+		if _, fallbackErr := executor.Exec(fallbackSQL); fallbackErr != nil {
 			return fmt.Errorf("%w (fallback failed: %v)", err, fallbackErr)
 		}
 	}
@@ -428,6 +440,209 @@ type DB interface {
 	SetConnected(connected bool)
 }
 
+type sqlQueryExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	Query(query string, args ...any) (*sql.Rows, error)
+}
+
+type sqlSchemaExecutor interface {
+	sqlQueryExecer
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+func tableExistsWithExecutor(db DB, executor sqlSchemaExecutor, tableName string) (bool, error) {
+	query := db.GetSQL("CheckTableExists")
+	if query == "" {
+		return false, fmt.Errorf("failed to load SQL command 'CheckTableExists' for database type '%s'", db.GetType())
+	}
+	var count int
+	if err := executor.QueryRow(query, tableName).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func getTableColumnsWithExecutor(db DB, executor sqlSchemaExecutor, tableName string) ([]string, error) {
+	query := db.GetSQL("GetTableColumns")
+	if query == "" {
+		return nil, fmt.Errorf("failed to load SQL command 'GetTableColumns' for database type '%s'", db.GetType())
+	}
+
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if db.GetType() == "sqlite3" {
+		query = fmt.Sprintf(query, strings.ReplaceAll(tableName, "'", "''"))
+		rows, err = executor.Query(query)
+	} else {
+		rows, err = executor.Query(query, tableName)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var columns []string
+	for rows.Next() {
+		if db.GetType() == "sqlite3" {
+			var cid, notNull, primaryKey int
+			var name, columnType string
+			var defaultValue any
+			if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+				return nil, err
+			}
+			columns = append(columns, name)
+			continue
+		}
+
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		columns = append(columns, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return columns, nil
+}
+
+const (
+	accountsWithLabelsColumnsMarker = "/* ACCOUNTS_WITH_LABELS_COLUMNS */ *"
+	accountsIndexedFallbackColumns  = "a.AccountId, a.FirstName, a.LastName, a.FullName, a.PhoneNumber, a.Email, a.CustomerId, a.Notes, a.OriginalAddress, a.CrmId, a.AccountOwner, a.DaysSinceLastCheckin, a.LastCheckinDate, a.LastModifiedDate, a.FollowUpDate, a.CreatedAt, a.UpdatedAt"
+	accountsIndexedColumnsMarker    = "/* ACCOUNTS_INDEXED_COLUMNS */ " + accountsIndexedFallbackColumns
+)
+
+// RefreshAccountsWithLabels rebuilds the account view after profile metadata changes.
+func RefreshAccountsWithLabels(db DB, executor sqlQueryExecer) error {
+	switch db.GetType() {
+	case "sqlite3":
+		return refreshSQLiteAccountView(
+			db,
+			executor,
+			"AccountsWithLabels",
+			"GetAccountsWithLabelsColumns",
+			"CreateAccountsWithLabelsView",
+			accountsWithLabelsColumnsMarker,
+		)
+	case "postgres":
+		_, err := executor.Exec("SELECT AccountsWithLabelsView()")
+		return err
+	case "mssql":
+		_, err := executor.Exec("EXEC AccountsWithLabelsView")
+		return err
+	default:
+		return fmt.Errorf("unsupported database type %q", db.GetType())
+	}
+}
+
+// RefreshAccountsIndexed rebuilds the profile-indexed account view.
+func RefreshAccountsIndexed(db DB, executor sqlQueryExecer) error {
+	switch db.GetType() {
+	case "sqlite3":
+		return refreshSQLiteAccountView(
+			db,
+			executor,
+			"AccountsIndexed",
+			"GetAccountsIndexedColumns",
+			"CreateAccountsIndexedView",
+			accountsIndexedColumnsMarker,
+		)
+	case "postgres":
+		_, err := executor.Exec("SELECT AccountsIndexedView()")
+		return err
+	case "mssql":
+		_, err := executor.Exec("EXEC AccountsIndexedView")
+		return err
+	default:
+		return fmt.Errorf("unsupported database type %q", db.GetType())
+	}
+}
+
+// RefreshGeneratedViews performs one refresh pass after profile metadata is stored.
+func RefreshGeneratedViews(db DB, executor sqlQueryExecer) error {
+	if err := RefreshAccountsWithLabels(db, executor); err != nil {
+		return fmt.Errorf("failed to refresh AccountsWithLabels: %w", err)
+	}
+	if err := RefreshAccountsIndexed(db, executor); err != nil {
+		return fmt.Errorf("failed to refresh AccountsIndexed: %w", err)
+	}
+	return nil
+}
+
+func refreshSQLiteAccountView(db DB, executor sqlQueryExecer, viewName, columnsCommand, createCommand, columnsMarker string) error {
+	if db.GetType() != "sqlite3" {
+		return nil
+	}
+
+	columnsSQL := db.GetSQL(columnsCommand)
+	if columnsSQL == "" {
+		return fmt.Errorf("failed to load SQL command '%s' for database type '%s'", columnsCommand, db.GetType())
+	}
+	rows, err := executor.Query(columnsSQL)
+	if err != nil {
+		return fmt.Errorf("failed to load %s columns: %w", viewName, err)
+	}
+	defer rows.Close()
+
+	selectColumns := make([]string, 0, 80)
+	aliases := make(map[string]string)
+	sources := make(map[string]struct{})
+	for rows.Next() {
+		var column string
+		var label sql.NullString
+		if err := rows.Scan(&column, &label); err != nil {
+			return fmt.Errorf("failed to scan %s column: %w", viewName, err)
+		}
+
+		normalizedSource := strings.ToLower(column)
+		if _, exists := sources[normalizedSource]; exists {
+			return fmt.Errorf("multiple data sets map to account field %q", column)
+		}
+		sources[normalizedSource] = struct{}{}
+
+		alias := column
+		if label.Valid && label.String != "" {
+			alias = label.String
+		}
+		normalizedAlias := strings.ToLower(alias)
+		if existingColumn, exists := aliases[normalizedAlias]; exists {
+			return fmt.Errorf("duplicate account view label %q for fields %q and %q", alias, existingColumn, column)
+		}
+		aliases[normalizedAlias] = column
+
+		expression := "a." + quoteSQLiteIdentifier(column)
+		if alias != column {
+			expression += " AS " + quoteSQLiteIdentifier(alias)
+		}
+		selectColumns = append(selectColumns, expression)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed to read %s columns: %w", viewName, err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("failed to close %s columns: %w", viewName, err)
+	}
+	if len(selectColumns) == 0 {
+		return fmt.Errorf("cannot create %s because Accounts has no columns", viewName)
+	}
+
+	viewSQL := db.GetSQL(createCommand)
+	if strings.Count(viewSQL, columnsMarker) != 1 {
+		return fmt.Errorf("%s SQL is missing its column marker", createCommand)
+	}
+	viewSQL = strings.Replace(viewSQL, columnsMarker, strings.Join(selectColumns, ", "), 1)
+	if _, err := executor.Exec(viewSQL); err != nil {
+		return fmt.Errorf("failed to rebuild %s view: %w", viewName, err)
+	}
+	return nil
+}
+
+func quoteSQLiteIdentifier(identifier string) string {
+	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
+}
+
 // SQLiteConfig represents a SQLite database configuration
 type SQLiteConfig struct {
 	db        *sql.DB
@@ -514,7 +729,10 @@ func (db *SQLiteConfig) EnforceSchema(s *state.State) error {
 	if sqlDB == nil {
 		return fmt.Errorf("database connection is not initialized")
 	}
+	return db.enforceSchema(s, sqlDB)
+}
 
+func (db *SQLiteConfig) enforceSchema(s *state.State, executor sqlSchemaExecutor) error {
 	for _, tableName := range RequiredTables() {
 		if (s.Verbose || s.Debug) && !s.Quiet {
 			fmt.Printf("Creating table: %s... ", tableName)
@@ -527,7 +745,7 @@ func (db *SQLiteConfig) EnforceSchema(s *state.State) error {
 			}
 			return fmt.Errorf("failed to load SQL command '%s' for database type '%s'", createCmd, db.GetType())
 		}
-		if _, err := sqlDB.Exec(sqlText); err != nil {
+		if _, err := executor.Exec(sqlText); err != nil {
 			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
@@ -538,7 +756,7 @@ func (db *SQLiteConfig) EnforceSchema(s *state.State) error {
 		}
 	}
 
-	if err := applyColumnMigrations(db, syncHistoryTimezoneColumnMigrations, s); err != nil {
+	if err := applyColumnMigrationsWithExecutor(db, executor, syncHistoryTimezoneColumnMigrations, s); err != nil {
 		return err
 	}
 
@@ -548,7 +766,7 @@ func (db *SQLiteConfig) EnforceSchema(s *state.State) error {
 	}
 	sqlText := db.GetSQL("InsertFieldMaps")
 	if sqlText != "" {
-		if _, err := db.GetDB().Exec(sqlText); err != nil {
+		if _, err := executor.Exec(sqlText); err != nil {
 			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
@@ -565,7 +783,7 @@ func (db *SQLiteConfig) EnforceSchema(s *state.State) error {
 	}
 	sqlText = db.GetSQL("InsertConfigurations")
 	if sqlText != "" {
-		if _, err := db.GetDB().Exec(sqlText); err != nil {
+		if _, err := executor.Exec(sqlText); err != nil {
 			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
@@ -580,14 +798,23 @@ func (db *SQLiteConfig) EnforceSchema(s *state.State) error {
 	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Creating view: AccountsWithLabels... ")
 	}
-	sqlText = db.GetSQL("CreateAccountsWithLabelsView")
-	if sqlText != "" {
-		if _, err := db.GetDB().Exec(sqlText); err != nil {
-			if (s.Verbose || s.Debug) && !s.Quiet {
-				fmt.Println(color.RedString("ERROR"))
-			}
-			return fmt.Errorf("failed to create view AccountsWithLabels: %w", err)
+	if err := RefreshAccountsWithLabels(db, executor); err != nil {
+		if (s.Verbose || s.Debug) && !s.Quiet {
+			fmt.Println(color.RedString("ERROR"))
 		}
+		return fmt.Errorf("failed to create view AccountsWithLabels: %w", err)
+	}
+	if (s.Verbose || s.Debug) && !s.Quiet {
+		fmt.Println(color.GreenString("OK"))
+	}
+	if (s.Verbose || s.Debug) && !s.Quiet {
+		fmt.Printf("Creating view: AccountsIndexed... ")
+	}
+	if err := RefreshAccountsIndexed(db, executor); err != nil {
+		if (s.Verbose || s.Debug) && !s.Quiet {
+			fmt.Println(color.RedString("ERROR"))
+		}
+		return fmt.Errorf("failed to create view AccountsIndexed: %w", err)
 	}
 	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
@@ -657,24 +884,8 @@ func (db *SQLiteConfig) ValidateSchema(s *state.State) error {
 		}
 	}
 
-	if s.Verbose && !s.Quiet {
-		fmt.Printf("Checking view: AccountsWithLabels... ")
-	}
-	exists, err := db.ViewExists("AccountsWithLabels")
-	if err != nil {
-		if s.Verbose && !s.Quiet {
-			fmt.Println(color.RedString("ERROR"))
-		}
-		return fmt.Errorf("error checking if view AccountsWithLabels exists: %w", err)
-	}
-	if !exists {
-		if s.Verbose && !s.Quiet {
-			fmt.Println(color.RedString("MISSING"))
-		}
-		return fmt.Errorf("required view AccountsWithLabels does not exist")
-	}
-	if s.Verbose && !s.Quiet {
-		fmt.Println(color.GreenString("OK"))
+	if err := validateRequiredViews(db, s); err != nil {
+		return err
 	}
 
 	return nil
@@ -846,7 +1057,25 @@ func (db *PostgreSQLConfig) GetSQL(command string) string {
 	if err != nil {
 		return ""
 	}
-	return string(data)
+	return rebindPostgreSQLPlaceholders(string(data))
+}
+
+func rebindPostgreSQLPlaceholders(query string) string {
+	if !strings.Contains(query, "?") {
+		return query
+	}
+
+	var rebound strings.Builder
+	parameter := 1
+	for _, character := range query {
+		if character == '?' {
+			fmt.Fprintf(&rebound, "$%d", parameter)
+			parameter++
+			continue
+		}
+		rebound.WriteRune(character)
+	}
+	return rebound.String()
 }
 
 func (db *PostgreSQLConfig) Connect() error {
@@ -897,7 +1126,10 @@ func (db *PostgreSQLConfig) EnforceSchema(s *state.State) error {
 	if sqlDB == nil {
 		return fmt.Errorf("database connection is not initialized")
 	}
+	return db.enforceSchema(s, sqlDB)
+}
 
+func (db *PostgreSQLConfig) enforceSchema(s *state.State, executor sqlSchemaExecutor) error {
 	for _, tableName := range RequiredTables() {
 		if (s.Verbose || s.Debug) && !s.Quiet {
 			fmt.Printf("Creating table: %s... ", tableName)
@@ -910,7 +1142,7 @@ func (db *PostgreSQLConfig) EnforceSchema(s *state.State) error {
 			}
 			return fmt.Errorf("failed to load SQL command '%s' for database type '%s'", createCmd, db.GetType())
 		}
-		if _, err := sqlDB.Exec(sqlText); err != nil {
+		if _, err := executor.Exec(sqlText); err != nil {
 			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
@@ -921,7 +1153,7 @@ func (db *PostgreSQLConfig) EnforceSchema(s *state.State) error {
 		}
 	}
 
-	if err := applyColumnMigrations(db, syncHistoryTimezoneColumnMigrations, s); err != nil {
+	if err := applyColumnMigrationsWithExecutor(db, executor, syncHistoryTimezoneColumnMigrations, s); err != nil {
 		return err
 	}
 
@@ -931,7 +1163,7 @@ func (db *PostgreSQLConfig) EnforceSchema(s *state.State) error {
 	}
 	sqlText := db.GetSQL("InsertFieldMaps")
 	if sqlText != "" {
-		if _, err := db.GetDB().Exec(sqlText); err != nil {
+		if _, err := executor.Exec(sqlText); err != nil {
 			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
@@ -948,7 +1180,7 @@ func (db *PostgreSQLConfig) EnforceSchema(s *state.State) error {
 	}
 	sqlText = db.GetSQL("InsertConfigurations")
 	if sqlText != "" {
-		if _, err := db.GetDB().Exec(sqlText); err != nil {
+		if _, err := executor.Exec(sqlText); err != nil {
 			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
@@ -965,7 +1197,7 @@ func (db *PostgreSQLConfig) EnforceSchema(s *state.State) error {
 	}
 	sqlText = db.GetSQL("CreateAccountsWithLabelsView")
 	if sqlText != "" {
-		if _, err := db.GetDB().Exec(sqlText); err != nil {
+		if _, err := executor.Exec(sqlText); err != nil {
 			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
@@ -980,11 +1212,41 @@ func (db *PostgreSQLConfig) EnforceSchema(s *state.State) error {
 	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Creating view: AccountsWithLabels... ")
 	}
-	if _, err := db.GetDB().Exec("SELECT AccountsWithLabelsView()"); err != nil {
+	if _, err := executor.Exec("SELECT AccountsWithLabelsView()"); err != nil {
 		if (s.Verbose || s.Debug) && !s.Quiet {
 			fmt.Println(color.RedString("ERROR"))
 		}
 		return fmt.Errorf("failed to execute AccountsWithLabelsView function: %w", err)
+	}
+	if (s.Verbose || s.Debug) && !s.Quiet {
+		fmt.Println(color.GreenString("OK"))
+	}
+
+	// Create the profile-indexed account view function.
+	if (s.Verbose || s.Debug) && !s.Quiet {
+		fmt.Printf("Creating function: AccountsIndexedView... ")
+	}
+	sqlText = db.GetSQL("CreateAccountsIndexedView")
+	if sqlText != "" {
+		if _, err := executor.Exec(sqlText); err != nil {
+			if (s.Verbose || s.Debug) && !s.Quiet {
+				fmt.Println(color.RedString("ERROR"))
+			}
+			return fmt.Errorf("failed to create function AccountsIndexedView: %w", err)
+		}
+	}
+	if (s.Verbose || s.Debug) && !s.Quiet {
+		fmt.Println(color.GreenString("OK"))
+	}
+
+	if (s.Verbose || s.Debug) && !s.Quiet {
+		fmt.Printf("Creating view: AccountsIndexed... ")
+	}
+	if _, err := executor.Exec("SELECT AccountsIndexedView()"); err != nil {
+		if (s.Verbose || s.Debug) && !s.Quiet {
+			fmt.Println(color.RedString("ERROR"))
+		}
+		return fmt.Errorf("failed to execute AccountsIndexedView function: %w", err)
 	}
 	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
@@ -996,7 +1258,7 @@ func (db *PostgreSQLConfig) EnforceSchema(s *state.State) error {
 	}
 	sqlText = db.GetSQL("CreateDatasetsUpdateTrigger")
 	if sqlText != "" {
-		if _, err := db.GetDB().Exec(sqlText); err != nil {
+		if _, err := executor.Exec(sqlText); err != nil {
 			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
@@ -1013,7 +1275,7 @@ func (db *PostgreSQLConfig) EnforceSchema(s *state.State) error {
 	}
 	sqlText = db.GetSQL("UpdateFieldMapsFromDatasets")
 	if sqlText != "" {
-		if _, err := db.GetDB().Exec(sqlText); err != nil {
+		if _, err := executor.Exec(sqlText); err != nil {
 			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
@@ -1030,7 +1292,7 @@ func (db *PostgreSQLConfig) EnforceSchema(s *state.State) error {
 	}
 	sqlText = db.GetSQL("CreateFieldMapsUpdateTrigger")
 	if sqlText != "" {
-		if _, err := db.GetDB().Exec(sqlText); err != nil {
+		if _, err := executor.Exec(sqlText); err != nil {
 			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
@@ -1092,7 +1354,7 @@ func (db *PostgreSQLConfig) ValidateSchema(s *state.State) error {
 		for _, expectedColumn := range expectedColumns {
 			found := false
 			for _, column := range columns {
-				if column == expectedColumn {
+				if strings.EqualFold(column, expectedColumn) {
 					found = true
 					break
 				}
@@ -1103,24 +1365,8 @@ func (db *PostgreSQLConfig) ValidateSchema(s *state.State) error {
 		}
 	}
 
-	if s.Verbose && !s.Quiet {
-		fmt.Printf("Checking view: AccountsWithLabels... ")
-	}
-	viewExists, err := db.ViewExists("AccountsWithLabels")
-	if err != nil {
-		if s.Verbose && !s.Quiet {
-			fmt.Println(color.RedString("ERROR"))
-		}
-		return fmt.Errorf("error checking if view AccountsWithLabels exists: %w", err)
-	}
-	if !viewExists {
-		if s.Verbose && !s.Quiet {
-			fmt.Println(color.RedString("MISSING"))
-		}
-		return fmt.Errorf("required view AccountsWithLabels does not exist")
-	}
-	if s.Verbose && !s.Quiet {
-		fmt.Println(color.GreenString("OK"))
+	if err := validateRequiredViews(db, s); err != nil {
+		return err
 	}
 
 	if s.Verbose && !s.Quiet {
@@ -1264,7 +1510,7 @@ func (db *PostgreSQLConfig) DropAllTables() error {
 		return fmt.Errorf("database connection is not initialized")
 	}
 	for _, viewName := range requiredViews() {
-		query := fmt.Sprintf("DROP VIEW IF EXISTS \"%s\" CASCADE", viewName)
+		query := fmt.Sprintf("DROP VIEW IF EXISTS %s CASCADE", viewName)
 		if _, err := sqlDB.Exec(query); err != nil {
 			return fmt.Errorf("failed to drop view %s: %w", viewName, err)
 		}
@@ -1431,7 +1677,10 @@ func (db *MSSQLConfig) EnforceSchema(s *state.State) error {
 	if sqlDB == nil {
 		return fmt.Errorf("database connection is not initialized")
 	}
+	return db.enforceSchema(s, sqlDB)
+}
 
+func (db *MSSQLConfig) enforceSchema(s *state.State, executor sqlSchemaExecutor) error {
 	for _, tableName := range RequiredTables() {
 		if (s.Verbose || s.Debug) && !s.Quiet {
 			fmt.Printf("Creating table: %s... ", tableName)
@@ -1444,7 +1693,7 @@ func (db *MSSQLConfig) EnforceSchema(s *state.State) error {
 			}
 			return fmt.Errorf("failed to load SQL command '%s' for database type '%s'", createCmd, db.GetType())
 		}
-		if _, err := sqlDB.Exec(sqlText); err != nil {
+		if _, err := executor.Exec(sqlText); err != nil {
 			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
@@ -1455,13 +1704,13 @@ func (db *MSSQLConfig) EnforceSchema(s *state.State) error {
 		}
 	}
 
-	if err := applyColumnMigrations(db, legacyColumnMigrations, s); err != nil {
+	if err := applyColumnMigrationsWithExecutor(db, executor, legacyColumnMigrations, s); err != nil {
 		return err
 	}
-	if err := applyColumnMigrations(db, syncHistoryTimezoneColumnMigrations, s); err != nil {
+	if err := applyColumnMigrationsWithExecutor(db, executor, syncHistoryTimezoneColumnMigrations, s); err != nil {
 		return err
 	}
-	if err := addMSSQLMissingColumnsRecursively(db, s); err != nil {
+	if err := addMSSQLMissingColumnsRecursivelyWithExecutor(db, executor, s); err != nil {
 		return err
 	}
 
@@ -1471,7 +1720,7 @@ func (db *MSSQLConfig) EnforceSchema(s *state.State) error {
 	}
 	sqlText := db.GetSQL("InsertFieldMaps")
 	if sqlText != "" {
-		if _, err := db.GetDB().Exec(sqlText); err != nil {
+		if _, err := executor.Exec(sqlText); err != nil {
 			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
@@ -1488,7 +1737,7 @@ func (db *MSSQLConfig) EnforceSchema(s *state.State) error {
 	}
 	sqlText = db.GetSQL("InsertConfigurations")
 	if sqlText != "" {
-		if _, err := db.GetDB().Exec(sqlText); err != nil {
+		if _, err := executor.Exec(sqlText); err != nil {
 			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
@@ -1505,7 +1754,7 @@ func (db *MSSQLConfig) EnforceSchema(s *state.State) error {
 	}
 	sqlText = db.GetSQL("CreateAccountsWithLabelsView")
 	if sqlText != "" {
-		if _, err := db.GetDB().Exec(sqlText); err != nil {
+		if _, err := executor.Exec(sqlText); err != nil {
 			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
@@ -1520,11 +1769,41 @@ func (db *MSSQLConfig) EnforceSchema(s *state.State) error {
 	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Creating view: AccountsWithLabels... ")
 	}
-	if _, err := db.GetDB().Exec("EXEC AccountsWithLabelsView"); err != nil {
+	if _, err := executor.Exec("EXEC AccountsWithLabelsView"); err != nil {
 		if (s.Verbose || s.Debug) && !s.Quiet {
 			fmt.Println(color.RedString("ERROR"))
 		}
 		return fmt.Errorf("failed to execute AccountsWithLabelsView procedure: %w", err)
+	}
+	if (s.Verbose || s.Debug) && !s.Quiet {
+		fmt.Println(color.GreenString("OK"))
+	}
+
+	// Create the profile-indexed account view procedure.
+	if (s.Verbose || s.Debug) && !s.Quiet {
+		fmt.Printf("Creating procedure: AccountsIndexedView... ")
+	}
+	sqlText = db.GetSQL("CreateAccountsIndexedView")
+	if sqlText != "" {
+		if _, err := executor.Exec(sqlText); err != nil {
+			if (s.Verbose || s.Debug) && !s.Quiet {
+				fmt.Println(color.RedString("ERROR"))
+			}
+			return fmt.Errorf("failed to create procedure AccountsIndexedView: %w", err)
+		}
+	}
+	if (s.Verbose || s.Debug) && !s.Quiet {
+		fmt.Println(color.GreenString("OK"))
+	}
+
+	if (s.Verbose || s.Debug) && !s.Quiet {
+		fmt.Printf("Creating view: AccountsIndexed... ")
+	}
+	if _, err := executor.Exec("EXEC AccountsIndexedView"); err != nil {
+		if (s.Verbose || s.Debug) && !s.Quiet {
+			fmt.Println(color.RedString("ERROR"))
+		}
+		return fmt.Errorf("failed to execute AccountsIndexedView procedure: %w", err)
 	}
 	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
@@ -1536,7 +1815,7 @@ func (db *MSSQLConfig) EnforceSchema(s *state.State) error {
 	}
 	sqlText = db.GetSQL("CreateDatasetsUpdateTrigger")
 	if sqlText != "" {
-		if _, err := db.GetDB().Exec(sqlText); err != nil {
+		if _, err := executor.Exec(sqlText); err != nil {
 			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
@@ -1553,7 +1832,7 @@ func (db *MSSQLConfig) EnforceSchema(s *state.State) error {
 	}
 	sqlText = db.GetSQL("UpdateFieldMapsFromDatasets")
 	if sqlText != "" {
-		if _, err := db.GetDB().Exec(sqlText); err != nil {
+		if _, err := executor.Exec(sqlText); err != nil {
 			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
@@ -1570,7 +1849,7 @@ func (db *MSSQLConfig) EnforceSchema(s *state.State) error {
 	}
 	sqlText = db.GetSQL("CreateFieldMapsUpdateTrigger")
 	if sqlText != "" {
-		if _, err := db.GetDB().Exec(sqlText); err != nil {
+		if _, err := executor.Exec(sqlText); err != nil {
 			if (s.Verbose || s.Debug) && !s.Quiet {
 				fmt.Println(color.RedString("ERROR"))
 			}
@@ -1643,24 +1922,8 @@ func (db *MSSQLConfig) ValidateSchema(s *state.State) error {
 		}
 	}
 
-	if s.Verbose && !s.Quiet {
-		fmt.Printf("Checking view: AccountsWithLabels... ")
-	}
-	viewExists, err := db.ViewExists("AccountsWithLabels")
-	if err != nil {
-		if s.Verbose && !s.Quiet {
-			fmt.Println(color.RedString("ERROR"))
-		}
-		return fmt.Errorf("error checking if view AccountsWithLabels exists: %w", err)
-	}
-	if !viewExists {
-		if s.Verbose && !s.Quiet {
-			fmt.Println(color.RedString("MISSING"))
-		}
-		return fmt.Errorf("required view AccountsWithLabels does not exist")
-	}
-	if s.Verbose && !s.Quiet {
-		fmt.Println(color.GreenString("OK"))
+	if err := validateRequiredViews(db, s); err != nil {
+		return err
 	}
 
 	if s.Verbose && !s.Quiet {
@@ -1987,6 +2250,7 @@ func RequiredTables() []string {
 		"JobLog",
 		"CommandLog",
 		"WebhookLog",
+		"SchemaMigrations",
 	}
 }
 
@@ -2002,7 +2266,33 @@ func dropTableOrder() []string {
 func requiredViews() []string {
 	return []string{
 		"AccountsWithLabels",
+		"AccountsIndexed",
 	}
+}
+
+func validateRequiredViews(db DB, s *state.State) error {
+	for _, viewName := range requiredViews() {
+		if s.Verbose && !s.Quiet {
+			fmt.Printf("Checking view: %s... ", viewName)
+		}
+		exists, err := db.ViewExists(viewName)
+		if err != nil {
+			if s.Verbose && !s.Quiet {
+				fmt.Println(color.RedString("ERROR"))
+			}
+			return fmt.Errorf("error checking if view %s exists: %w", viewName, err)
+		}
+		if !exists {
+			if s.Verbose && !s.Quiet {
+				fmt.Println(color.RedString("MISSING"))
+			}
+			return fmt.Errorf("required view %s does not exist", viewName)
+		}
+		if s.Verbose && !s.Quiet {
+			fmt.Println(color.GreenString("OK"))
+		}
+	}
+	return nil
 }
 
 var matchFirstCap = regexp.MustCompile("(.)([A-Z][a-z]+)")
@@ -2030,12 +2320,21 @@ func CreateCommandForTable(tableName string) string {
 }
 
 func RunCommand(db DB, command string, args ...any) error {
+	return runCommand(db, db.GetDB(), command, args...)
+}
+
+func RunCommandTx(db DB, tx *sql.Tx, command string, args ...any) error {
+	return runCommand(db, tx, command, args...)
+}
+
+func runCommand(db DB, executor interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}, command string, args ...any) error {
 	sqlText := db.GetSQL(command)
 	if sqlText == "" {
 		return fmt.Errorf("unknown or unavailable SQL command: %s", command)
 	}
-	sqlDB := db.GetDB()
-	_, err := sqlDB.Exec(sqlText, args...)
+	_, err := executor.Exec(sqlText, args...)
 	return err
 }
 
@@ -2043,18 +2342,125 @@ func UpdateConfiguration(db DB, key string, value string) error {
 	return RunCommand(db, "UpdateConfiguration", value, key)
 }
 
+func UpdateConfigurationTx(db DB, tx *sql.Tx, key string, value string) error {
+	return RunCommandTx(db, tx, "UpdateConfiguration", value, key)
+}
+
+var existingSchemaMigrations = []schemaMigration{
+	{
+		Version: 1,
+		Name:    "enforce current schema",
+		Apply: func(db DB, tx *sql.Tx) error {
+			s := &state.State{Quiet: true}
+			switch typedDB := db.(type) {
+			case *SQLiteConfig:
+				return typedDB.enforceSchema(s, tx)
+			case *PostgreSQLConfig:
+				return typedDB.enforceSchema(s, tx)
+			case *MSSQLConfig:
+				return typedDB.enforceSchema(s, tx)
+			default:
+				return fmt.Errorf("unsupported database type %q", db.GetType())
+			}
+		},
+	},
+}
+
+func runSchemaMigrations(db DB, migrations []schemaMigration) error {
+	if db == nil || db.GetDB() == nil {
+		return fmt.Errorf("database connection is not initialized")
+	}
+
+	createSQL := db.GetSQL("CreateSchemaMigrationsTable")
+	if createSQL == "" {
+		return fmt.Errorf("failed to load SQL command 'CreateSchemaMigrationsTable' for database type '%s'", db.GetType())
+	}
+	setupTx, err := db.GetDB().Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin schema migration setup: %w", err)
+	}
+	if _, err := setupTx.Exec(createSQL); err != nil {
+		_ = setupTx.Rollback()
+		return fmt.Errorf("failed to create schema migration metadata: %w", err)
+	}
+	if err := setupTx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit schema migration metadata: %w", err)
+	}
+
+	versionSQL := db.GetSQL("GetSchemaVersion")
+	if versionSQL == "" {
+		return fmt.Errorf("failed to load SQL command 'GetSchemaVersion' for database type '%s'", db.GetType())
+	}
+	var currentVersion int
+	if err := db.GetDB().QueryRow(versionSQL).Scan(&currentVersion); err != nil {
+		return fmt.Errorf("failed to read schema version: %w", err)
+	}
+
+	previousVersion := 0
+	for _, migration := range migrations {
+		if migration.Version <= previousVersion {
+			return fmt.Errorf("schema migrations must have strictly increasing versions: %d follows %d", migration.Version, previousVersion)
+		}
+		previousVersion = migration.Version
+		if migration.Version <= currentVersion {
+			continue
+		}
+		if migration.Apply == nil {
+			return fmt.Errorf("schema migration %d (%s) has no implementation", migration.Version, migration.Name)
+		}
+
+		if err := applySchemaMigration(db, migration); err != nil {
+			return err
+		}
+		currentVersion = migration.Version
+	}
+	return nil
+}
+
+func applySchemaMigration(db DB, migration schemaMigration) error {
+	tx, err := db.GetDB().Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin schema migration %d (%s): %w", migration.Version, migration.Name, err)
+	}
+	defer tx.Rollback()
+
+	if err := migration.Apply(db, tx); err != nil {
+		return fmt.Errorf("schema migration %d (%s) failed: %w", migration.Version, migration.Name, err)
+	}
+	if err := RunCommandTx(db, tx, "InsertSchemaMigration", migration.Version, migration.Name); err != nil {
+		return fmt.Errorf("failed to record schema migration %d (%s): %w", migration.Version, migration.Name, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit schema migration %d (%s): %w", migration.Version, migration.Name, err)
+	}
+	return nil
+}
+
+// UpgradeExistingSchema reapplies idempotent schema definitions without creating
+// a schema for a database that has not completed initial setup.
+func UpgradeExistingSchema(db DB) error {
+	if db == nil || db.GetDB() == nil {
+		return fmt.Errorf("database connection is not initialized")
+	}
+	exists, err := db.TableExists("Configurations")
+	if err != nil {
+		return fmt.Errorf("failed to inspect existing schema: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	if err := runSchemaMigrations(db, existingSchemaMigrations); err != nil {
+		return fmt.Errorf("failed to upgrade existing schema: %w", err)
+	}
+	return nil
+}
+
 func LogCommand(db DB, command string, args []string, success bool, errorMessage string) error {
-	sqlText := "INSERT INTO CommandLog (Command, Args, Success, ErrorMessage) VALUES (?, ?, ?, ?)"
-	sqlDB := db.GetDB()
-	_, err := sqlDB.Exec(sqlText, command, strings.Join(args, " "), success, errorMessage)
-	return err
+	return RunCommand(db, "InsertCommandLog", command, strings.Join(args, " "), success, errorMessage)
 }
 
 func LogWebhook(db DB, receivedAt time.Time, method, uri, headers, body string) error {
-	sqlText := "INSERT INTO WebhookLog (ReceivedAt, Method, Uri, Headers, Body) VALUES (?, ?, ?, ?, ?)"
-	sqlDB := db.GetDB()
-	_, err := sqlDB.Exec(sqlText, receivedAt, method, uri, headers, body)
-	return err
+	return RunCommand(db, "InsertWebhookLog", receivedAt, method, uri, headers, body)
 }
 
 func GetWebhookLog(db DB, id int) (method, uri, headers, body string, err error) {
@@ -2134,6 +2540,9 @@ func GetExpectedSchema() map[string][]string {
 		},
 		"Configurations": {
 			"SettingKey", "SettingValue", "LastModified",
+		},
+		"SchemaMigrations": {
+			"Version", "Name", "AppliedAt",
 		},
 	}
 }

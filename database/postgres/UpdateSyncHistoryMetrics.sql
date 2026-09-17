@@ -1,4 +1,4 @@
-UPDATE "SyncHistory"
-SET "ItemsProcessed" = $1,
-    "Summary" = $2
-WHERE "CorrelationId" = $3;
+UPDATE SyncHistory
+SET ItemsProcessed = ?,
+    Summary = ?
+WHERE CorrelationId = ?;

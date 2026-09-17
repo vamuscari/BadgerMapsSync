@@ -1,1 +1,1 @@
-INSERT INTO "DataSetValues" ("DataSetName", "ProfileId", "Text", "Value", "DataSetPosition") VALUES (?, ?, ?, ?, ?);
+INSERT INTO DataSetValues (DataSetName, ProfileId, Text, Value, DataSetPosition) VALUES (?, ?, ?, ?, ?);

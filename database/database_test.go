@@ -4,6 +4,7 @@ import (
 	"badgermaps/app/state"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -45,6 +46,7 @@ func TestSQLFiles(t *testing.T) {
 		"CreateIndexes.sql",
 		"CreateRouteWaypointsTable.sql",
 		"CreateRoutesTable.sql",
+		"CreateSchemaMigrationsTable.sql",
 		"CreateSyncHistoryTable.sql",
 		"CreateJobLogTable.sql",
 		"CreateUserProfilesTable.sql",
@@ -59,11 +61,15 @@ func TestSQLFiles(t *testing.T) {
 		"GetPendingCheckinChanges.sql",
 		"GetProfile.sql",
 		"GetRouteById.sql",
+		"GetSchemaVersion.sql",
 		"GetTableColumns.sql",
 		"InsertAccountLocations.sql",
 		"InsertDataSetValues.sql",
 		"InsertDataSets.sql",
+		"InsertCommandLog.sql",
+		"InsertWebhookLog.sql",
 		"InsertRouteWaypoints.sql",
+		"InsertSchemaMigration.sql",
 		"MergeAccountCheckins.sql",
 		"MergeAccountsBasic.sql",
 		"MergeAccountsDetailed.sql",
@@ -74,6 +80,7 @@ func TestSQLFiles(t *testing.T) {
 		"SearchCheckins.sql",
 		"UpdatePendingChangeStatus.sql",
 		"CreateAccountsWithLabelsView.sql",
+		"CreateAccountsIndexedView.sql",
 		"CreateFieldMapsTable.sql",
 		"InsertFieldMaps.sql",
 		"UpdateFieldMapsFromDatasets.sql",
@@ -104,6 +111,10 @@ func TestSQLFiles(t *testing.T) {
 		"CreateDatasetsUpdateTrigger.sql",
 		"CheckProcedureExists.sql",
 		"CheckTriggerExists.sql",
+	}
+	sqliteExtraFiles := []string{
+		"GetAccountsIndexedColumns.sql",
+		"GetAccountsWithLabelsColumns.sql",
 	}
 	mssqlExtraFiles := []string{
 		"AddAccountCheckinsPendingChangesAccountIdColumn.sql",
@@ -147,7 +158,7 @@ func TestSQLFiles(t *testing.T) {
 	}
 
 	t.Run("sqlite3", func(t *testing.T) {
-		checkFiles(t, filepath.Join("database", "sqlite3"), baseExpectedFiles)
+		checkFiles(t, filepath.Join("database", "sqlite3"), append(baseExpectedFiles, sqliteExtraFiles...))
 	})
 
 	t.Run("postgres", func(t *testing.T) {
@@ -157,6 +168,192 @@ func TestSQLFiles(t *testing.T) {
 	t.Run("mssql", func(t *testing.T) {
 		checkFiles(t, filepath.Join("database", "mssql"), append(append(baseExpectedFiles, postgresMssqlExtraFiles...), mssqlExtraFiles...))
 	})
+}
+
+func TestPostgreSQLGetSQLRebindsPlaceholders(t *testing.T) {
+	db := &PostgreSQLConfig{}
+	sqlText := db.GetSQL("UpdateConfiguration")
+
+	if strings.Contains(sqlText, "?") {
+		t.Fatalf("expected PostgreSQL placeholders to be rebound, got %q", sqlText)
+	}
+	if !strings.Contains(sqlText, "$1") || !strings.Contains(sqlText, "$2") {
+		t.Fatalf("expected PostgreSQL placeholders $1 and $2, got %q", sqlText)
+	}
+}
+
+func TestPostgreSQLAssetsUsePortableSourceSyntax(t *testing.T) {
+	entries, err := postgresFS.ReadDir("postgres")
+	if err != nil {
+		t.Fatalf("failed to list PostgreSQL SQL assets: %v", err)
+	}
+
+	quotedMixedCase := regexp.MustCompile(`"[A-Z][A-Za-z0-9_]*"`)
+	dollarPlaceholder := regexp.MustCompile(`\$[0-9]+`)
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		content, err := postgresFS.ReadFile("postgres/" + entry.Name())
+		if err != nil {
+			t.Fatalf("failed to read %s: %v", entry.Name(), err)
+		}
+		sqlText := string(content)
+		for _, match := range quotedMixedCase.FindAllString(sqlText, -1) {
+			legacyViewReference := (entry.Name() == "CreateAccountsWithLabelsView.sql" && match == `"AccountsWithLabels"`) ||
+				(entry.Name() == "CreateAccountsIndexedView.sql" && match == `"AccountsIndexed"`)
+			if !legacyViewReference {
+				t.Errorf("%s uses mixed-case quoted identifier %s", entry.Name(), match)
+			}
+		}
+		if match := dollarPlaceholder.FindString(sqlText); match != "" {
+			t.Errorf("%s uses driver-specific placeholder %s instead of ?", entry.Name(), match)
+		}
+	}
+}
+
+func TestDatabaseLoggingCommandsAvailableForEveryDialect(t *testing.T) {
+	databases := []DB{
+		&SQLiteConfig{},
+		&PostgreSQLConfig{},
+		&MSSQLConfig{},
+	}
+	for _, db := range databases {
+		for _, command := range []string{"InsertCommandLog", "InsertWebhookLog"} {
+			sqlText := db.GetSQL(command)
+			if sqlText == "" {
+				t.Errorf("%s is missing %s", db.GetType(), command)
+			}
+			if db.GetType() == "postgres" && strings.Contains(sqlText, "?") {
+				t.Errorf("PostgreSQL %s placeholders were not rebound: %q", command, sqlText)
+			}
+		}
+	}
+}
+
+func TestPostgreSQLAccountsWithLabelsDDLIsDeployable(t *testing.T) {
+	db := &PostgreSQLConfig{}
+	functionSQL := db.GetSQL("CreateAccountsWithLabelsView")
+	triggerSQL := db.GetSQL("CreateDatasetsUpdateTrigger")
+
+	for name, sqlText := range map[string]string{
+		"view function":   functionSQL,
+		"refresh trigger": triggerSQL,
+	} {
+		if !strings.Contains(sqlText, "AS $$") || !strings.Contains(sqlText, "$$ LANGUAGE plpgsql") {
+			t.Errorf("%s must use valid PostgreSQL dollar quoting", name)
+		}
+		if strings.Contains(sqlText, `"Accounts"`) || strings.Contains(sqlText, `"DataSets"`) || strings.Contains(sqlText, `"Configurations"`) {
+			t.Errorf("%s must reference the lowercase relations created by the schema", name)
+		}
+	}
+
+	lowerFunctionSQL := strings.ToLower(functionSQL)
+	if strings.Contains(lowerFunctionSQL, "drop view if exists accountswithlabels") {
+		t.Fatal("refresh must preserve the existing PostgreSQL view and its grants")
+	}
+	if !strings.Contains(lowerFunctionSQL, "create or replace view accountswithlabels") {
+		t.Fatal("expected refresh function to replace the existing view in place")
+	}
+	if !strings.Contains(functionSQL, `"AccountsWithLabels"`) || !strings.Contains(lowerFunctionSQL, "alter view") {
+		t.Fatal("expected refresh function to migrate the legacy quoted view name")
+	}
+	for _, expected := range []string{"information_schema.table_privileges", "drop view accountswithlabels", "grant_statement"} {
+		if !strings.Contains(lowerFunctionSQL, expected) {
+			t.Errorf("expected PostgreSQL AccountsWithLabels fallback to contain %q", expected)
+		}
+	}
+	if strings.Contains(lowerFunctionSQL, "drop view accountswithlabels cascade") {
+		t.Fatal("AccountsWithLabels fallback must not remove dependent objects")
+	}
+	if !strings.Contains(strings.ToLower(functionSQL), "order by c.ordinal_position") {
+		t.Fatal("expected deterministic account-column ordering")
+	}
+}
+
+func TestMSSQLAccountsWithLabelsRefreshPreservesViewObject(t *testing.T) {
+	sqlText := (&MSSQLConfig{}).GetSQL("CreateAccountsWithLabelsView")
+	lowerSQL := strings.ToLower(sqlText)
+
+	if strings.Contains(lowerSQL, "drop view dbo.accountswithlabels") {
+		t.Fatal("refresh must not drop the view because doing so removes object grants")
+	}
+	if !strings.Contains(lowerSQL, "alter view dbo.accountswithlabels") {
+		t.Fatal("expected existing views to be refreshed with ALTER VIEW")
+	}
+	if !strings.Contains(lowerSQL, "datalength(ds.label)") {
+		t.Fatal("expected SQL Server labels to be checked before QUOTENAME")
+	}
+	if !strings.Contains(lowerSQL, "join information_schema.columns mapped_column") {
+		t.Fatal("expected label limits to apply only to DataSets mapped to Accounts columns")
+	}
+}
+
+func TestPostgreSQLAccountsIndexedDDLUsesProfileOrder(t *testing.T) {
+	viewSQL := (&PostgreSQLConfig{}).GetSQL("CreateAccountsIndexedView")
+	triggerSQL := (&PostgreSQLConfig{}).GetSQL("CreateDatasetsUpdateTrigger")
+	lowerViewSQL := strings.ToLower(viewSQL)
+	lowerTriggerSQL := strings.ToLower(triggerSQL)
+
+	for _, expected := range []string{
+		"create or replace function accountsindexedview()",
+		"create or replace view accountsindexed",
+		"ds.position",
+		"customtext%",
+		"customnumeric%",
+	} {
+		if !strings.Contains(lowerViewSQL, expected) {
+			t.Errorf("expected PostgreSQL AccountsIndexed DDL to contain %q", expected)
+		}
+	}
+	if strings.Contains(lowerViewSQL, "drop view if exists accountsindexed") {
+		t.Fatal("AccountsIndexed refresh must preserve the existing PostgreSQL view and its grants")
+	}
+	if !strings.Contains(viewSQL, `"AccountsIndexed"`) || !strings.Contains(lowerViewSQL, "alter view") {
+		t.Fatal("expected AccountsIndexed refresh to migrate the legacy quoted view name")
+	}
+	for _, expected := range []string{"information_schema.table_privileges", "drop view accountsindexed", "grant_statement"} {
+		if !strings.Contains(lowerViewSQL, expected) {
+			t.Errorf("expected PostgreSQL AccountsIndexed fallback to contain %q", expected)
+		}
+	}
+	if strings.Contains(lowerViewSQL, "drop view accountsindexed cascade") {
+		t.Fatal("AccountsIndexed fallback must not remove dependent objects")
+	}
+	if !strings.Contains(viewSQL, "AS $$") || !strings.Contains(viewSQL, "$$ LANGUAGE plpgsql") {
+		t.Fatal("AccountsIndexed function must use valid PostgreSQL dollar quoting")
+	}
+	if strings.Contains(lowerTriggerSQL, "perform accountswithlabelsview()") || strings.Contains(lowerTriggerSQL, "perform accountsindexedview()") {
+		t.Fatal("DataSets trigger must not rebuild generated views for every profile metadata statement")
+	}
+}
+
+func TestMSSQLAccountsIndexedDDLUsesProfileOrder(t *testing.T) {
+	viewSQL := (&MSSQLConfig{}).GetSQL("CreateAccountsIndexedView")
+	triggerSQL := (&MSSQLConfig{}).GetSQL("CreateDatasetsUpdateTrigger")
+	lowerViewSQL := strings.ToLower(viewSQL)
+	lowerTriggerSQL := strings.ToLower(triggerSQL)
+
+	for _, expected := range []string{
+		"alter procedure dbo.accountsindexedview",
+		"alter view dbo.accountsindexed",
+		"ds.position",
+		"customtext%",
+		"customnumeric%",
+	} {
+		if !strings.Contains(lowerViewSQL, expected) {
+			t.Errorf("expected SQL Server AccountsIndexed DDL to contain %q", expected)
+		}
+	}
+	if strings.Contains(lowerViewSQL, "drop view dbo.accountsindexed") {
+		t.Fatal("AccountsIndexed refresh must preserve the existing SQL Server view object")
+	}
+	if !strings.Contains(lowerViewSQL, "join information_schema.columns mapped_column") {
+		t.Fatal("expected label limits to apply only to DataSets mapped to Accounts columns")
+	}
+	if strings.Contains(lowerTriggerSQL, "exec dbo.accountswithlabelsview") || strings.Contains(lowerTriggerSQL, "exec dbo.accountsindexedview") {
+		t.Fatal("DataSets trigger must not rebuild generated views for every profile metadata statement")
+	}
 }
 
 func TestExtractMSSQLCreateTableColumnDefinitions(t *testing.T) {
@@ -283,6 +480,209 @@ func TestEnforceSchema(t *testing.T) {
 	}
 	if syncHistoryExists {
 		t.Fatalf("expected SyncHistory table to be omitted from enforced schema")
+	}
+}
+
+func TestGetProfileUsesStoredSchemaColumns(t *testing.T) {
+	db, err := NewDB(&DBConfig{Type: "sqlite3", Path: filepath.Join(t.TempDir(), "profile.db")})
+	if err != nil {
+		t.Fatalf("failed to create database: %v", err)
+	}
+	if err := db.Connect(); err != nil {
+		t.Fatalf("failed to connect database: %v", err)
+	}
+	defer db.Close()
+	if err := db.EnforceSchema(&state.State{Quiet: true}); err != nil {
+		t.Fatalf("failed to enforce schema: %v", err)
+	}
+
+	_, err = db.GetDB().Exec(`
+		INSERT INTO UserProfiles (
+			ProfileId, Email, FirstName, LastName, CRMEditableFieldsList,
+			CompanyId, CompanyName, CompanyShortName
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, 42, "owner@example.com", "Test", "Owner", "email,phone_number", 7, "Example Company", "EX")
+	if err != nil {
+		t.Fatalf("failed to seed profile: %v", err)
+	}
+
+	profile, err := GetProfile(db)
+	if err != nil {
+		t.Fatalf("GetProfile returned an error: %v", err)
+	}
+	if got, want := profile.ProfileId.Int64, int64(42); got != want {
+		t.Fatalf("expected profile id %d, got %d", want, got)
+	}
+	if got, want := profile.Company.Name.String, "Example Company"; got != want {
+		t.Fatalf("expected company name %q, got %q", want, got)
+	}
+	if len(profile.CRMEditableFieldsList) != 2 || profile.CRMEditableFieldsList[0].String != "email" || profile.CRMEditableFieldsList[1].String != "phone_number" {
+		t.Fatalf("unexpected CRM editable fields: %#v", profile.CRMEditableFieldsList)
+	}
+}
+
+func TestEnforceSchemaRefreshesSQLiteAccountsWithLabels(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "labels.db")
+	db, err := NewDB(&DBConfig{Type: "sqlite3", Path: dbPath})
+	if err != nil {
+		t.Fatalf("failed to create database: %v", err)
+	}
+	if err := db.Connect(); err != nil {
+		t.Fatalf("failed to connect database: %v", err)
+	}
+	defer db.Close()
+
+	quietState := &state.State{Quiet: true}
+	if err := db.EnforceSchema(quietState); err != nil {
+		t.Fatalf("failed to enforce initial schema: %v", err)
+	}
+
+	sqlDB := db.GetDB()
+	if _, err := sqlDB.Exec("INSERT INTO UserProfiles (ProfileId) VALUES (?)", 42); err != nil {
+		t.Fatalf("failed to seed profile: %v", err)
+	}
+	if _, err := sqlDB.Exec("UPDATE Configurations SET SettingValue = ? WHERE SettingKey = 'ApiProfileId'", "42"); err != nil {
+		t.Fatalf("failed to select profile: %v", err)
+	}
+	if _, err := sqlDB.Exec("INSERT INTO DataSets (Name, ProfileId, Label, AccountField) VALUES (?, ?, ?, ?)", "ct", 42, "Customer Tier", "CustomText"); err != nil {
+		t.Fatalf("failed to seed label: %v", err)
+	}
+
+	if err := db.EnforceSchema(quietState); err != nil {
+		t.Fatalf("failed to re-enforce schema: %v", err)
+	}
+
+	var count int
+	if err := sqlDB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('AccountsWithLabels') WHERE name = ?", "Customer Tier").Scan(&count); err != nil {
+		t.Fatalf("failed to inspect labeled view: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected refreshed view to expose Customer Tier, found %d matching columns", count)
+	}
+}
+
+func TestEnforceSchemaCreatesSQLiteAccountsIndexed(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "indexed.db")
+	db, err := NewDB(&DBConfig{Type: "sqlite3", Path: dbPath})
+	if err != nil {
+		t.Fatalf("failed to create database: %v", err)
+	}
+	if err := db.Connect(); err != nil {
+		t.Fatalf("failed to connect database: %v", err)
+	}
+	defer db.Close()
+
+	quietState := &state.State{Quiet: true}
+	if err := db.EnforceSchema(quietState); err != nil {
+		t.Fatalf("failed to enforce initial schema: %v", err)
+	}
+
+	sqlDB := db.GetDB()
+	if _, err := sqlDB.Exec("INSERT INTO UserProfiles (ProfileId) VALUES (?), (?)", 42, 43); err != nil {
+		t.Fatalf("failed to seed profile: %v", err)
+	}
+	if _, err := sqlDB.Exec("UPDATE Configurations SET SettingValue = ? WHERE SettingKey = 'ApiProfileId'", "42"); err != nil {
+		t.Fatalf("failed to select profile: %v", err)
+	}
+	if _, err := sqlDB.Exec(`
+		INSERT INTO DataSets (Name, ProfileId, Label, Position, AccountField) VALUES
+			('email', 42, 'Work Email', 99, 'Email'),
+			('ct2', 42, 'First Custom', 1, 'CustomText2'),
+			('cn', 42, 'Second Custom', 2, 'CustomNumeric'),
+			('ct', 43, 'Other Profile Custom', 0, 'CustomText')
+	`); err != nil {
+		t.Fatalf("failed to seed data sets: %v", err)
+	}
+
+	if err := db.EnforceSchema(quietState); err != nil {
+		t.Fatalf("failed to refresh schema: %v", err)
+	}
+
+	rows, err := sqlDB.Query("SELECT name FROM pragma_table_info('AccountsIndexed') ORDER BY cid")
+	if err != nil {
+		t.Fatalf("failed to inspect AccountsIndexed: %v", err)
+	}
+	defer rows.Close()
+
+	var columns []string
+	for rows.Next() {
+		var column string
+		if err := rows.Scan(&column); err != nil {
+			t.Fatalf("failed to scan AccountsIndexed column: %v", err)
+		}
+		columns = append(columns, column)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("failed to read AccountsIndexed columns: %v", err)
+	}
+
+	want := []string{
+		"AccountId", "FirstName", "LastName", "FullName", "PhoneNumber", "Work Email", "CustomerId", "Notes",
+		"OriginalAddress", "CrmId", "AccountOwner", "DaysSinceLastCheckin", "LastCheckinDate", "LastModifiedDate",
+		"FollowUpDate", "First Custom", "Second Custom", "CreatedAt", "UpdatedAt",
+	}
+	if strings.Join(columns, "|") != strings.Join(want, "|") {
+		t.Fatalf("unexpected AccountsIndexed columns:\n got: %v\nwant: %v", columns, want)
+	}
+}
+
+func TestSQLiteAccountsIndexedSQLFallbackOmitsCustomFields(t *testing.T) {
+	db, err := NewDB(&DBConfig{Type: "sqlite3", Path: filepath.Join(t.TempDir(), "indexed-fallback.db")})
+	if err != nil {
+		t.Fatalf("failed to create database: %v", err)
+	}
+	if err := db.Connect(); err != nil {
+		t.Fatalf("failed to connect database: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.GetDB().Exec(db.GetSQL("CreateAccountsTable")); err != nil {
+		t.Fatalf("failed to create Accounts: %v", err)
+	}
+	if _, err := db.GetDB().Exec(db.GetSQL("CreateAccountsIndexedView")); err != nil {
+		t.Fatalf("failed to create AccountsIndexed from SQL fallback: %v", err)
+	}
+
+	var customCount int
+	if err := db.GetDB().QueryRow(`
+		SELECT COUNT(*)
+		FROM pragma_table_info('AccountsIndexed')
+		WHERE lower(name) LIKE 'customtext%' OR lower(name) LIKE 'customnumeric%'
+	`).Scan(&customCount); err != nil {
+		t.Fatalf("failed to inspect AccountsIndexed fallback: %v", err)
+	}
+	if customCount != 0 {
+		t.Fatalf("expected SQL fallback to omit custom fields, found %d", customCount)
+	}
+}
+
+func TestValidateSchemaRequiresAccountsIndexed(t *testing.T) {
+	tempDir := t.TempDir()
+	db, err := NewDB(&DBConfig{Type: "sqlite3", Path: filepath.Join(tempDir, "validate-indexed.db")})
+	if err != nil {
+		t.Fatalf("failed to create database: %v", err)
+	}
+	if err := db.Connect(); err != nil {
+		t.Fatalf("failed to connect database: %v", err)
+	}
+	defer db.Close()
+
+	quietState := &state.State{Quiet: true}
+	if err := db.EnforceSchema(quietState); err != nil {
+		t.Fatalf("failed to enforce schema: %v", err)
+	}
+	if _, err := db.GetDB().Exec("DROP VIEW AccountsIndexed"); err != nil {
+		t.Fatalf("failed to remove AccountsIndexed: %v", err)
+	}
+
+	err = db.ValidateSchema(quietState)
+	if err == nil {
+		t.Fatal("expected validation to reject a missing AccountsIndexed view")
+	}
+	if !strings.Contains(err.Error(), "AccountsIndexed") {
+		t.Fatalf("expected AccountsIndexed validation error, got %v", err)
 	}
 }
 

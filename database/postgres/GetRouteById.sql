@@ -1,1 +1,1 @@
-SELECT "RouteId", "Name", "RouteDate", "Duration", "StartAddress", "DestinationAddress", "StartTime" FROM "Routes" WHERE "RouteId" = ?
+SELECT RouteId, Name, RouteDate, Duration, StartAddress, DestinationAddress, StartTime FROM Routes WHERE RouteId = ?

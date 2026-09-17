@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -324,8 +325,17 @@ func (a *App) LoadConfig() error {
 			a.DB = nil
 		} else {
 			a.DB.TestConnection()
+			if err := database.UpgradeExistingSchema(a.DB); err != nil {
+				a.Events.Dispatch(events.Errorf("db", "Database schema upgrade failed: %v", err))
+				a.DB.Close()
+				a.DB = nil
+				return fmt.Errorf("database schema upgrade failed: %w", err)
+			}
 			if err := database.EnsureJobLogSetup(a.DB); err != nil {
-				a.Events.Dispatch(events.Warningf("db", "JobLog setup skipped: %v", err))
+				a.Events.Dispatch(events.Errorf("db", "JobLog setup failed: %v", err))
+				a.DB.Close()
+				a.DB = nil
+				return fmt.Errorf("JobLog setup failed: %w", err)
 			}
 		}
 	}
@@ -356,10 +366,41 @@ func (a *App) writeYamlFile(path string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
-	return os.WriteFile(path, data, 0644)
+
+	tempFile, err := os.CreateTemp(dir, ".config-*.tmp")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary config file: %w", err)
+	}
+	tempPath := tempFile.Name()
+	defer os.Remove(tempPath)
+
+	if err := tempFile.Chmod(0600); err != nil {
+		tempFile.Close()
+		return fmt.Errorf("failed to secure temporary config file: %w", err)
+	}
+	if _, err := tempFile.Write(data); err != nil {
+		tempFile.Close()
+		return fmt.Errorf("failed to write temporary config file: %w", err)
+	}
+	if err := tempFile.Sync(); err != nil {
+		tempFile.Close()
+		return fmt.Errorf("failed to sync temporary config file: %w", err)
+	}
+	if err := tempFile.Close(); err != nil {
+		return fmt.Errorf("failed to close temporary config file: %w", err)
+	}
+
+	if err := replaceFile(tempPath, path); err != nil {
+		return fmt.Errorf("failed to replace config file: %w", err)
+	}
+	if err := os.Chmod(path, 0600); err != nil && runtime.GOOS != "windows" {
+		return fmt.Errorf("failed to secure config file: %w", err)
+	}
+	return nil
 }
 
 func (a *App) ensureWorkflowProfiles() error {
@@ -483,6 +524,11 @@ func (a *App) ReloadDB() error {
 		a.DB.Close()
 		a.DB = nil
 		return fmt.Errorf("failed to test database connection: %w", err)
+	}
+	if err := database.UpgradeExistingSchema(a.DB); err != nil {
+		a.DB.Close()
+		a.DB = nil
+		return fmt.Errorf("failed to upgrade database schema: %w", err)
 	}
 	if err := database.EnsureJobLogSetup(a.DB); err != nil {
 		a.DB.Close()
@@ -987,6 +1033,10 @@ func (a *App) InteractiveSetup() bool {
 	if err := a.DB.TestConnection(); err != nil {
 		fmt.Println(utils.Colors.Red("✗ Database connection failed: %v", err))
 		fmt.Println(utils.Colors.Yellow("Please check your database settings and try again."))
+		return false
+	}
+	if err := database.UpgradeExistingSchema(a.DB); err != nil {
+		fmt.Println(utils.Colors.Red("✗ Database schema upgrade failed: %v", err))
 		return false
 	}
 	fmt.Println(utils.Colors.Green("✓ Database connection successful"))

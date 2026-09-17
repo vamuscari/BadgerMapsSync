@@ -2,7 +2,11 @@ package database
 
 import (
 	"badgermaps/api/models"
+	"database/sql"
 	"fmt"
+	"strings"
+
+	"github.com/guregu/null/v6"
 )
 
 func GetAccountByID(db DB, accountID int) (*models.Account, error) {
@@ -88,9 +92,11 @@ func GetProfile(db DB) (*models.UserProfile, error) {
 	sqlDB := db.GetDB()
 
 	var profile models.UserProfile
+	var manager sql.NullString
+	var crmEditableFields sql.NullString
 	err := sqlDB.QueryRow(sqlText).Scan(
 		&profile.ProfileId, &profile.Email, &profile.FirstName, &profile.LastName, &profile.IsManager,
-		&profile.IsHideReferralIOSBanner, &profile.MarkerIcon, &profile.Manager, &profile.CRMEditableFieldsList,
+		&profile.IsHideReferralIOSBanner, &profile.MarkerIcon, &manager, &crmEditableFields,
 		&profile.CRMBaseURL, &profile.CRMType, &profile.ReferralURL, &profile.MapStartZoom, &profile.MapStart,
 		&profile.IsUserCanEdit, &profile.IsUserCanDeleteCheckins, &profile.IsUserCanAddNewTextValues,
 		&profile.HasData, &profile.DefaultApptLength, &profile.Completed, &profile.TrialDaysLeft,
@@ -98,6 +104,17 @@ func GetProfile(db DB) (*models.UserProfile, error) {
 	)
 	if err != nil {
 		return nil, err
+	}
+	if manager.Valid {
+		value := null.StringFrom(manager.String)
+		profile.Manager = &value
+	}
+	if crmEditableFields.Valid {
+		for _, field := range strings.Split(crmEditableFields.String, ",") {
+			if field = strings.TrimSpace(field); field != "" {
+				profile.CRMEditableFieldsList = append(profile.CRMEditableFieldsList, null.StringFrom(field))
+			}
+		}
 	}
 	return &profile, nil
 }

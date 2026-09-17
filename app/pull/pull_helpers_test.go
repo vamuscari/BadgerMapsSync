@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -170,5 +171,143 @@ func TestStoreAccountDetailed(t *testing.T) {
 	}
 	if lastName != "Smith" {
 		t.Errorf("Expected lastName to be 'Smith', got '%s'", lastName)
+	}
+}
+
+func TestStoreProfileRefreshesSQLiteAccountsWithLabels(t *testing.T) {
+	testApp, teardown := setupTestApp(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer teardown()
+
+	profile := testProfile(42, []models.DataField{
+		testDataField("ct", "Customer Tier", "CustomText"),
+	})
+	if err := pull.StoreProfile(testApp, profile); err != nil {
+		t.Fatalf("StoreProfile returned an unexpected error: %v", err)
+	}
+
+	var count int
+	err := testApp.DB.GetDB().QueryRow(
+		"SELECT COUNT(*) FROM pragma_table_info('AccountsWithLabels') WHERE name = ?",
+		"Customer Tier",
+	).Scan(&count)
+	if err != nil {
+		t.Fatalf("failed to inspect AccountsWithLabels: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected AccountsWithLabels to expose Customer Tier, found %d matching columns", count)
+	}
+}
+
+func TestStoreProfileRefreshesSQLiteAccountsIndexed(t *testing.T) {
+	testApp, teardown := setupTestApp(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer teardown()
+
+	first := testDataField("ct2", "First Custom", "CustomText2")
+	first.Position = null.IntFrom(1)
+	second := testDataField("cn", "Second Custom", "CustomNumeric")
+	second.Position = null.IntFrom(2)
+	if err := pull.StoreProfile(testApp, testProfile(42, []models.DataField{second, first})); err != nil {
+		t.Fatalf("StoreProfile returned an unexpected error: %v", err)
+	}
+
+	var customColumns string
+	err := testApp.DB.GetDB().QueryRow(`
+		SELECT COALESCE(group_concat(name, '|'), '')
+		FROM (
+			SELECT name
+			FROM pragma_table_info('AccountsIndexed')
+			WHERE name IN ('First Custom', 'Second Custom')
+			ORDER BY cid
+		)
+	`).Scan(&customColumns)
+	if err != nil {
+		t.Fatalf("failed to inspect AccountsIndexed: %v", err)
+	}
+	if customColumns != "First Custom|Second Custom" {
+		t.Fatalf("expected profile-ordered custom columns, got %q", customColumns)
+	}
+
+	var unusedCount int
+	if err := testApp.DB.GetDB().QueryRow(
+		"SELECT COUNT(*) FROM pragma_table_info('AccountsIndexed') WHERE name = ?",
+		"CustomText",
+	).Scan(&unusedCount); err != nil {
+		t.Fatalf("failed to inspect unused AccountsIndexed columns: %v", err)
+	}
+	if unusedCount != 0 {
+		t.Fatalf("expected AccountsIndexed to omit unused custom fields, found %d", unusedCount)
+	}
+}
+
+func TestStoreProfileRollsBackDatasetReplacement(t *testing.T) {
+	testApp, teardown := setupTestApp(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer teardown()
+
+	initial := testProfile(42, []models.DataField{
+		testDataField("ct", "Original Label", "CustomText"),
+	})
+	if err := pull.StoreProfile(testApp, initial); err != nil {
+		t.Fatalf("failed to store initial profile: %v", err)
+	}
+
+	replacementField := testDataField("ct2", "Replacement Label", "CustomText2")
+	replacementField.Values = []models.FieldValue{{
+		Text:  null.StringFrom("invalid"),
+		Value: struct{}{},
+	}}
+	err := pull.StoreProfile(testApp, testProfile(42, []models.DataField{replacementField}))
+	if err == nil {
+		t.Fatal("expected unsupported dataset value to fail")
+	}
+
+	var name, label string
+	if err := testApp.DB.GetDB().QueryRow(
+		"SELECT Name, Label FROM DataSets WHERE ProfileId = ?",
+		42,
+	).Scan(&name, &label); err != nil {
+		t.Fatalf("failed to read retained dataset: %v", err)
+	}
+	if name != "ct" || label != "Original Label" {
+		t.Fatalf("expected original dataset after rollback, got name=%q label=%q", name, label)
+	}
+}
+
+func TestStoreProfileRejectsDuplicateViewLabels(t *testing.T) {
+	testApp, teardown := setupTestApp(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer teardown()
+
+	profile := testProfile(42, []models.DataField{
+		testDataField("ct", "Duplicate", "CustomText"),
+		testDataField("ct2", "Duplicate", "CustomText2"),
+	})
+	err := pull.StoreProfile(testApp, profile)
+	if err == nil {
+		t.Fatal("expected duplicate view labels to be rejected")
+	}
+	if !strings.Contains(err.Error(), "duplicate account view label") {
+		t.Fatalf("expected duplicate-label error, got %v", err)
+	}
+}
+
+func testProfile(id int64, datafields []models.DataField) *models.UserProfile {
+	return &models.UserProfile{
+		ProfileId:  null.IntFrom(id),
+		Email:      null.StringFrom("owner@example.com"),
+		FirstName:  null.StringFrom("Test"),
+		LastName:   null.StringFrom("Owner"),
+		Datafields: datafields,
+		Company: models.Company{
+			Id:        null.IntFrom(7),
+			Name:      null.StringFrom("Example Company"),
+			ShortName: null.StringFrom("EX"),
+		},
+	}
+}
+
+func testDataField(name, label, accountField string) models.DataField {
+	return models.DataField{
+		Name:         null.StringFrom(name),
+		Label:        null.StringFrom(label),
+		AccountField: null.StringFrom(accountField),
 	}
 }

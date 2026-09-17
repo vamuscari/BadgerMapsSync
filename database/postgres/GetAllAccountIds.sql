@@ -1,1 +1,1 @@
-SELECT "AccountId" FROM "Accounts";
+SELECT AccountId FROM Accounts;

@@ -34,6 +34,18 @@ type CliPresenter struct {
 	scheduler *appserver.Scheduler
 }
 
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
+}
+
 // NewCliPresenter creates a new presenter for the server command.
 func NewCliPresenter(a *app.App) *CliPresenter {
 	return &CliPresenter{App: a}
@@ -215,7 +227,7 @@ func (p *CliPresenter) RunServerWithContext(ctx context.Context, config *ServerC
 
 	mux.HandleFunc("/health", p.HandleHealthCheck)
 	addr := net.JoinHostPort(normalizeServerHost(config.Host), strconv.Itoa(config.Port))
-	server := &http.Server{Addr: addr, Handler: mux}
+	server := newHTTPServer(addr, mux)
 
 	serverErr := make(chan error, 1)
 	go func() {

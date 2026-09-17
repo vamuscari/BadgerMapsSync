@@ -79,8 +79,8 @@ func TestSyncHistoryInsertAndCompleteSQLUseTimezoneColumns(t *testing.T) {
 			read:                postgresFS.ReadFile,
 			insertPath:          "postgres/InsertSyncHistory.sql",
 			completePath:        "postgres/CompleteSyncHistory.sql",
-			insertMustContain:   "\"STARTEDATTIMEZONE\"",
-			completeMustContain: "\"COMPLETEDATTIMEZONE\"",
+			insertMustContain:   "STARTEDATTIMEZONE",
+			completeMustContain: "COMPLETEDATTIMEZONE",
 		},
 		{
 			name:                "mssql",

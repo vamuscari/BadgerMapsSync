@@ -4705,12 +4705,12 @@ func (ui *Gui) loadPaginatedTableData(tableName string, page, pageSize int, opts
 	orderColumn := matchColumn(columns, normalized.OrderColumn)
 
 	dbType := ui.app.DB.GetType()
-	whereClause := buildExplorerWhereClause(resolvedFilters, dbType)
+	whereClause, filterArgs := buildExplorerWhereClause(resolvedFilters, dbType)
 	orderClause := buildExplorerOrderClause(columns, orderColumn, normalized.OrderDescending, dbType)
 
-	countQuery := buildExplorerCountQuery(tableName, whereClause)
+	countQuery := buildExplorerCountQuery(tableName, whereClause, dbType)
 
-	countRows, err := ui.app.DB.ExecuteQuery(countQuery)
+	countRows, err := ui.app.DB.GetDB().Query(countQuery, filterArgs...)
 	if err != nil {
 		ui.app.Events.Dispatch(events.Errorf("gui", "Error counting rows for %s: %v", tableName, err))
 		return &PaginatedTableData{
@@ -4743,7 +4743,7 @@ func (ui *Gui) loadPaginatedTableData(tableName string, page, pageSize int, opts
 	}
 	selectQuery := buildExplorerSelectQuery(tableName, whereClause, orderClause, page, pageSize, dbType)
 
-	rows, err := ui.app.DB.ExecuteQuery(selectQuery)
+	rows, err := ui.app.DB.GetDB().Query(selectQuery, filterArgs...)
 	if err != nil {
 		ui.app.Events.Dispatch(events.Errorf("gui", "Error executing paginated query: %v", err))
 		return &PaginatedTableData{
@@ -4933,8 +4933,11 @@ func fallbackOrderColumn(columns []string) string {
 	return columns[0]
 }
 
-func escapeSQLLiteral(value string) string {
-	return strings.ReplaceAll(value, "'", "''")
+func quoteExplorerIdentifier(identifier, dbType string) string {
+	if strings.EqualFold(dbType, "mssql") {
+		return "[" + strings.ReplaceAll(identifier, "]", "]]") + "]"
+	}
+	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
 }
 
 func likeOperator(dbType string) string {
@@ -4944,25 +4947,33 @@ func likeOperator(dbType string) string {
 	return "LIKE"
 }
 
-func buildFilterCondition(column string, mode ExplorerFilterMode, value string, dbType string) string {
+func explorerPlaceholder(dbType string, position int) string {
+	if strings.EqualFold(dbType, "postgres") {
+		return fmt.Sprintf("$%d", position)
+	}
+	return "?"
+}
+
+func buildFilterCondition(column string, mode ExplorerFilterMode, value string, dbType string, position int) (string, any) {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
-		return ""
+		return "", nil
 	}
 
-	escaped := escapeSQLLiteral(trimmed)
+	quotedColumn := quoteExplorerIdentifier(column, dbType)
+	placeholder := explorerPlaceholder(dbType, position)
 
 	switch mode {
 	case FilterModeEquals:
-		return fmt.Sprintf("%s = '%s'", column, escaped)
+		return fmt.Sprintf("%s = %s", quotedColumn, placeholder), trimmed
 	case FilterModeNotEquals:
-		return fmt.Sprintf("%s <> '%s'", column, escaped)
+		return fmt.Sprintf("%s <> %s", quotedColumn, placeholder), trimmed
 	case FilterModeStartsWith:
-		return fmt.Sprintf("%s %s '%s%%'", column, likeOperator(dbType), escaped)
+		return fmt.Sprintf("%s %s %s", quotedColumn, likeOperator(dbType), placeholder), trimmed + "%"
 	case FilterModeEndsWith:
-		return fmt.Sprintf("%s %s '%%%s'", column, likeOperator(dbType), escaped)
+		return fmt.Sprintf("%s %s %s", quotedColumn, likeOperator(dbType), placeholder), "%" + trimmed
 	default:
-		return fmt.Sprintf("%s %s '%%%s%%'", column, likeOperator(dbType), escaped)
+		return fmt.Sprintf("%s %s %s", quotedColumn, likeOperator(dbType), placeholder), "%" + trimmed + "%"
 	}
 }
 
@@ -4995,31 +5006,33 @@ func resolveExplorerFilters(filters []ExplorerFilterClause, columns []string) []
 	return resolved
 }
 
-func buildExplorerWhereClause(filters []ExplorerFilterClause, dbType string) string {
+func buildExplorerWhereClause(filters []ExplorerFilterClause, dbType string) (string, []any) {
 	if len(filters) == 0 {
-		return ""
+		return "", nil
 	}
 
 	clauses := make([]string, 0, len(filters))
+	args := make([]any, 0, len(filters))
 	for _, clause := range filters {
 		if clause.Column == "" || clause.Mode == FilterModeNone {
 			continue
 		}
-		condition := buildFilterCondition(clause.Column, clause.Mode, clause.Value, dbType)
+		condition, arg := buildFilterCondition(clause.Column, clause.Mode, clause.Value, dbType, len(args)+1)
 		if condition != "" {
 			clauses = append(clauses, condition)
+			args = append(args, arg)
 		}
 	}
 
 	if len(clauses) == 0 {
-		return ""
+		return "", nil
 	}
 
 	if len(clauses) == 1 {
-		return clauses[0]
+		return clauses[0], args
 	}
 
-	return strings.Join(clauses, " AND ")
+	return strings.Join(clauses, " AND "), args
 }
 
 func buildExplorerOrderClause(columns []string, orderColumn string, descending bool, dbType string) string {
@@ -5029,12 +5042,12 @@ func buildExplorerOrderClause(columns []string, orderColumn string, descending b
 	}
 
 	if orderColumn != "" {
-		return fmt.Sprintf("ORDER BY %s %s", orderColumn, direction)
+		return fmt.Sprintf("ORDER BY %s %s", quoteExplorerIdentifier(orderColumn, dbType), direction)
 	}
 
 	fallback := fallbackOrderColumn(columns)
 	if fallback != "" {
-		return fmt.Sprintf("ORDER BY %s %s", fallback, direction)
+		return fmt.Sprintf("ORDER BY %s %s", quoteExplorerIdentifier(fallback, dbType), direction)
 	}
 
 	if strings.EqualFold(dbType, "mssql") {
@@ -5044,11 +5057,12 @@ func buildExplorerOrderClause(columns []string, orderColumn string, descending b
 	return ""
 }
 
-func buildExplorerCountQuery(tableName, whereClause string) string {
+func buildExplorerCountQuery(tableName, whereClause, dbType string) string {
+	quotedTable := quoteExplorerIdentifier(tableName, dbType)
 	if whereClause == "" {
-		return fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)
+		return fmt.Sprintf("SELECT COUNT(*) FROM %s", quotedTable)
 	}
-	return fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", tableName, whereClause)
+	return fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", quotedTable, whereClause)
 }
 
 func buildExplorerSelectQuery(tableName, whereClause, orderClause string, page, pageSize int, dbType string) string {
@@ -5061,7 +5075,7 @@ func buildExplorerSelectQuery(tableName, whereClause, orderClause string, page, 
 	offset := page * pageSize
 
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("SELECT * FROM %s", tableName))
+	builder.WriteString(fmt.Sprintf("SELECT * FROM %s", quoteExplorerIdentifier(tableName, dbType)))
 	if whereClause != "" {
 		builder.WriteString(" WHERE ")
 		builder.WriteString(whereClause)
@@ -5086,7 +5100,7 @@ func (ui *Gui) getTableRowCount(tableName string) int {
 		return 0
 	}
 
-	query := fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)
+	query := fmt.Sprintf("SELECT COUNT(*) FROM %s", quoteExplorerIdentifier(tableName, ui.app.DB.GetType()))
 	rows, err := ui.app.DB.ExecuteQuery(query)
 	if err != nil {
 		ui.app.Events.Dispatch(events.Debugf("gui", "Error counting rows in %s: %v", tableName, err))
@@ -5116,11 +5130,12 @@ func (ui *Gui) getTableColumns(tableName string) []string {
 	}
 
 	var query string
+	quotedTable := quoteExplorerIdentifier(tableName, db.GetType())
 	switch strings.ToLower(db.GetType()) {
 	case "mssql":
-		query = fmt.Sprintf("SELECT TOP 1 * FROM %s", tableName)
+		query = fmt.Sprintf("SELECT TOP 1 * FROM %s", quotedTable)
 	default:
-		query = fmt.Sprintf("SELECT * FROM %s LIMIT 1", tableName)
+		query = fmt.Sprintf("SELECT * FROM %s LIMIT 1", quotedTable)
 	}
 
 	rows, err := db.ExecuteQuery(query)

@@ -85,8 +85,8 @@ func TestJobLogInsertAndCompleteSQLUseTimezoneColumns(t *testing.T) {
 			read:                postgresFS.ReadFile,
 			insertPath:          "postgres/InsertJobLog.sql",
 			completePath:        "postgres/CompleteJobLog.sql",
-			insertMustContain:   "\"STARTEDATTIMEZONE\"",
-			completeMustContain: "\"COMPLETEDATTIMEZONE\"",
+			insertMustContain:   "STARTEDATTIMEZONE",
+			completeMustContain: "COMPLETEDATTIMEZONE",
 		},
 		{
 			name:                "mssql",
@@ -142,10 +142,10 @@ func TestPostgresJobLogUsesUTCTimestamps(t *testing.T) {
 	}
 
 	completeSQL := strings.ToUpper(string(completeContent))
-	if !strings.Contains(completeSQL, "\"COMPLETEDAT\" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')") {
+	if !strings.Contains(completeSQL, "COMPLETEDAT = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')") {
 		t.Fatalf("expected Postgres JobLog CompletedAt to use UTC conversion")
 	}
-	if strings.Contains(completeSQL, "\"COMPLETEDAT\" = CURRENT_TIMESTAMP") {
+	if strings.Contains(completeSQL, "COMPLETEDAT = CURRENT_TIMESTAMP") {
 		t.Fatalf("did not expect Postgres JobLog CompletedAt to use session-local CURRENT_TIMESTAMP")
 	}
 }

@@ -49,6 +49,14 @@ func TestWebhookSecurity_VerifySignature(t *testing.T) {
 			errorContains: "webhook signature header missing",
 		},
 		{
+			name:          "Missing timestamp",
+			body:          []byte(`{"test": "data"}`),
+			signature:     "calculated",
+			timestamp:     "",
+			expectError:   true,
+			errorContains: "webhook timestamp header missing",
+		},
+		{
 			name:          "Expired timestamp",
 			body:          []byte(`{"test": "data"}`),
 			signature:     "calculated", // Will be calculated
@@ -193,6 +201,41 @@ func TestWebhookSecurityMiddleware(t *testing.T) {
 				t.Errorf("Expected status %d, got %d", tt.expectedStatus, rr.Code)
 			}
 		})
+	}
+}
+
+func TestWebhookSecurityMiddlewareRejectsOversizedBody(t *testing.T) {
+	ws := NewWebhookSecurity("test-secret", true)
+	handler := WebhookSecurityMiddleware(ws)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(bytes.Repeat([]byte("a"), 1024*1024+1)))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected status %d, got %d", http.StatusRequestEntityTooLarge, rr.Code)
+	}
+}
+
+func TestWebhookSecurityRejectsReplay(t *testing.T) {
+	ws := NewWebhookSecurity("test-secret", true)
+	payload := []byte(`{"test": "data"}`)
+	signature, timestamp := ws.GenerateWebhookSignature(payload)
+
+	newRequest := func() *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(payload))
+		req.Header.Set("X-Webhook-Signature", signature)
+		req.Header.Set("X-Webhook-Timestamp", timestamp)
+		return req
+	}
+
+	if err := ws.VerifySignature(newRequest(), payload); err != nil {
+		t.Fatalf("expected first delivery to be accepted, got %v", err)
+	}
+	if err := ws.VerifySignature(newRequest(), payload); err == nil || !strings.Contains(err.Error(), "replayed") {
+		t.Fatalf("expected replay error, got %v", err)
 	}
 }
 

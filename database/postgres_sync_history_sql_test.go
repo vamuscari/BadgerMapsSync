@@ -27,10 +27,10 @@ func TestPostgresCompleteSyncHistoryUsesUTCCompletionTimestamp(t *testing.T) {
 	}
 
 	sqlText := strings.ToUpper(string(content))
-	if !strings.Contains(sqlText, "\"COMPLETEDAT\" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')") {
+	if !strings.Contains(sqlText, "COMPLETEDAT = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')") {
 		t.Fatalf("expected Postgres CompletedAt to use UTC conversion")
 	}
-	if strings.Contains(sqlText, "\"COMPLETEDAT\" = CURRENT_TIMESTAMP") {
+	if strings.Contains(sqlText, "COMPLETEDAT = CURRENT_TIMESTAMP") {
 		t.Fatalf("did not expect Postgres CompletedAt to use session-local CURRENT_TIMESTAMP")
 	}
 }

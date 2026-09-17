@@ -4,18 +4,24 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+const MaxWebhookBodyBytes int64 = 1024 * 1024
 
 type WebhookSecurity struct {
 	secretKey       string
 	enabled         bool
 	timestampWindow time.Duration
+	replayMu        sync.Mutex
+	seenSignatures  map[string]time.Time
 }
 
 func NewWebhookSecurity(secretKey string, enabled bool) *WebhookSecurity {
@@ -23,6 +29,7 @@ func NewWebhookSecurity(secretKey string, enabled bool) *WebhookSecurity {
 		secretKey:       secretKey,
 		enabled:         enabled,
 		timestampWindow: 5 * time.Minute, // Webhook must be received within 5 minutes
+		seenSignatures:  make(map[string]time.Time),
 	}
 }
 
@@ -52,10 +59,11 @@ func (ws *WebhookSecurity) VerifySignature(r *http.Request, body []byte) error {
 
 	// Get timestamp from header for replay attack prevention
 	timestamp := r.Header.Get("X-Webhook-Timestamp")
-	if timestamp != "" {
-		if err := ws.verifyTimestamp(timestamp); err != nil {
-			return err
-		}
+	if timestamp == "" {
+		return fmt.Errorf("webhook timestamp header missing")
+	}
+	if err := ws.verifyTimestamp(timestamp); err != nil {
+		return err
 	}
 
 	// Calculate expected signature
@@ -65,8 +73,29 @@ func (ws *WebhookSecurity) VerifySignature(r *http.Request, body []byte) error {
 	if !hmac.Equal([]byte(signature), []byte(expectedSig)) {
 		return fmt.Errorf("invalid webhook signature")
 	}
+	if ws.isReplay(timestamp, signature) {
+		return fmt.Errorf("replayed webhook signature")
+	}
 
 	return nil
+}
+
+func (ws *WebhookSecurity) isReplay(timestamp, signature string) bool {
+	now := time.Now()
+	key := timestamp + ":" + signature
+
+	ws.replayMu.Lock()
+	defer ws.replayMu.Unlock()
+	for seen, expiresAt := range ws.seenSignatures {
+		if !expiresAt.After(now) {
+			delete(ws.seenSignatures, seen)
+		}
+	}
+	if _, exists := ws.seenSignatures[key]; exists {
+		return true
+	}
+	ws.seenSignatures[key] = now.Add(ws.timestampWindow)
+	return false
 }
 
 // calculateSignature generates HMAC-SHA256 signature for webhook payload
@@ -123,8 +152,14 @@ func WebhookSecurityMiddleware(ws *WebhookSecurity) func(http.Handler) http.Hand
 			}
 
 			// Read body for signature verification
+			r.Body = http.MaxBytesReader(w, r.Body, MaxWebhookBodyBytes)
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
+				var maxBytesErr *http.MaxBytesError
+				if errors.As(err, &maxBytesErr) {
+					http.Error(w, "Webhook request body too large", http.StatusRequestEntityTooLarge)
+					return
+				}
 				http.Error(w, "Failed to read request body", http.StatusBadRequest)
 				return
 			}
