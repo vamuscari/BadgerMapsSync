@@ -5,6 +5,8 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+
+	"badgermaps/app/state"
 )
 
 func TestRunSchemaMigrationsRollsBackFailedMigration(t *testing.T) {
@@ -91,5 +93,38 @@ func TestRunSchemaMigrationsAppliesEachVersionOnce(t *testing.T) {
 	}
 	if probeCount != 1 {
 		t.Fatalf("expected one committed migration write, found %d", probeCount)
+	}
+}
+
+func TestUpgradeExistingSchemaCreatesAccountsIndexedColumnsAfterVersionOne(t *testing.T) {
+	db, err := NewDB(&DBConfig{Type: "sqlite3", Path: filepath.Join(t.TempDir(), "indexed-columns-upgrade.db")})
+	if err != nil {
+		t.Fatalf("failed to create database: %v", err)
+	}
+	if err := db.Connect(); err != nil {
+		t.Fatalf("failed to connect database: %v", err)
+	}
+	defer db.Close()
+
+	if err := db.EnforceSchema(&state.State{Quiet: true}); err != nil {
+		t.Fatalf("failed to enforce schema: %v", err)
+	}
+	if _, err := db.GetDB().Exec("DROP VIEW IF EXISTS AccountsIndexedColumns"); err != nil {
+		t.Fatalf("failed to remove AccountsIndexedColumns: %v", err)
+	}
+	if err := RunCommand(db, "InsertSchemaMigration", 1, "enforce current schema"); err != nil {
+		t.Fatalf("failed to mark schema version 1 as applied: %v", err)
+	}
+
+	if err := UpgradeExistingSchema(db); err != nil {
+		t.Fatalf("failed to upgrade existing schema: %v", err)
+	}
+
+	exists, err := db.ViewExists("AccountsIndexedColumns")
+	if err != nil {
+		t.Fatalf("failed to inspect AccountsIndexedColumns: %v", err)
+	}
+	if !exists {
+		t.Fatal("expected schema migration to create AccountsIndexedColumns")
 	}
 }

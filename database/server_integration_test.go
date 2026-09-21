@@ -116,6 +116,45 @@ func TestServerDatabaseSchemaIntegration(t *testing.T) {
 			if !containsFold(indexedColumns, "Priority") {
 				t.Fatalf("expanded AccountsIndexed on %s is missing Priority: %v", tc.name, indexedColumns)
 			}
+
+			metadataQuery := "SELECT Name, Type, Position FROM AccountsIndexedColumns ORDER BY Position"
+			if tc.dbType == "mssql" {
+				metadataQuery = "SELECT [Name], [Type], [Position] FROM dbo.AccountsIndexedColumns ORDER BY [Position]"
+			}
+			metadataRows, err := db.GetDB().Query(metadataQuery)
+			if err != nil {
+				t.Fatalf("failed to query AccountsIndexedColumns on %s: %v", tc.name, err)
+			}
+			var metadataNames []string
+			for metadataRows.Next() {
+				var name, columnType string
+				var position int
+				if err := metadataRows.Scan(&name, &columnType, &position); err != nil {
+					metadataRows.Close()
+					t.Fatalf("failed to scan AccountsIndexedColumns on %s: %v", tc.name, err)
+				}
+				if position != len(metadataNames)+1 {
+					metadataRows.Close()
+					t.Fatalf("non-contiguous AccountsIndexedColumns position on %s: got %d after %d rows", tc.name, position, len(metadataNames))
+				}
+				metadataNames = append(metadataNames, name)
+			}
+			if err := metadataRows.Err(); err != nil {
+				metadataRows.Close()
+				t.Fatalf("failed to read AccountsIndexedColumns on %s: %v", tc.name, err)
+			}
+			if err := metadataRows.Close(); err != nil {
+				t.Fatalf("failed to close AccountsIndexedColumns rows on %s: %v", tc.name, err)
+			}
+			if len(metadataNames) != len(indexedColumns) {
+				t.Fatalf("AccountsIndexedColumns length differs from AccountsIndexed on %s: %v vs %v", tc.name, metadataNames, indexedColumns)
+			}
+			for index := range indexedColumns {
+				if !strings.EqualFold(metadataNames[index], indexedColumns[index]) {
+					t.Fatalf("AccountsIndexedColumns order differs from AccountsIndexed on %s at position %d: %q vs %q", tc.name, index+1, metadataNames[index], indexedColumns[index])
+				}
+			}
+
 			if err := RunCommand(db, "DeleteDataSets", 42); err != nil {
 				t.Fatalf("failed to remove data sets on %s: %v", tc.name, err)
 			}

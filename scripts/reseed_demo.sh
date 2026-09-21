@@ -44,7 +44,7 @@ for t in "${TABLES[@]}"; do
 done
 
 # Optional views
-for view in AccountsWithLabels AccountsIndexed; do
+for view in AccountsWithLabels AccountsIndexed AccountsIndexedColumns; do
   sql="database/sqlite3/Create${view}View.sql"
   if [[ -f "$sql" ]]; then
     echo "[reseed] Creating view: ${view}"

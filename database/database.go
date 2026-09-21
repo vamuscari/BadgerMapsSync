@@ -560,6 +560,15 @@ func RefreshAccountsIndexed(db DB, executor sqlQueryExecer) error {
 	}
 }
 
+func createAccountsIndexedColumnsView(db DB, executor sqlQueryExecer) error {
+	sqlText := db.GetSQL("CreateAccountsIndexedColumnsView")
+	if sqlText == "" {
+		return fmt.Errorf("failed to load SQL command 'CreateAccountsIndexedColumnsView' for database type '%s'", db.GetType())
+	}
+	_, err := executor.Exec(sqlText)
+	return err
+}
+
 // RefreshGeneratedViews performs one refresh pass after profile metadata is stored.
 func RefreshGeneratedViews(db DB, executor sqlQueryExecer) error {
 	if err := RefreshAccountsWithLabels(db, executor); err != nil {
@@ -815,6 +824,18 @@ func (db *SQLiteConfig) enforceSchema(s *state.State, executor sqlSchemaExecutor
 			fmt.Println(color.RedString("ERROR"))
 		}
 		return fmt.Errorf("failed to create view AccountsIndexed: %w", err)
+	}
+	if (s.Verbose || s.Debug) && !s.Quiet {
+		fmt.Println(color.GreenString("OK"))
+	}
+	if (s.Verbose || s.Debug) && !s.Quiet {
+		fmt.Printf("Creating view: AccountsIndexedColumns... ")
+	}
+	if err := createAccountsIndexedColumnsView(db, executor); err != nil {
+		if (s.Verbose || s.Debug) && !s.Quiet {
+			fmt.Println(color.RedString("ERROR"))
+		}
+		return fmt.Errorf("failed to create view AccountsIndexedColumns: %w", err)
 	}
 	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
@@ -1247,6 +1268,19 @@ func (db *PostgreSQLConfig) enforceSchema(s *state.State, executor sqlSchemaExec
 			fmt.Println(color.RedString("ERROR"))
 		}
 		return fmt.Errorf("failed to execute AccountsIndexedView function: %w", err)
+	}
+	if (s.Verbose || s.Debug) && !s.Quiet {
+		fmt.Println(color.GreenString("OK"))
+	}
+
+	if (s.Verbose || s.Debug) && !s.Quiet {
+		fmt.Printf("Creating view: AccountsIndexedColumns... ")
+	}
+	if err := createAccountsIndexedColumnsView(db, executor); err != nil {
+		if (s.Verbose || s.Debug) && !s.Quiet {
+			fmt.Println(color.RedString("ERROR"))
+		}
+		return fmt.Errorf("failed to create view AccountsIndexedColumns: %w", err)
 	}
 	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Println(color.GreenString("OK"))
@@ -1809,6 +1843,19 @@ func (db *MSSQLConfig) enforceSchema(s *state.State, executor sqlSchemaExecutor)
 		fmt.Println(color.GreenString("OK"))
 	}
 
+	if (s.Verbose || s.Debug) && !s.Quiet {
+		fmt.Printf("Creating view: AccountsIndexedColumns... ")
+	}
+	if err := createAccountsIndexedColumnsView(db, executor); err != nil {
+		if (s.Verbose || s.Debug) && !s.Quiet {
+			fmt.Println(color.RedString("ERROR"))
+		}
+		return fmt.Errorf("failed to create view AccountsIndexedColumns: %w", err)
+	}
+	if (s.Verbose || s.Debug) && !s.Quiet {
+		fmt.Println(color.GreenString("OK"))
+	}
+
 	// Create trigger
 	if (s.Verbose || s.Debug) && !s.Quiet {
 		fmt.Printf("Creating trigger: datasets_update_trigger... ")
@@ -2267,6 +2314,7 @@ func requiredViews() []string {
 	return []string{
 		"AccountsWithLabels",
 		"AccountsIndexed",
+		"AccountsIndexedColumns",
 	}
 }
 
@@ -2362,6 +2410,13 @@ var existingSchemaMigrations = []schemaMigration{
 			default:
 				return fmt.Errorf("unsupported database type %q", db.GetType())
 			}
+		},
+	},
+	{
+		Version: 2,
+		Name:    "create AccountsIndexedColumns view",
+		Apply: func(db DB, tx *sql.Tx) error {
+			return createAccountsIndexedColumnsView(db, tx)
 		},
 	},
 }

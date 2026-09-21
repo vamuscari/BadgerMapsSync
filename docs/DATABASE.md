@@ -53,12 +53,13 @@ The database schema is managed through the `EnforceSchema`, `ValidateSchema`, an
 
 ## Account Views
 
-The schema exposes two account views using the profile selected by the `ApiProfileId` configuration:
+The schema exposes account views using the profile selected by the `ApiProfileId` configuration:
 
 - **`AccountsWithLabels`** includes every physical `Accounts` column and aliases mapped columns with `DataSets.Label`.
 - **`AccountsIndexed`** keeps fixed account columns in table order, includes only custom columns mapped by the active profile, and orders those custom columns by `DataSets.Position`. `CreatedAt` and `UpdatedAt` remain last.
+- **`AccountsIndexedColumns`** dynamically lists the columns selected for `AccountsIndexed` as `Name`, `Type`, and a contiguous `Position`, using profile labels and types when available. Query it with `ORDER BY Position` to preserve the indexed account-column order.
 
-Both views are rebuilt when profile data is stored. PostgreSQL and SQL Server also refresh them through the `DataSets` update trigger.
+The generated account data views are rebuilt when profile data is stored. PostgreSQL and SQL Server also refresh them through the `DataSets` update trigger. `AccountsIndexedColumns` reads the active profile each time it is queried.
 
 ## Job History Storage
 

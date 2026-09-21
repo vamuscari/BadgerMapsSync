@@ -81,6 +81,7 @@ func TestSQLFiles(t *testing.T) {
 		"UpdatePendingChangeStatus.sql",
 		"CreateAccountsWithLabelsView.sql",
 		"CreateAccountsIndexedView.sql",
+		"CreateAccountsIndexedColumnsView.sql",
 		"CreateFieldMapsTable.sql",
 		"InsertFieldMaps.sql",
 		"UpdateFieldMapsFromDatasets.sql",
@@ -356,6 +357,22 @@ func TestMSSQLAccountsIndexedDDLUsesProfileOrder(t *testing.T) {
 	}
 }
 
+func TestMSSQLAccountsIndexedColumnsDDLUsesCompositePosition(t *testing.T) {
+	sqlText := strings.ToLower((&MSSQLConfig{}).GetSQL("CreateAccountsIndexedColumnsView"))
+	for _, expected := range []string{
+		"create or alter view dbo.accountsindexedcolumns",
+		"row_number() over",
+		"account_column.lastcustom",
+		"data_set.position",
+		"account_column.ordinal_position",
+		"as [position]",
+	} {
+		if !strings.Contains(sqlText, expected) {
+			t.Errorf("expected SQL Server AccountsIndexedColumns DDL to contain %q", expected)
+		}
+	}
+}
+
 func TestExtractMSSQLCreateTableColumnDefinitions(t *testing.T) {
 	mssqlDB := &MSSQLConfig{}
 	sqlText := mssqlDB.GetSQL("CreateAccountCheckinsPendingChangesTable")
@@ -626,6 +643,113 @@ func TestEnforceSchemaCreatesSQLiteAccountsIndexed(t *testing.T) {
 	if strings.Join(columns, "|") != strings.Join(want, "|") {
 		t.Fatalf("unexpected AccountsIndexed columns:\n got: %v\nwant: %v", columns, want)
 	}
+}
+
+func TestAccountsIndexedColumnsUsesActiveProfile(t *testing.T) {
+	type expectedColumn struct {
+		columnType string
+		position   int
+	}
+
+	db, err := NewDB(&DBConfig{Type: "sqlite3", Path: filepath.Join(t.TempDir(), "indexed-columns.db")})
+	if err != nil {
+		t.Fatalf("failed to create database: %v", err)
+	}
+	if err := db.Connect(); err != nil {
+		t.Fatalf("failed to connect database: %v", err)
+	}
+	defer db.Close()
+
+	quietState := &state.State{Quiet: true}
+	if err := db.EnforceSchema(quietState); err != nil {
+		t.Fatalf("failed to enforce schema: %v", err)
+	}
+
+	sqlDB := db.GetDB()
+	if _, err := sqlDB.Exec("INSERT INTO UserProfiles (ProfileId) VALUES (?), (?)", 42, 43); err != nil {
+		t.Fatalf("failed to seed profiles: %v", err)
+	}
+	if _, err := sqlDB.Exec(`
+		INSERT INTO DataSets (Name, ProfileId, Label, Position, Type, AccountField) VALUES
+			('email', 42, 'Work Email', 1, 'email', 'Email'),
+			('revenue', 42, 'Annual Revenue', 1, 'numeric', 'CustomNumeric'),
+			('tier', 42, 'Customer Tier', 2, 'select', 'CustomText2'),
+			('score', 43, 'Account Score', 1, 'numeric', 'CustomNumeric')
+	`); err != nil {
+		t.Fatalf("failed to seed profile fields: %v", err)
+	}
+
+	assertColumns := func(profileID string, expected map[string]expectedColumn, excluded map[string]struct{}) {
+		t.Helper()
+		if _, err := sqlDB.Exec("UPDATE Configurations SET SettingValue = ? WHERE SettingKey = 'ApiProfileId'", profileID); err != nil {
+			t.Fatalf("failed to select profile %s: %v", profileID, err)
+		}
+
+		rows, err := sqlDB.Query("SELECT Name, Type, Position FROM AccountsIndexedColumns ORDER BY Position")
+		if err != nil {
+			t.Fatalf("failed to query AccountsIndexedColumns for profile %s: %v", profileID, err)
+		}
+		defer rows.Close()
+
+		resultColumns, err := rows.Columns()
+		if err != nil {
+			t.Fatalf("failed to inspect AccountsIndexedColumns result: %v", err)
+		}
+		if strings.Join(resultColumns, "|") != "Name|Type|Position" {
+			t.Fatalf("unexpected AccountsIndexedColumns result columns: %v", resultColumns)
+		}
+
+		got := make(map[string]expectedColumn)
+		wantPosition := 1
+		for rows.Next() {
+			var name, columnType string
+			var position int
+			if err := rows.Scan(&name, &columnType, &position); err != nil {
+				t.Fatalf("failed to scan AccountsIndexedColumns row: %v", err)
+			}
+			if position != wantPosition {
+				t.Errorf("AccountsIndexedColumns position = %d, want contiguous position %d", position, wantPosition)
+			}
+			wantPosition++
+			got[name] = expectedColumn{columnType: columnType, position: position}
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("failed to read AccountsIndexedColumns rows: %v", err)
+		}
+
+		for name, column := range expected {
+			if got[name] != column {
+				t.Errorf("AccountsIndexedColumns[%q] = %#v, want %#v", name, got[name], column)
+			}
+		}
+		for name := range excluded {
+			if _, ok := got[name]; ok {
+				t.Errorf("AccountsIndexedColumns unexpectedly contains %q for profile %s", name, profileID)
+			}
+		}
+	}
+
+	assertColumns("42", map[string]expectedColumn{
+		"AccountId":      {columnType: "INTEGER", position: 1},
+		"Work Email":     {columnType: "email", position: 6},
+		"Annual Revenue": {columnType: "numeric", position: 16},
+		"Customer Tier":  {columnType: "select", position: 17},
+		"CreatedAt":      {columnType: "DATETIME", position: 18},
+	}, map[string]struct{}{
+		"Email":         {},
+		"Account Score": {},
+		"CustomText":    {},
+	})
+	assertColumns("43", map[string]expectedColumn{
+		"AccountId":     {columnType: "INTEGER", position: 1},
+		"Email":         {columnType: "TEXT", position: 6},
+		"Account Score": {columnType: "numeric", position: 16},
+		"CreatedAt":     {columnType: "DATETIME", position: 17},
+	}, map[string]struct{}{
+		"Work Email":    {},
+		"Customer Tier": {},
+		"CustomText":    {},
+	})
 }
 
 func TestSQLiteAccountsIndexedSQLFallbackOmitsCustomFields(t *testing.T) {
